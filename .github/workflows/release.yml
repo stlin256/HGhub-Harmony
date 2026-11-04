@@ -155,6 +155,7 @@ jobs:
             "$APKSIGNER" sign \
               --ks "$KS" --ks-key-alias "$KEY_ALIAS" \
               --ks-pass "pass:$STORE_PASSWORD" --key-pass "pass:$KEY_PASSWORD" \
+              --v4-signing-enabled false \
               --out "$out" "$f"
             "$APKSIGNER" verify --print-certs "$out" | head -3
             found=$((found+1))
