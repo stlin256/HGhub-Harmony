@@ -94,3 +94,26 @@ pnpm android:build    # 产出 APK
 ## License
 
 [MIT](LICENSE)
+## 常见问题
+
+**1. `pnpm install` 报 `ERR_PNPM_EISDIR ... symlink`**
+
+工程放在 exFAT / FAT32 盘时无法创建符号链接，保留 `.npmrc` 里的 `node-linker=hoisted` 即可。
+
+**2. `tauri android build` 报 `Failed to create a symbolic link ... jniLibs`**
+
+同样是 exFAT 不支持符号链接。可手动把 Rust 产物拷进 jniLibs，再直接跑 Gradle：
+
+```bash
+cp src-tauri/target/aarch64-linux-android/debug/libhuangguo_client_lib.so \
+   src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/
+
+cd src-tauri/gen/android
+./gradlew assembleDebug        # Windows: gradlew.bat assembleDebug
+```
+
+产物在 `src-tauri/gen/android/app/build/outputs/apk/`。
+
+**3. Android 构建提示找不到 SDK / NDK**
+
+需要设置 `ANDROID_HOME`（Android SDK 根目录）、`NDK_HOME`（`$ANDROID_HOME/ndk/<版本>`）与 `JAVA_HOME`（JDK 17）。
