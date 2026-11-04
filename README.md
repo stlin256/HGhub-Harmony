@@ -117,3 +117,6 @@ cd src-tauri/gen/android
 **3. Android 构建提示找不到 SDK / NDK**
 
 需要设置 `ANDROID_HOME`（Android SDK 根目录）、`NDK_HOME`（`$ANDROID_HOME/ndk/<版本>`）与 `JAVA_HOME`（JDK 17）。
+
+## LinuxDO
+https://linux.do/
