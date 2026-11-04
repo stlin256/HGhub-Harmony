@@ -1,7 +1,7 @@
 {
   "name": "huangguo-client",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
     "app:dev": "tauri dev",
     "app:build": "tauri build",
     "android:init": "tauri android init",
+    "android:icons": "node scripts/sync-android-icons.mjs",
     "android:dev": "tauri android dev",
     "android:build": "tauri android build"
   },
