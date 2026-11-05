@@ -4,7 +4,7 @@
 
 **黄果短剧第三方客户端 · Rust + Tauri 2**
 
-Windows / Android 双端 · Fluent 设计 · 沉浸式竖屏播放
+Windows / macOS / Android 三端 · Fluent 设计 · 沉浸式竖屏播放
 ![alt text](docs/image.png)
 
 </div>
@@ -47,8 +47,11 @@ Windows / Android 双端 · Fluent 设计 · 沉浸式竖屏播放
 ```bash
 pnpm install          # 首次安装
 pnpm app:dev          # 桌面端热重载
-pnpm app:build        # 打包 Windows 安装程序（NSIS）
+pnpm app:build        # 打包：Windows → NSIS 安装程序；macOS → .app + .dmg
 ```
+
+macOS 先装 Xcode Command Line Tools（`xcode-select --install`），打包目标写在
+`src-tauri/tauri.macos.conf.json`（`app` + `dmg`，窗口用系统标题栏 Overlay）。
 
 Android（需 Android SDK + NDK，并配置 `ANDROID_HOME` / `NDK_HOME`）：
 
@@ -61,14 +64,16 @@ pnpm android:build    # 产出 APK
 ### 环境注意
 
 - 工程若放在 **exFAT** 盘（不支持符号链接），需保留 `.npmrc` 中的 `node-linker=hoisted`。
-- `esbuild` 需在 `package.json` 的 `pnpm.onlyBuiltDependencies` 中放行，否则 `vite build` 缺少二进制。
+- pnpm 10 靠 `package.json` 的 `pnpm.onlyBuiltDependencies` 放行 `esbuild`，否则 `vite build` 缺少二进制；
+  pnpm 11 起该字段失效，白名单改在 `pnpm-workspace.yaml` 的 `allowBuilds`（两处都保留）。
 
 ## 实现要点
 
 1. **统一边缘信封**：站点把 `/api/**` 收敛为 `POST /api/edge/request`（`method/path/body(base64)/content_type` + `Authorization: Bearer`），本项目只对接这一个入口，无需处理 Cookie。
 2. **封面解密**：封面为 AES-128-CBC 密文，Rust 侧解密后经自定义协议输出，前端 `<img>` 直接使用。
 3. **HLS 代理**：m3u8 与分片经自定义协议转发并改写 `#EXT-X-KEY` / 分片地址，绕开 WebView 的 CORS 与防盗链。
-4. **自定义协议**：Windows 为 `http://hg.localhost/*`，Android 为 `https://hg.localhost/*`（由 Rust 侧按平台生成，避免 WebView 无法解析）。
+4. **自定义协议**：Windows / Android 为 `http://hg.localhost/*`，macOS 为 `hg://localhost/*`（Tauri 的平台差异）。
+   Rust 侧 `lib.rs` 与前端 `api.ts` 各自按平台生成一次基址，两处必须一致，否则封面与视频全部加载失败。
 5. **不做签名逆向**：只复用浏览器同源行为，接口字段均有文档与实测样本。
 
 接口细节见 [docs/API.md](docs/API.md)。
