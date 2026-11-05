@@ -21,7 +21,6 @@ Windows / macOS / Android 三端 · Fluent 设计 · 沉浸式竖屏播放
 | 前端 | React 19 + TypeScript + Vite 7 + Tailwind CSS 4 |
 | 播放 | hls.js（HLS / AES-128） |
 | 网络 | reqwest + rustls |
-| 图标 | 内联 SVG |
 
 ## 目录
 
@@ -76,7 +75,6 @@ pnpm android:build    # 产出 APK
    Rust 侧 `lib.rs` 与前端 `api.ts` 各自按平台生成一次基址，两处必须一致，否则封面与视频全部加载失败。
 5. **不做签名逆向**：只复用浏览器同源行为，接口字段均有文档与实测样本。
 
-接口细节见 [docs/API.md](docs/API.md)。
 
 ## 免责声明
 
