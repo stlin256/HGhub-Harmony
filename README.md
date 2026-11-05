@@ -5,7 +5,6 @@
 **黄果短剧第三方客户端 · Rust + Tauri 2**
 
 Windows / macOS / Android 三端 · Fluent 设计 · 沉浸式竖屏播放
-![alt text](docs/image.png)
 
 </div>
 
