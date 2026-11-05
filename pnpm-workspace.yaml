@@ -1,0 +1,6 @@
+# pnpm 11 起 package.json 的 `pnpm.onlyBuiltDependencies` 不再被读取，
+# 构建脚本白名单移到这里（两个键都写，兼容 pnpm 10 的 CI）。
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: true
