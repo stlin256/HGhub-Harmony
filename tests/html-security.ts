@@ -1,10 +1,11 @@
-import { sanitizeHtml } from "../src/html";
+import { handleArticleClick, sanitizeHtml, setStrictSecurity } from "../src/html";
 import DOMPurify from "dompurify";
 
 const fixture = document.querySelector<HTMLDivElement>("#fixture")!;
 const results: { name: string; passed: boolean; error?: string }[] = [];
 const assert = (value: unknown, message: string) => { if (!value) throw new Error(message); };
 const marker = "window.__hghubAudit = 1;void(0)";
+setStrictSecurity(true);
 
 async function test(name: string, run: () => void | Promise<void>) {
   try { await run(); results.push({ name, passed: true }); }
@@ -65,6 +66,42 @@ await test("URL credentials are rejected", () => {
   assert(!fixture.querySelector("a[href],img"), "URL credentials survived");
 });
 
+await test("internal and private links or spoofed proxy images are rejected in strict mode", () => {
+  setStrictSecurity(true);
+  fixture.innerHTML = sanitizeHtml(
+    '<a href="http://tauri.localhost/tests/html-security.html">t</a>' +
+    '<a href="http://hg.localhost/img?u=https://example.invalid">h</a>' +
+    '<a href="http://127.0.0.1:1420/">l</a>' +
+    '<img src="http://hg.localhost/img?u=http%3A%2F%2F127.0.0.1%2Fsecret.jpg">'
+  );
+  assert(!fixture.querySelector("a[href],img"), "internal or private URL survived in strict mode");
+});
+
+await test("sanitizeHtml is idempotent and intercepts link clicks", () => {
+  const once = sanitizeHtml('<p><a href="/video/123">link</a><img src="/cover.jpg" alt="封面"></p>');
+  const twice = sanitizeHtml(once);
+  assert(once === twice, "sanitizeHtml is not idempotent");
+  fixture.innerHTML = twice;
+  let opened = "";
+  fixture.addEventListener("click", (e) => handleArticleClick(e, (u) => { opened = u; }), { once: true });
+  const ev = new MouseEvent("click", { bubbles: true, cancelable: true });
+  fixture.querySelector("a")!.dispatchEvent(ev);
+  assert(ev.defaultPrevented && opened === "https://example.invalid", "link click not intercepted safely");
+});
+
+await test("relaxed mode fallback keeps XSS protection while relaxing strict host/style rules", () => {
+  try {
+    setStrictSecurity(false);
+    const out = sanitizeHtml('<p style="color:red"><a href="http://nas.local/item">local</a><script>window.__hghubAudit=1</script><img src=x onerror="window.__hghubAudit=1"></p>');
+    fixture.innerHTML = out;
+    assert(!fixture.querySelector("script"), "script survived in relaxed mode");
+    assert(fixture.querySelector("p")?.getAttribute("style")?.includes("color"), "style stripped in relaxed mode");
+    assert(fixture.querySelector("a")?.getAttribute("href") === "http://nas.local/item", "local host blocked in relaxed mode");
+  } finally {
+    setStrictSecurity(true);
+  }
+});
+
 await test("unsupported WebViews fail closed", () => {
   const supported = DOMPurify.isSupported;
   try {
@@ -72,6 +109,25 @@ await test("unsupported WebViews fail closed", () => {
     assert(sanitizeHtml('<img src="broken" onerror="alert(1)">') === "", "unsupported sanitizer returned raw HTML");
   } finally { DOMPurify.isSupported = supported; }
 });
+
+for (const [i, attack] of attacks.entries()) {
+  await test(`relaxed attack ${i + 1}`, async () => {
+    setStrictSecurity(false);
+    try {
+      (window as unknown as { __hghubAudit: number }).__hghubAudit = 0;
+      fixture.innerHTML = sanitizeHtml(attack);
+      assert(!fixture.querySelector("svg,math,script,iframe,object,embed"), "active tag survived");
+      for (const el of fixture.querySelectorAll("*")) {
+        for (const attr of el.attributes) {
+          assert(!/^(on|xlink:)/i.test(attr.name), `unsafe attribute: ${attr.name}`);
+        }
+      }
+      for (const a of fixture.querySelectorAll("a")) a.click();
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert((window as unknown as { __hghubAudit: number }).__hghubAudit === 0, "script executed");
+    } finally { setStrictSecurity(true); }
+  });
+}
 
 fixture.replaceChildren();
 const report = { passed: results.filter(r => r.passed).length, failed: results.filter(r => !r.passed).length, results };
