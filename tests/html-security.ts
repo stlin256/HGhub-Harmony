@@ -54,6 +54,11 @@ await test("formatting and lazy image survive", () => {
   assert(img?.alt === "封面" && !img.hasAttribute("data-src"), "image attributes incorrect");
 });
 
+await test("ordered list starting number survives both sanitizer passes", () => {
+  fixture.innerHTML = sanitizeHtml('<ol start="5"><li>fifth item</li></ol>');
+  assert(fixture.querySelector("ol")?.start === 5, "ordered list numbering lost");
+});
+
 await test("safe links cannot retain opener", () => {
   fixture.innerHTML = sanitizeHtml('<a href="/video/123" target="_self" rel="opener">link</a>');
   const a = fixture.querySelector("a")!;
