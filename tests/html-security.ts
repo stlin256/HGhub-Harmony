@@ -54,6 +54,13 @@ await test("formatting and lazy image survive", () => {
   assert(img?.alt === "封面" && !img.hasAttribute("data-src"), "image attributes incorrect");
 });
 
+await test("reserved IPv4 literal links are rejected before opening", () => {
+  for (const host of ["192.0.0.1", "192.0.2.1", "192.88.99.1", "198.51.100.1", "203.0.113.1"]) {
+    fixture.innerHTML = sanitizeHtml(`<a href="https://${host}/">link</a>`);
+    assert(!fixture.querySelector("a[href]"), `reserved literal survived: ${host}`);
+  }
+});
+
 await test("ordered list starting number survives both sanitizer passes", () => {
   fixture.innerHTML = sanitizeHtml('<ol start="5"><li>fifth item</li></ol>');
   assert(fixture.querySelector("ol")?.start === 5, "ordered list numbering lost");
