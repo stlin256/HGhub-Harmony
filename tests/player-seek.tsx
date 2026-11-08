@@ -7,6 +7,7 @@ import "../src/index.css";
 import { flushPlaybackLog, initPlaybackLog, playbackLogApi, setPlaybackLog } from "../src/playbackDiagnostics";
 import Settings from "../src/pages/Settings";
 import Player from "../src/components/Player";
+import Hls from "hls.js";
 
 // 仅将自定义媒体协议映射到本地测试服务器；播放器、HLS 和鼠标事件均使用真实实现。
 const proxy = new URLSearchParams(location.search).get("proxy") || "http://127.0.0.1:17779";
@@ -26,17 +27,30 @@ const fixture = {
   setLogging: setPlaybackLog,
   flushLogs: flushPlaybackLog,
   rejectLoggingSave: false,
+  pauseBuffering: () => testHls?.pauseBuffering(),
+  resumeBuffering: () => testHls?.resumeBuffering(),
+  engineState: () => ({ loading: testHls?.loadingEnabled, buffering: testHls?.bufferingEnabled, levels: testHls?.levels.length }),
 };
+let testHls: Hls | undefined;
 const diagnosticTest = new URLSearchParams(location.search).has("diagnostics");
 const legacyTest = new URLSearchParams(location.search).has("legacy");
+const initiallyInactive = new URLSearchParams(location.search).has("inactive");
 if (diagnosticTest) {
+  // Test-only handle: exercise the real engine's public API without rewriting production modules.
+  const attach = Hls.prototype.attachMedia;
+  Hls.prototype.attachMedia = function (...args) { testHls = this; return attach.apply(this, args); };
   let enabled = false;
   playbackLogApi.status = async () => ({ enabled, path: "playback.log", error: null });
   playbackLogApi.set = async (on) => {
     if (fixture.rejectLoggingSave) throw new Error("fixture: disk unavailable");
     return { enabled: enabled = on, path: "playback.log", error: null };
   };
-  playbackLogApi.write = async entries => { if (enabled) fixture.logs.push(...entries); };
+  playbackLogApi.write = async entries => {
+    if (!enabled) return;
+    fixture.logs.push(...entries);
+    const collect = (window as typeof window & { collectPlaybackLogs?: (entries: typeof fixture.logs) => Promise<void> }).collectPlaybackLogs;
+    await collect?.(entries);
+  };
   playbackLogApi.read = async () => fixture.logs.map(e => JSON.stringify(e)).join("\n");
   api.lineState = async () => ({ base: "https://fixture.invalid", default: "https://fixture.invalid", fixed: [] });
   void initPlaybackLog();
@@ -56,13 +70,13 @@ api.video = async () => ({
   author: { id: 1, name: "Fixture" }, is_finished: true, is_original: 0,
 });
 function Fixture() {
-  const [active, setActive] = useState(true);
+  const [active, setActive] = useState(!initiallyInactive);
   const [settings, setSettings] = useState(false);
   fixture.setActive = setActive;
   return <AppProvider>
     <div style={{ position: "relative", width: 900, height: 540 }}>
       {legacyTest
-        ? <Player src="https://media.fixture.invalid/list.m3u8" autoPlay className="w-full h-full" diagnosticContext={{ video_id: 991, active }} />
+        ? <Player src="https://media.fixture.invalid/list.m3u8" autoPlay active={active} className="w-full h-full" diagnosticContext={{ video_id: 991, active }} />
         : <Feed videoIds={[991]} mode="home" active={active} bottomInset={0} />}
     </div>
     <button onClick={() => setActive((v) => !v)}>切换播放页激活状态</button>
@@ -90,7 +104,7 @@ async function checkIdleSeekTarget() {
   }
   throw new Error("等待播放或控制条隐藏超时");
 }
-if (!legacyTest) void checkIdleSeekTarget().catch((error) => {
+if (!legacyTest && !initiallyInactive) void checkIdleSeekTarget().catch((error) => {
   fixture.errors.push(String(error));
   document.querySelector("#results")!.textContent = JSON.stringify({ passed: 0, failed: 1, error: String(error) });
 });
