@@ -4,6 +4,9 @@ import Feed from "../src/components/Feed";
 import { AppProvider } from "../src/store";
 import { api } from "../src/api";
 import "../src/index.css";
+import { flushPlaybackLog, initPlaybackLog, playbackLogApi, setPlaybackLog } from "../src/playbackDiagnostics";
+import Settings from "../src/pages/Settings";
+import Player from "../src/components/Player";
 
 // 仅将自定义媒体协议映射到本地测试服务器；播放器、HLS 和鼠标事件均使用真实实现。
 const proxy = new URLSearchParams(location.search).get("proxy") || "http://127.0.0.1:17779";
@@ -19,7 +22,25 @@ XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, 
 const fixture = {
   seeks: [] as number[], errors: [] as string[],
   setActive: (_active: boolean) => {},
+  logs: [] as { event: string; data: Record<string, unknown> }[],
+  setLogging: setPlaybackLog,
+  flushLogs: flushPlaybackLog,
+  rejectLoggingSave: false,
 };
+const diagnosticTest = new URLSearchParams(location.search).has("diagnostics");
+const legacyTest = new URLSearchParams(location.search).has("legacy");
+if (diagnosticTest) {
+  let enabled = false;
+  playbackLogApi.status = async () => ({ enabled, path: "playback.log", error: null });
+  playbackLogApi.set = async (on) => {
+    if (fixture.rejectLoggingSave) throw new Error("fixture: disk unavailable");
+    return { enabled: enabled = on, path: "playback.log", error: null };
+  };
+  playbackLogApi.write = async entries => { if (enabled) fixture.logs.push(...entries); };
+  playbackLogApi.read = async () => fixture.logs.map(e => JSON.stringify(e)).join("\n");
+  api.lineState = async () => ({ base: "https://fixture.invalid", default: "https://fixture.invalid", fixed: [] });
+  void initPlaybackLog();
+}
 Object.assign(window, { playerSeekFixture: fixture });
 document.addEventListener("seeking", (e) => {
   if (e.target instanceof HTMLVideoElement) fixture.seeks.push(e.target.currentTime);
@@ -36,12 +57,17 @@ api.video = async () => ({
 });
 function Fixture() {
   const [active, setActive] = useState(true);
+  const [settings, setSettings] = useState(false);
   fixture.setActive = setActive;
   return <AppProvider>
     <div style={{ position: "relative", width: 900, height: 540 }}>
-      <Feed videoIds={[991]} mode="home" active={active} bottomInset={0} />
+      {legacyTest
+        ? <Player src="https://media.fixture.invalid/list.m3u8" autoPlay className="w-full h-full" diagnosticContext={{ video_id: 991, active }} />
+        : <Feed videoIds={[991]} mode="home" active={active} bottomInset={0} />}
     </div>
     <button onClick={() => setActive((v) => !v)}>切换播放页激活状态</button>
+    {diagnosticTest && <button onClick={() => setSettings(v => !v)}>诊断设置</button>}
+    {settings && <div style={{ position: "relative", width: 900, height: 700 }}><Settings onBack={() => setSettings(false)} wide /></div>}
   </AppProvider>;
 }
 createRoot(document.querySelector("#root")!).render(<Fixture />);
@@ -64,7 +90,7 @@ async function checkIdleSeekTarget() {
   }
   throw new Error("等待播放或控制条隐藏超时");
 }
-void checkIdleSeekTarget().catch((error) => {
+if (!legacyTest) void checkIdleSeekTarget().catch((error) => {
   fixture.errors.push(String(error));
   document.querySelector("#results")!.textContent = JSON.stringify({ passed: 0, failed: 1, error: String(error) });
 });
