@@ -20,6 +20,8 @@ macOS 文件位于 `~/Library/Application Support/com.hghub.huangguo/`：
 
 每行包含 UTC `ts`、进程 `pid`、递增 `seq`、当时生效的安全模式 `strict`、`event` 与 `data`。前端记录还包含采集时刻 `data.at`、单调时钟 `mono_ms`、页面会话 `session`、播放器 `player`、页面来源、视频/集数及激活状态。前端约每 250ms 批量写入，分析事件先后顺序使用 `data.at/mono_ms`，不只看落盘时间。
 
+`debug.log` 新写入的所有记录也使用 RFC 3339 UTC（`Z` 结尾），格式为 `[2026-11-08T14:30:00.123Z] [pid=12345] [api] ...`。时间由后端统一在写入时生成，覆盖 API 错误、运行异常、未处理的 Promise 拒绝、网络自检和播放自检；多行正文/堆栈的每一行带同一个时间和进程编号，同一条记录的各行连续写入。`playback.log` 的后端 `ts` 与前端 `data.at` 同样都是 RFC 3339 UTC，精度可能不同；`mono_ms`、`elapsed_ms` 等为相对耗时，继续保留毫秒数值。已有无时间戳的历史记录保留原样，无法补出真实发生时间。
+
 点击、拖动和键盘定位会记录：
 
 | 事件 | 含义 |
@@ -41,6 +43,12 @@ macOS 文件位于 `~/Library/Application Support/com.hghub.huangguo/`：
 hls.js 固定为 **1.6.19**，包含 [macOS/iOS 27 ManagedMediaSource 跳转恢复缓冲的上游修复](https://github.com/video-dev/hls.js/pull/7984)。两个播放器均显式配置 `preferManagedMediaSource: false`，在标准 MediaSource 可用时优先使用它；只有 ManagedMediaSource 的环境仍可回退，并由升级后的库在 seeking 时恢复缓冲。诊断日志中的 `hls_version`、`engine` 和 `prefer_managed` 可确认实际运行版本和路径。
 
 `web.hls.attached`/状态快照记录 MediaSource 类型与偏好；`web.mms.startstreaming/endstreaming`、分片加载/缓冲、非致命和致命 HLS 错误也会记录。`protocol.request` 包含原请求的 Range 和 Origin 分类；`proxy.begin/end` 与 `network.begin/end` 通过 `resource` 和请求编号关联代理耗时、HTTP 状态、字节数与每次重试。`network.target_failed`、`security.origin_denied`、`web.security.csp_violation` 用于识别安全拒绝，不需要关闭安全保护。
+
+业务接口也受同一个日志开关控制：`api.begin/end` 记录请求编号 `request`、每次尝试 `attempt`、操作类型 `operation`（首页/分类/播放地址等）、逻辑方法、所选线路 `line_host`、重定向后目标 `target_host`、HTTP 状态、响应头/总耗时、响应类型与网关类别。`business_status` 是 HTTP 200 后返回的业务状态；`retryable` 表示当前逻辑请求及错误是否允许重试。通过 `(pid, request, attempt)` 关联一次尝试，结合 `line.changed` 和每行的 `strict` 判断是否与切换线路或安全模式有关。只记录主机名和固定操作名，不记录搜索词、账号、内容 ID、请求体、凭据或响应正文。旧版只有 `[api]` 错误的 `debug.log` 无法事后补出请求时间和线路。
+
+HTTP 404/其他不可重试的 4xx、权限和安全拒绝直接结束；超时、408/425/429 和 5xx 的逻辑只读请求仍最多尝试三次。每次请求保留原有 20 秒超时，因此持续 5xx/超时时仍可能等待较久；日志会逐次记录。首页失败后显示重试入口；分类首次打开才请求预览，各频道和帖子独立更新、独立报错及重试，避免一个慢请求拖住整页。分片计时尚未就绪时记录 `null`，不再出现负耗时。
+
+可运行 `pnpm test:api-loading` 注入首页 404、频道 503、慢频道和空结果。测试使用真实页面及 API 错误处理，替换 Tauri IPC，阻止所有外部请求；检查首页停止转圈并可重试、成功频道与帖子提前显示、失败频道单独重试，以及未打开分类时不预取。结果保存到 `test-results/api-loading/<UTC时间>/`。Rust 网络层另行测试 404/权限/安全拒绝只尝试一次，503/超时可以重试恢复。
 
 ## 本地验证
 
