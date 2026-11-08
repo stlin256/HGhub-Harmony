@@ -95,7 +95,11 @@ pnpm android:build    # 产出 APK
 
 ## 实现要点
 
+「设置 → 播放 → 启动时静音」默认开启，每次启动应用均静音，播放时可手动开启声音。关闭此选项后，下次启动恢复上次的静音状态；音量仍会记忆。
+
 安全加固后的正文处理、FakeIP/内网限制、账号线路隔离及本地回归方法，见 [客户端内容与网络安全](docs/security.md)。镜像线路仅支持游客浏览，跨站点切换和首次升级后需要重新登录。
+
+Mihomo 与 sing-box 分流规则、已知域名统计及导入方法，见 [网络分流规则](rules/README.md)。
 
 1. **统一边缘信封**：站点把 `/api/**` 收敛为 `POST /api/edge/request`（`method/path/body(base64)/content_type` + `Authorization: Bearer`），本项目只对接这一个入口，无需处理 Cookie。
 2. **封面解密**：封面为 AES-128-CBC 密文，Rust 侧解密后经自定义协议输出，前端 `<img>` 直接使用。
