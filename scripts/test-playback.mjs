@@ -115,6 +115,13 @@ async function seekChecks(page, legacy) {
   const last = drags.at(-1);
   assert(logs.some(e => e.event === "seek.input.up" && e.data.input === "drag"));
   assert(logs.some(e => e.event === "seek.resumed" && e.data.seek === last.data.seek), "Final drag target must recover a frame");
+  const fragments = (await getLogs(page)).filter(e => e.event === "hlsFragLoading" || e.event === "hlsFragLoaded");
+  assert(fragments.some(e => e.event === "hlsFragLoading" && e.data.load_ms === null), "Incomplete downloads must have unknown duration");
+  for (const { data } of fragments) {
+    for (const key of ["load_ms", "first_byte_ms"]) {
+      assert(data[key] === null || data[key] >= 0, "Fragment timings must never be negative");
+    }
+  }
 
   await page.getByRole("button", { name: "暂停", exact: true }).click();
   await clickProgress(page, .6);
