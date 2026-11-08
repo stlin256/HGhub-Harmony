@@ -44,7 +44,7 @@ Windows / macOS / Android 三端 · Fluent 设计 · 沉浸式竖屏播放
 
 | 层 | 选型 |
 | --- | --- |
-| 壳 | Tauri 2（Rust 1.9x） |
+| 壳 | Tauri 2（Rust 1.90+） |
 | 前端 | React 19 + TypeScript + Vite 7 + Tailwind CSS 4 |
 | 播放 | hls.js（HLS / AES-128） |
 | 网络 | reqwest + rustls |
