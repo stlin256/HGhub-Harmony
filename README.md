@@ -147,5 +147,14 @@ cd src-tauri/gen/android
 
 需要设置 `ANDROID_HOME`（Android SDK 根目录）、`NDK_HOME`（`$ANDROID_HOME/ndk/<版本>`）与 `JAVA_HOME`（JDK 17）。
 
+**4. macOS 打开时提示「已损坏」或「无法验证开发者」**
+
+Release 里的 dmg 没有用 Apple 开发者证书签名和公证，从网上下载后会被 Gatekeeper 拦下。
+把 HGhub 拖进「应用程序」后，在终端执行一次：
+
+```bash
+xattr -cr /Applications/HGhub.app
+```
+
 ## LinuxDO
 https://linux.do/
