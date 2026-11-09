@@ -47,6 +47,20 @@ function mul(a: number, b: number): number {
   return result & 0xff;
 }
 
+/** 预计算乘法表（InvMixColumns 加速：避免逐字节 mul 循环）。 */
+const MUL_9: number[] = buildMulTable(9);
+const MUL_11: number[] = buildMulTable(11);
+const MUL_13: number[] = buildMulTable(13);
+const MUL_14: number[] = buildMulTable(14);
+
+function buildMulTable(factor: number): number[] {
+  const table: number[] = zeros(256);
+  for (let i = 0; i < 256; i++) {
+    table[i] = mul(i, factor);
+  }
+  return table;
+}
+
 function expandKey(key: Uint8Array): number[] {
   if (key.length !== 16) {
     throw new Error('AES-128 key must be 16 bytes');
@@ -76,15 +90,15 @@ function expandKey(key: Uint8Array): number[] {
 }
 
 function invMixColumn(a0: number[], a1: number[], a2: number[], a3: number[]): void {
-  // 原地对一列做 InvMixColumns
-  const b0 = mul(a0[0], 14) ^ mul(a1[0], 11) ^ mul(a2[0], 13) ^ mul(a3[0], 9);
-  const b1 = mul(a0[0], 9) ^ mul(a1[0], 14) ^ mul(a2[0], 11) ^ mul(a3[0], 13);
-  const b2 = mul(a0[0], 13) ^ mul(a1[0], 9) ^ mul(a2[0], 14) ^ mul(a3[0], 11);
-  const b3 = mul(a0[0], 11) ^ mul(a1[0], 13) ^ mul(a2[0], 9) ^ mul(a3[0], 14);
-  a0[0] = b0;
-  a1[0] = b1;
-  a2[0] = b2;
-  a3[0] = b3;
+  // 原地对一列做 InvMixColumns（查表加速）
+  const v0 = a0[0];
+  const v1 = a1[0];
+  const v2 = a2[0];
+  const v3 = a3[0];
+  a0[0] = MUL_14[v0] ^ MUL_11[v1] ^ MUL_13[v2] ^ MUL_9[v3];
+  a1[0] = MUL_9[v0] ^ MUL_14[v1] ^ MUL_11[v2] ^ MUL_13[v3];
+  a2[0] = MUL_13[v0] ^ MUL_9[v1] ^ MUL_14[v2] ^ MUL_11[v3];
+  a3[0] = MUL_11[v0] ^ MUL_13[v1] ^ MUL_9[v2] ^ MUL_14[v3];
 }
 
 /**

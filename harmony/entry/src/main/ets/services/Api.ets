@@ -5,9 +5,12 @@ import { Session } from './Session';
 import { ImageCache } from './ImageCache';
 import { AppContext } from './AppContext';
 import {
-  BootInfo, CommentPage, Detail, LineMirrors, LineProbe, LoginResult, Paged, PlayInfo, Post,
+  BootInfo, CommentPage, Detail, LineMirrors, LineProbe, LoginResult, Paged, PlaybackInfo, PlayInfo, Post,
   RankResult, SearchResult, UpdateInfo, User, VideoCard
 } from '../models/Types';
+
+interface EmptyRequest {
+}
 
 interface LoginPayload {
   token: string;
@@ -172,10 +175,26 @@ export class Api {
     return requireObject(data) as Detail;
   }
 
+  /** 旧版播放接口（上游已不再返回 video_url；仅作兼容保留）。 */
   static async play(id: number, ep: number): Promise<PlayInfo> {
     const data = await Api.edge('GET',
       '/api/videos/' + id + '/play?ep=' + ep + '&page_texts=0', null);
     return requireObject(data) as PlayInfo;
+  }
+
+  /** 新版播放接口：返回 streams.main + CDN 鉴权头，游客可用。 */
+  static async playback(id: number, ep: number): Promise<PlaybackInfo> {
+    const body: EmptyRequest = {};
+    const data = await Api.edge('POST',
+      '/api/videos/' + id + '/episodes/' + ep + '/playback', body);
+    return requireObject(data) as PlaybackInfo;
+  }
+
+  /** 帖子（吃瓜视频）播放接口。 */
+  static async postPlayback(id: number): Promise<PlaybackInfo> {
+    const body: EmptyRequest = {};
+    const data = await Api.edge('POST', '/api/posts/' + id + '/playback', body);
+    return requireObject(data) as PlaybackInfo;
   }
 
   /* ── 评论 / 互动 ──────────────────────────────────── */
