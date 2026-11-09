@@ -119,6 +119,8 @@ export class HgSize {
   static readonly chipHeight: number = 30;
   static readonly topBar: number = 52;
   static readonly tabBar: number = 56;
+  /** 悬浮胶囊底栏占用的垂直空间（含浮动间距），Tab 页滚动内容底部预留用。 */
+  static readonly tabBarFloating: number = 68;
   static readonly tabBarLargeFont: number = 64;
   static readonly listRow: number = 52;
   static readonly listRowDouble: number = 64;

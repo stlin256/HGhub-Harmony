@@ -1,4 +1,6 @@
 import { promptAction } from '@kit.ArkUI';
+import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { K_DARK, K_TOP_INSET, K_BOTTOM_INSET } from '../state/UserPrefs';
 import { UiBus } from '../services/UiBus';
 import { HgColor, HgFont, HgSize } from '../design/HgTokens';
@@ -27,11 +29,17 @@ struct Index {
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
-  @State currentTab: number = 0;
   @State loginVisible: boolean = false;
   @State lineVisible: boolean = false;
+  @State currentIndex: number = 0;
+  @State activeIndex: number = 0;
+  @StorageProp('bottomInsetPx') bottomInsetPx: number = 0;
+  private tabsController: HdsTabsController = new HdsTabsController();
+  private readonly selectedColor: string = '';
 
   aboutToAppear(): void {
+    hilog.info(0x0000, 'HGBoot', 'app init build=cover-debug-2');
+    hilog.info(0x0000, 'HGBoot', 'HdsTabs floating bar ready');
     UiBus.openLogin = () => {
       this.loginVisible = true;
     };
@@ -42,7 +50,11 @@ struct Index {
       this.navStack.pushPathByName(ROUTE_SETTINGS, null);
     };
     UiBus.switchTab = (index: number) => {
-      this.currentTab = index;
+      this.activeIndex = index;
+      try {
+        this.tabsController.changeIndex(index);
+      } catch (err) {
+      }
       this.navStack.clear();
     };
     UiBus.toast = (message: string) => {
@@ -57,6 +69,8 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    hilog.info(0x0000, 'HGBack', 'onBackPress tab=%{public}d stack=%{public}d login=%{public}s line=%{public}s',
+      this.currentIndex, this.navStack.size(), this.loginVisible ? '1' : '0', this.lineVisible ? '1' : '0');
     if (this.loginVisible) {
       this.loginVisible = false;
       return true;
@@ -69,28 +83,51 @@ struct Index {
       this.navStack.pop();
       return true;
     }
-    if (this.currentTab !== 0) {
-      this.currentTab = 0;
+    if (this.currentIndex !== 0) {
+      this.activeIndex = 0;
+      this.tabsController.changeIndex(0);
       return true;
     }
     return false;
   }
 
+  /** HdsTabs 悬浮底栏底部避让：4vp + 系统底部安全区。 */
+  private barBottomMargin(): number {
+    return 4 + this.getUIContext().px2vp(this.bottomInsetPx);
+  }
+
+  private itemColor(index: number): string {
+    if (this.activeIndex === index) {
+      // 底栏选中态使用项目主题蓝色（深浅色各自主题值），与 App 强调色保持一致。
+      return HgColor.accent(this.dark);
+    }
+    return this.dark ? '#FFFFFF' : HgColor.textSecondary(this.dark);
+  }
+
+  /** 悬浮底栏页签：图标 20vp、文字 10fp、间距 3vp、内容高度 46vp（HdsTabs 系统规范）。 */
   @Builder
-  TabItem(index: number, label: string, icon: Resource) {
-    Column({ space: 2 }) {
+  tabItem(title: string, icon: Resource, index: number) {
+    Column() {
       SymbolGlyph(icon)
-        .fontSize(22)
-        .fontColor([this.currentTab === index ? HgColor.accent(this.dark) : HgColor.textTertiary(this.dark)])
-      Text(label)
+        .fontSize(20)
+        .fontColor([this.itemColor(index)])
+      Text(title)
         .fontSize(10)
-        .fontWeight(this.currentTab === index ? HgFont.weightMedium : HgFont.weightRegular)
-        .fontColor(this.currentTab === index ? HgColor.accent(this.dark) : HgColor.textTertiary(this.dark))
+        .fontWeight(this.activeIndex === index ? HgFont.weightMedium : HgFont.weightRegular)
+        .fontColor(this.itemColor(index))
+        .margin({ top: 3 })
     }
     .width('100%')
-    .height(HgSize.tabBar + this.bottomInset)
-    .padding({ bottom: this.bottomInset })
+    .height(46)
     .justifyContent(FlexAlign.Center)
+    .onClick(() => {
+      if (this.activeIndex === index) {
+        return;
+      }
+      // 先更新高亮，再交给 controller 做 240ms 页面切换动画。
+      this.activeIndex = index;
+      this.tabsController.changeIndex(index);
+    })
   }
 
   @Builder
@@ -135,36 +172,52 @@ struct Index {
   build() {
     Stack() {
       Navigation(this.navStack) {
-        Tabs({ barPosition: BarPosition.End, index: this.currentTab }) {
+        HdsTabs({
+          barPosition: BarPosition.End,
+          index: this.currentIndex,
+          controller: this.tabsController
+        }) {
           TabContent() {
             HomePage()
           }
-          .tabBar(this.TabItem(0, '首页', $r('sys.symbol.house')))
+          .tabBar(this.tabItem('首页', $r('sys.symbol.house'), 0))
 
           TabContent() {
             SearchPage()
           }
-          .tabBar(this.TabItem(1, '搜索', $r('sys.symbol.magnifyingglass')))
+          .tabBar(this.tabItem('搜索', $r('sys.symbol.magnifyingglass'), 1))
 
           TabContent() {
             CategoryPage()
           }
-          .tabBar(this.TabItem(2, '分类', $r('sys.symbol.square_grid_2x2')))
+          .tabBar(this.tabItem('分类', $r('sys.symbol.square_grid_2x2'), 2))
 
           TabContent() {
             ProfilePage()
           }
-          .tabBar(this.TabItem(3, '我的', $r('sys.symbol.person')))
+          .tabBar(this.tabItem('我的', $r('sys.symbol.person'), 3))
         }
-        .barHeight(HgSize.tabBar + this.bottomInset)
-        .barBackgroundColor(HgColor.surface1(this.dark))
         .scrollable(false)
-        .animationDuration(0)
-        .onChange((index: number) => {
-          this.currentTab = index;
+        .animationDuration(240)
+        .barMode(BarMode.Fixed)
+        .barOverlap(true)
+        .barFloatingStyle({
+          barWidth: { smallWidth: 340, mediumWidth: 420, largeWidth: 500 },
+          barSideMargin: 12,
+          barBottomMargin: this.barBottomMargin(),
+          adaptToHandedness: true,
+          lightColor: this.dark ? '#6660CDFF' : '#660067C0',
+          systemMaterialEffect: {
+            materialType: hdsMaterial.MaterialType.IMMERSIVE,
+            materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+          }
         })
         .width('100%')
         .height('100%')
+        .onChange((index: number) => {
+          this.currentIndex = index;
+          this.activeIndex = index;
+        })
       }
       .mode(NavigationMode.Stack)
       .hideTitleBar(true)
