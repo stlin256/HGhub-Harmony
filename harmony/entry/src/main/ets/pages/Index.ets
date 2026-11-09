@@ -33,6 +33,8 @@ struct Index {
   @State lineVisible: boolean = false;
   @State currentIndex: number = 0;
   @State activeIndex: number = 0;
+  /** 返回键二次确认：2 秒内再按一次才真正退出，避免误触直接退出 App。 */
+  private lastBackAt: number = 0;
   @StorageProp('bottomInsetPx') bottomInsetPx: number = 0;
   private tabsController: HdsTabsController = new HdsTabsController();
   private readonly selectedColor: string = '';
@@ -88,7 +90,18 @@ struct Index {
       this.tabsController.changeIndex(0);
       return true;
     }
-    return false;
+    // 已经在首页根层：第一次返回给出提示，2 秒内再按一次才退出。
+    const now: number = Date.now();
+    if (now - this.lastBackAt < 2000) {
+      this.lastBackAt = 0;
+      return false;
+    }
+    this.lastBackAt = now;
+    try {
+      promptAction.showToast({ message: '再按一次返回键退出 HGhub', duration: 1500 });
+    } catch (err) {
+    }
+    return true;
   }
 
   /** HdsTabs 悬浮底栏底部避让：4vp + 系统底部安全区。 */
