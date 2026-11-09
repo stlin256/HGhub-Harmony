@@ -568,6 +568,246 @@ export function isPlaylistBytes(bytes: Uint8Array): boolean {
   return true;
 }
 
+/* ───────────────────────── 预热解析（纯函数） ───────────────────────── */
+
+/** 主清单（多码率）里的一个子清单。 */
+export interface PlaylistVariant {
+  /** 绝对 URL。 */
+  uri: string;
+  /** BANDWIDTH 属性（bps）；缺失时为 0。 */
+  bandwidth: number;
+  /** RESOLUTION 属性，如 720x1280；缺失时为空串。 */
+  resolution: string;
+  /** CODECS 属性原样（可能含逗号与引号内的值）。 */
+  codecs: string;
+}
+
+/**
+ * 一份 m3u8 的预热摘要：主清单给 variants，媒体清单给 segments / keys / initSegments。
+ * URI 一律按 baseUrl 绝对化，供 MediaPrefetch 直接抓取。
+ */
+export interface PlaylistSummary {
+  master: boolean;
+  variants: PlaylistVariant[];
+  segments: string[];
+  keys: string[];
+  initSegments: string[];
+}
+
+/** 取属性列表中指定名字的值（去引号）；找不到返回空串。 */
+function attributeText(attributes: string[], name: string): string {
+  const wanted: string = name.trim().toUpperCase();
+  for (let i = 0; i < attributes.length; i++) {
+    const attribute: string = attributes[i];
+    const equal: number = attribute.indexOf('=');
+    if (equal <= 0) {
+      continue;
+    }
+    if (attribute.substring(0, equal).trim().toUpperCase() !== wanted) {
+      continue;
+    }
+    let value: string = attribute.substring(equal + 1).trim();
+    if (value.length >= 2 && value.charAt(0) === '"' && value.charAt(value.length - 1) === '"') {
+      value = value.substring(1, value.length - 1);
+    }
+    return value;
+  }
+  return '';
+}
+
+/** 数字属性转非负数；非法/缺失返回 0。 */
+function attributeNumber(text: string): number {
+  if (text.length === 0) {
+    return 0;
+  }
+  const value: number = Number(text);
+  if (isNaN(value) || value < 0) {
+    return 0;
+  }
+  return value;
+}
+
+function uriAttribute(line: string): string {
+  const attributes: string[] | undefined = attributeList(line);
+  if (attributes === undefined) {
+    return '';
+  }
+  return attributeText(attributes, 'URI');
+}
+
+/**
+ * 解析 m3u8 为预热摘要（只读，不改写）。
+ * - 主清单：每个 #EXT-X-STREAM-INF 后的 URI 行 → variants；
+ * - 媒体清单：非注释行 → segments；#EXT-X-KEY / #EXT-X-SESSION-KEY 的 URI → keys；
+ *   #EXT-X-MAP 的 URI → initSegments（fMP4 初始化段，先抓才能解码）。
+ */
+export function summarizePlaylist(baseUrl: string, text: string): PlaylistSummary {
+  const body: string = stripBom(text);
+  const lines: string[] = body.split('\n');
+  const variants: PlaylistVariant[] = [];
+  const segments: string[] = [];
+  const keys: string[] = [];
+  const initSegments: string[] = [];
+  let pendingVariant: boolean = false;
+  let pendingBandwidth: number = 0;
+  let pendingResolution: string = '';
+  let pendingCodecs: string = '';
+  for (let i = 0; i < lines.length; i++) {
+    const line: string = trimEnd(lines[i]);
+    if (line.length === 0) {
+      continue;
+    }
+    if (line.charAt(0) !== '#') {
+      const uri: string = absolutizeUrl(baseUrl, line);
+      if (pendingVariant) {
+        const variant: PlaylistVariant = {
+          uri: uri,
+          bandwidth: pendingBandwidth,
+          resolution: pendingResolution,
+          codecs: pendingCodecs
+        };
+        variants.push(variant);
+        pendingVariant = false;
+        pendingBandwidth = 0;
+        pendingResolution = '';
+        pendingCodecs = '';
+      } else {
+        segments.push(uri);
+      }
+      continue;
+    }
+    if (line.startsWith('#EXT-X-STREAM-INF:')) {
+      const attributes: string[] | undefined = attributeList(line);
+      pendingVariant = true;
+      pendingBandwidth = 0;
+      pendingResolution = '';
+      pendingCodecs = '';
+      if (attributes !== undefined) {
+        pendingBandwidth = attributeNumber(attributeText(attributes, 'BANDWIDTH'));
+        pendingResolution = attributeText(attributes, 'RESOLUTION');
+        pendingCodecs = attributeText(attributes, 'CODECS');
+      }
+      continue;
+    }
+    if (line.startsWith('#EXT-X-KEY:') || line.startsWith('#EXT-X-SESSION-KEY:')) {
+      const uri: string = uriAttribute(line);
+      if (uri.length === 0) {
+        continue;
+      }
+      const attributes: string[] | undefined = attributeList(line);
+      const method: string = attributes === undefined ? '' : attributeText(attributes, 'METHOD').toUpperCase();
+      if (method === 'NONE') {
+        continue;
+      }
+      keys.push(absolutizeUrl(baseUrl, uri));
+      continue;
+    }
+    if (line.startsWith('#EXT-X-MAP:')) {
+      const uri: string = uriAttribute(line);
+      if (uri.length > 0) {
+        initSegments.push(absolutizeUrl(baseUrl, uri));
+      }
+      continue;
+    }
+  }
+  const summary: PlaylistSummary = {
+    master: variants.length > 0,
+    variants: variants,
+    segments: segments,
+    keys: keys,
+    initSegments: initSegments
+  };
+  return summary;
+}
+
+/** 子清单的综合码率估算：优先 BANDWIDTH，缺失时回退分辨率像素数。 */
+function variantScore(variant: PlaylistVariant): number {
+  if (variant.bandwidth > 0) {
+    return variant.bandwidth;
+  }
+  const resolution: string = variant.resolution.toLowerCase();
+  const mark: number = resolution.indexOf('x');
+  if (mark > 0) {
+    const width: number = attributeNumber(resolution.substring(0, mark));
+    const height: number = attributeNumber(resolution.substring(mark + 1));
+    if (width > 0 && height > 0) {
+      return width * height;
+    }
+  }
+  return 0;
+}
+
+/** 选“最优”子清单：码率最高者；全部缺失时取第一个。 */
+export function pickBestVariant(variants: PlaylistVariant[]): PlaylistVariant | undefined {
+  if (variants.length === 0) {
+    return undefined;
+  }
+  let best: PlaylistVariant = variants[0];
+  let bestScore: number = variantScore(best);
+  for (let i = 1; i < variants.length; i++) {
+    const score: number = variantScore(variants[i]);
+    if (score > bestScore) {
+      best = variants[i];
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/**
+ * 缓存键里视为“易变鉴权参数”的 query 名。
+ * 上游每次 /playback 会签发新的 auth_key/token，但同一路径的分片内容不变；
+ * 命中时去掉这些参数，预加载写入的缓存才能在切集/切 feed 后（重新解析地址）复用。
+ */
+const VOLATILE_QUERY_NAMES: string[] = [
+  'auth_key', 'authkey', 'token', 'sign', 'signature', 'expires', 'expire', 'exp',
+  'wssecret', 'wstime', 'txsecret', 'tx_time'
+];
+
+function isVolatileQuery(name: string): boolean {
+  const lower: string = name.trim().toLowerCase();
+  for (let i = 0; i < VOLATILE_QUERY_NAMES.length; i++) {
+    if (VOLATILE_QUERY_NAMES[i] === lower) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 缓存键归一化：去掉 URL query 中的易变鉴权参数，其余（路径 + 稳定参数）保持原样。
+ * 只用于 MediaCache 的内部键/磁盘文件名；真正请求上游仍用原始 URL。
+ */
+export function normalizeCacheKey(url: string): string {
+  if (url.length === 0) {
+    return '';
+  }
+  const mark: number = url.indexOf('?');
+  if (mark < 0) {
+    return url;
+  }
+  const base: string = url.substring(0, mark);
+  const query: string = url.substring(mark + 1);
+  const pieces: string[] = query.split('&');
+  let kept: string = '';
+  for (let i = 0; i < pieces.length; i++) {
+    const piece: string = pieces[i];
+    if (piece.length === 0) {
+      continue;
+    }
+    const equal: number = piece.indexOf('=');
+    const name: string = equal >= 0 ? piece.substring(0, equal) : piece;
+    if (isVolatileQuery(name)) {
+      continue;
+    }
+    kept += (kept.length > 0 ? '&' : '') + piece;
+  }
+  if (kept.length === 0) {
+    return base;
+  }
+  return base + '?' + kept;
+}
+
 /* ───────────────────────── 自测（可用 Node 直接跑） ───────────────────────── */
 
 function expectEqual(name: string, actual: string, expected: string, failures: string[]): void {
@@ -691,6 +931,58 @@ export function selfTestPlaylistRewrite(): string {
   expectTrue('playlist bytes plain', isPlaylistBytes(plainBytes), failures);
   expectTrue('playlist bytes bom', isPlaylistBytes(bomBytes), failures);
   expectTrue('ts bytes not playlist', !isPlaylistBytes(tsBytes), failures);
+
+  // ── 预热解析（MediaPrefetch 依赖这些纯函数） ──
+  const master: string = '#EXTM3U\n' +
+    '#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=480x854,CODECS="avc1.4d401f,mp4a.40.2"\n' +
+    'low/index.m3u8?auth_key=1\n' +
+    '#EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=720x1280\n' +
+    'high/index.m3u8?auth_key=2\n';
+  const masterSummary: PlaylistSummary = summarizePlaylist(base, master);
+  expectTrue('summary master detected', masterSummary.master, failures);
+  expectTrue('summary variants count', masterSummary.variants.length === 2, failures);
+  expectTrue('summary segments empty on master', masterSummary.segments.length === 0, failures);
+  expectTrue('summary keeps quoted comma in codecs',
+    masterSummary.variants.length === 2 && masterSummary.variants[0].codecs === 'avc1.4d401f,mp4a.40.2', failures);
+  const bestVariant: PlaylistVariant | undefined = pickBestVariant(masterSummary.variants);
+  expectTrue('pick best variant by bandwidth',
+    bestVariant !== undefined &&
+    bestVariant.uri === 'https://cdn.example/videos5/abc/high/index.m3u8?auth_key=2', failures);
+  expectTrue('pick best variant undefined on empty', pickBestVariant([]) === undefined, failures);
+
+  const mediaPlaylist: string = '#EXTM3U\n' +
+    '#EXT-X-VERSION:7\n' +
+    '#EXT-X-MAP:URI="init.mp4"\n' +
+    '#EXT-X-KEY:METHOD=AES-128,URI="key.bin?auth_key=abc",IV=0x1\n' +
+    '#EXTINF:4,\n' +
+    'seg-1.ts\n' +
+    '#EXTINF:4,\n' +
+    'seg-2.ts\n' +
+    '#EXT-X-ENDLIST\n';
+  const mediaSummary: PlaylistSummary = summarizePlaylist(base, mediaPlaylist);
+  expectTrue('summary media not master', !mediaSummary.master, failures);
+  expectTrue('summary media segments abs',
+    mediaSummary.segments.length === 2 &&
+    mediaSummary.segments[0] === 'https://cdn.example/videos5/abc/seg-1.ts', failures);
+  expectTrue('summary media key abs',
+    mediaSummary.keys.length === 1 &&
+    mediaSummary.keys[0] === 'https://cdn.example/videos5/abc/key.bin?auth_key=abc', failures);
+  expectTrue('summary media init abs',
+    mediaSummary.initSegments.length === 1 &&
+    mediaSummary.initSegments[0] === 'https://cdn.example/videos5/abc/init.mp4', failures);
+
+  expectEqual('cache key strips auth params',
+    normalizeCacheKey('https://cdn.example/videos5/abc/seg-1.ts?auth_key=111&v=3&token=abc'),
+    'https://cdn.example/videos5/abc/seg-1.ts?v=3', failures);
+  expectEqual('cache key keeps stable params',
+    normalizeCacheKey('https://cdn.example/a/seg-1.ts?v=3&quality=hd'),
+    'https://cdn.example/a/seg-1.ts?v=3&quality=hd', failures);
+  expectEqual('cache key no query untouched',
+    normalizeCacheKey('https://cdn.example/a/seg-1.ts'),
+    'https://cdn.example/a/seg-1.ts', failures);
+  expectEqual('cache key all volatile becomes base',
+    normalizeCacheKey('https://cdn.example/a/seg-1.ts?auth_key=111&expires=9'),
+    'https://cdn.example/a/seg-1.ts', failures);
 
   if (failures.length > 0) {
     throw new Error('PlaylistRewrite self-test failed (' + failures.length + '):\n' + failures.join('\n'));

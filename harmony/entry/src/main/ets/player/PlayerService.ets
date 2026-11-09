@@ -3,10 +3,11 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
 import { Lines } from '../services/Lines';
 import { USER_AGENT } from '../services/Net';
-import { PlayInfo } from '../models/Types';
+import { PlaybackInfo } from '../models/Types';
 import { UserPrefs } from '../state/UserPrefs';
 import { PlaybackLog } from './PlaybackLog';
 import { LocalProxy } from './LocalProxy';
+import { MediaPrefetch } from './MediaPrefetch';
 
 const HISTORY_INTERVAL_MS: number = 5000;
 const UI_INTERVAL_MS: number = 250;
@@ -14,10 +15,10 @@ const PLAY_CACHE_TTL_MS: number = 8 * 60 * 1000;
 const NEAR_END_MS: number = 3000;
 
 class PlayCacheEntry {
-  info: PlayInfo;
+  info: PlaybackInfo;
   at: number;
 
-  constructor(info: PlayInfo, at: number) {
+  constructor(info: PlaybackInfo, at: number) {
     this.info = info;
     this.at = at;
   }
@@ -43,6 +44,8 @@ export class PlayerService {
   onCompleted: () => void = () => {};
   onError: (message: string, code: number) => void = () => {};
   onSeekDone: (ms: number) => void = () => {};
+  /** 视频原始尺寸变化（prepared/切集/切视频时回调）；页面据此计算 XComponent 展示矩形。 */
+  onVideoSize: (width: number, height: number) => void = () => {};
 
   private player: media.AVPlayer | undefined = undefined;
   private surfaceId: string = '';
@@ -61,18 +64,21 @@ export class PlayerService {
   private durationMs: number = 0;
   private bufferedMs: number = 0;
   private buffering: boolean = false;
+  /** 当前视频原始宽高（px）；0 表示尚未拿到。 */
+  private videoWidth: number = 0;
+  private videoHeight: number = 0;
 
   private rate: number = 1;
   private muted: boolean = false;
   private volume: number = 1;
 
   /**
-   * 直连/本地代理开关（默认 false，走原有直连 createMediaSourceWithUrl + headers）。
-   * 置 true 时：播 m3u8 前启动 127.0.0.1 回环代理（端口固定、整个会话复用），把上游地址包装成
-   * http://127.0.0.1:<port>/hls?u=<encoded> 交给 AVPlayer，由代理注入 Referer/UA 并改写
-   * 子清单/分片/密钥；代理启动失败自动回退直连，不阻塞播放。
+   * 本地回环代理开关（默认 true）：播 m3u8 前启动 127.0.0.1 回环代理（端口固定、整个会话复用），
+   * 把上游地址包装成 http://127.0.0.1:<port>/hls?u=<encoded> 交给 AVPlayer，由代理注入 Referer/UA 并改写
+   * 子清单/分片/密钥；Web 端等价链路。打开代理才能命中 MediaCache / 预加载缓存（切集、上滑下一条更快）。
+   * 代理启动失败会自动回退直连，不阻塞播放。
    */
-  useLocalProxy: boolean = false;
+  useLocalProxy: boolean = true;
 
   /** 本地回环代理：整个 PlayerService 生命周期内复用同一实例，端口固定。 */
   private proxy: LocalProxy = new LocalProxy();
@@ -110,6 +116,23 @@ export class PlayerService {
     return this.rate;
   }
 
+  currentVideoWidth(): number {
+    return this.videoWidth;
+  }
+
+  currentVideoHeight(): number {
+    return this.videoHeight;
+  }
+
+  private resetVideoSize(): void {
+    if (this.videoWidth === 0 && this.videoHeight === 0) {
+      return;
+    }
+    this.videoWidth = 0;
+    this.videoHeight = 0;
+    this.onVideoSize(0, 0);
+  }
+
   /** 切集/切视频前记录当前集与进度。 */
   private snapshot(): void {
     this.saveHistory(true, false);
@@ -131,6 +154,11 @@ export class PlayerService {
     this.surfaceId = surfaceId;
     const player = this.player;
     if (player === undefined || this.released) {
+      return;
+    }
+    // AVPlayer 只允许在 initialized 状态设置 surfaceId；其它状态先缓存，openUrl 时再绑定。
+    if (player.state !== 'initialized') {
+      PlaybackLog.info('surface.cached', player.state);
       return;
     }
     try {
@@ -163,21 +191,76 @@ export class PlayerService {
     return videoId + ':' + ep;
   }
 
-  private async resolvePlay(videoId: number, ep: number, force: boolean): Promise<PlayInfo> {
+  private async resolvePlay(videoId: number, ep: number, force: boolean): Promise<PlaybackInfo> {
     const key = this.cacheKey(videoId, ep);
     if (!force) {
       const entry = this.cache.get(key);
-      if (entry !== undefined && Date.now() - entry.at < PLAY_CACHE_TTL_MS) {
+      if (entry !== undefined && !PlayerService.cacheStale(entry)) {
         return entry.info;
       }
     }
-    const info = await Api.play(videoId, ep);
-    const url: string = info.video_url === undefined || info.video_url === null ? '' : info.video_url;
+    const info = await Api.playback(videoId, ep);
+    const url: string = PlayerService.mainUrl(info);
     if (url.length === 0) {
       throw new Error('暂无播放地址');
     }
     this.cache.set(key, new PlayCacheEntry(info, Date.now()));
     return info;
+  }
+
+  /** 播放地址是否已过缓存有效期（8 分钟 + 上游 auth_key 的 timestamp 双重判断）。 */
+  private static cacheStale(entry: PlayCacheEntry): boolean {
+    const now: number = Date.now();
+    if (now - entry.at >= PLAY_CACHE_TTL_MS) {
+      return true;
+    }
+    const ts: number | undefined = entry.info.timestamp;
+    if (ts !== undefined && ts !== null && ts > 0) {
+      return now >= ts * 1000 - 60000;
+    }
+    return false;
+  }
+
+  /** 从 playback 响应里取主播放地址。 */
+  private static mainUrl(info: PlaybackInfo): string {
+    const streams = info.streams;
+    if (streams === undefined || streams === null || streams.main === undefined || streams.main === null) {
+      return '';
+    }
+    return streams.main;
+  }
+
+  /** 上游 CDN 鉴权头（x-cdn-auth / x-cdn-app 等）+ 基础请求头。 */
+  private static cdnHeaders(info: PlaybackInfo): Record<string, string> {
+    const headers: Record<string, string> = {
+      'User-Agent': USER_AGENT,
+      'Accept': '*/*',
+      'Referer': Lines.current() + '/'
+    };
+    const cdn = info.cdn;
+    if (cdn !== undefined && cdn !== null) {
+      const key: string | undefined = cdn.authKey;
+      const value: string | undefined = cdn.authValue;
+      if (key !== undefined && key !== null && key.length > 0 &&
+        value !== undefined && value !== null && value.length > 0) {
+        headers[key] = value;
+      }
+      const app: string | undefined = cdn.app;
+      if (app !== undefined && app !== null && app.length > 0) {
+        headers['x-cdn-app'] = app;
+      }
+    }
+    return headers;
+  }
+
+  /** 直链（帖子 mp4 等）只需基础请求头。 */
+  private static directHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'User-Agent': USER_AGENT,
+      'Accept': '*/*',
+      'Referer': Lines.current() + '/'
+    };
+    return headers;
   }
 
   /** 预取下一集播放地址（失败静默，不进入错误 UI）。 */
@@ -190,12 +273,13 @@ export class PlayerService {
       return;
     }
     this.prefetching.add(key);
-    Api.play(videoId, ep).then((info: PlayInfo) => {
+    Api.playback(videoId, ep).then((info: PlaybackInfo) => {
       this.prefetching.delete(key);
-      const url: string = info.video_url === undefined || info.video_url === null ? '' : info.video_url;
+      const url: string = PlayerService.mainUrl(info);
       if (url.length > 0) {
         this.cache.set(key, new PlayCacheEntry(info, Date.now()));
         PlaybackLog.info('play.prefetch', 'done ep=' + ep);
+        MediaPrefetch.warmPlaybackInfo(info);
       }
     }).catch(() => {
       this.prefetching.delete(key);
@@ -204,6 +288,13 @@ export class PlayerService {
 
   private dropCache(videoId: number, ep: number): void {
     this.cache.delete(this.cacheKey(videoId, ep));
+  }
+
+  /** 线路切换后清空播放地址缓存：旧线路的签名地址不可复用，当前集/预取的下一集都要重新请求。 */
+  clearCache(): void {
+    this.cache.clear();
+    this.prefetching.clear();
+    MediaPrefetch.reset();
   }
 
   /* ── 加载入口 ─────────────────────────────────────── */
@@ -226,6 +317,7 @@ export class PlayerService {
     this.positionMs = 0;
     this.durationMs = 0;
     this.bufferedMs = 0;
+    this.resetVideoSize();
     this.onTime(0);
     this.onDuration(0);
     this.onLoading();
@@ -250,7 +342,7 @@ export class PlayerService {
 
   private async loadByApi(videoId: number, ep: number, startSec: number, autoPlay: boolean,
     forceRefresh: boolean, serial: number, retried: boolean): Promise<void> {
-    let info: PlayInfo;
+    let info: PlaybackInfo;
     try {
       info = await this.resolvePlay(videoId, ep, forceRefresh || retried);
     } catch (err) {
@@ -263,10 +355,16 @@ export class PlayerService {
     if (serial !== this.serial || this.released) {
       return;
     }
-    const url: string = info.video_url;
+    const url: string = PlayerService.mainUrl(info);
     this.playUrl = url;
+    const cdnHeaders: Record<string, string> = PlayerService.cdnHeaders(info);
+    // 代理回源分片/密钥也要带 CDN 鉴权头（与直连模式等价搬运）。
     try {
-      await this.openUrl(url, Math.max(0, startSec), autoPlay, serial);
+      this.proxy.setUpstreamHeaders(cdnHeaders);
+    } catch (err) {
+    }
+    try {
+      await this.openUrl(url, Math.max(0, startSec), autoPlay, serial, cdnHeaders);
     } catch (err) {
       if (serial !== this.serial || this.released) {
         return;
@@ -299,13 +397,14 @@ export class PlayerService {
     this.positionMs = 0;
     this.durationMs = 0;
     this.bufferedMs = 0;
+    this.resetVideoSize();
     this.onTime(0);
     this.onDuration(0);
     this.onLoading();
     PlaybackLog.info('load.direct', 'id=' + videoId);
     this.enqueue(async (): Promise<void> => {
       try {
-        await this.openUrl(url, Math.max(0, startSec), autoPlay, serial);
+        await this.openUrl(url, Math.max(0, startSec), autoPlay, serial, PlayerService.directHeaders());
       } catch (err) {
         if (serial !== this.serial || this.released) {
           return;
@@ -404,6 +503,16 @@ export class PlayerService {
       this.onSeekDone(ms);
     });
 
+    try {
+      player.on('videoSizeChange', (width: number, height: number) => {
+        PlaybackLog.info('video.size', width + 'x' + height);
+        this.videoWidth = width;
+        this.videoHeight = height;
+        this.onVideoSize(width, height);
+        this.applyScale(player);
+      });
+    } catch (err) {
+    }
     player.on('startRenderFrame', () => {
       PlaybackLog.info('firstFrame', '');
       this.onFirstFrame();
@@ -411,20 +520,42 @@ export class PlayerService {
 
     player.on('error', (err: BusinessError) => {
       const code: number = err.code === undefined ? -1 : err.code;
-      const message: string = PlayerService.friendlyError(code, err.message);
+      const raw: string = err.message === undefined || err.message === null ? '' : err.message;
+      // 播放器对「当前状态不支持的操作」（如 initialized 状态下设置倍速/音量/缩放/seek）也会抛 error 事件。
+      // 这类瞬时错误不代表媒体不可播：忽略即可，避免误报"视频暂时无法播放"而必须手动重试。
+      if (PlayerService.isTransientOperationError(code, raw)) {
+        PlaybackLog.warn('player.opError', 'code=' + code + ' ' + raw);
+        return;
+      }
+      const message: string = PlayerService.friendlyError(code, raw);
       this.state = 'error';
       this.onState('error');
-      PlaybackLog.warn('player.error', 'code=' + code + ' ' + err.message);
+      PlaybackLog.warn('player.error', 'code=' + code + ' ' + raw);
       this.onError(message, code);
     });
   }
 
-  private async openUrl(url: string, startSec: number, autoPlay: boolean, serial: number): Promise<void> {
+  private async openUrl(url: string, startSec: number, autoPlay: boolean, serial: number,
+    extraHeaders: Record<string, string>): Promise<void> {
     if (serial !== this.serial || this.released) {
       return;
     }
     if (this.playUrl.length === 0) {
       this.playUrl = url;
+    }
+    // XComponent 的 onLoad 可能晚于页面数据加载：先等 surface 就绪，避免播放器无画面。
+    if (this.surfaceId.length === 0) {
+      let waited: number = 0;
+      while (this.surfaceId.length === 0 && waited < 1500 &&
+        serial === this.serial && !this.released) {
+        await new Promise<void>((resolve: () => void) => {
+          setTimeout(() => {
+            resolve();
+          }, 50);
+        });
+        waited += 50;
+      }
+      PlaybackLog.info('surface.wait', 'ms=' + waited);
     }
     const player = await this.ensurePlayer();
     if (serial !== this.serial || this.released) {
@@ -461,13 +592,16 @@ export class PlayerService {
     } else if (this.useLocalProxy) {
       PlaybackLog.warn('source.proxy.skip', 'not an HLS url');
     }
-    let headers: Record<string, string> = {
-      'Referer': Lines.current() + '/',
-      'User-Agent': USER_AGENT,
-      'Accept': '*/*'
-    };
+    let headers: Record<string, string> = {};
+    const extraKeys: string[] = Object.keys(extraHeaders);
+    for (let i = 0; i < extraKeys.length; i++) {
+      headers[extraKeys[i]] = extraHeaders[extraKeys[i]];
+    }
+    headers['Referer'] = Lines.current() + '/';
+    headers['User-Agent'] = USER_AGENT;
+    headers['Accept'] = '*/*';
     if (viaProxy) {
-      // 本地代理自己注入 Referer/UA，播放器侧只需最小请求头。
+      // 本地代理自己注入 Referer/UA/CDN 鉴权头，播放器侧只需最小请求头。
       headers = { 'Accept': '*/*' };
     }
     const source: media.MediaSource = media.createMediaSourceWithUrl(sourceUrl, headers);
@@ -475,13 +609,26 @@ export class PlayerService {
     if (serial !== this.serial || this.released) {
       return;
     }
-    if (this.surfaceId.length > 0) {
+    // setMediaSource 后状态机异步进入 initialized；在其间绑定 surfaceId（官方允许的唯一状态）。
+    let initWaited: number = 0;
+    while (player.state !== 'initialized' && initWaited < 1000 &&
+      serial === this.serial && !this.released) {
+      await new Promise<void>((resolve: () => void) => {
+        setTimeout(() => {
+          resolve();
+        }, 30);
+      });
+      initWaited += 30;
+    }
+    if (this.surfaceId.length > 0 && player.state === 'initialized') {
       try {
         player.surfaceId = this.surfaceId;
-        PlaybackLog.info('surface.bind', 'late');
+        PlaybackLog.info('surface.bind', 'ok');
       } catch (err) {
         PlaybackLog.warn('surface.bind.fail', PlayerService.errText(err));
       }
+    } else {
+      PlaybackLog.warn('surface.bind.skip', 'state=' + player.state + ' waited=' + initWaited);
     }
     try {
       await player.prepare();
@@ -498,6 +645,31 @@ export class PlayerService {
       await player.prepare();
     }
     if (serial !== this.serial || this.released) {
+      return;
+    }
+    // prepare() 的 Promise 与 state=prepared 事件之间可能有极短竞态：等到 prepared 再做动态设置/seek，
+    // 否则倍速/音量/缩放/seek 会触发 5400102 的 error 事件，被误判成播放失败。
+    let prepWaited: number = 0;
+    while (player.state !== 'prepared' && prepWaited < 2500 &&
+      serial === this.serial && !this.released) {
+      await new Promise<void>((resolve: () => void) => {
+        setTimeout(() => {
+          resolve();
+        }, 20);
+      });
+      prepWaited += 20;
+    }
+    if (prepWaited > 0) {
+      PlaybackLog.info('prepare.wait', 'ms=' + prepWaited + ' state=' + player.state);
+    }
+    if (player.state !== 'prepared' && player.state !== 'playing' &&
+      player.state !== 'paused' && player.state !== 'completed') {
+      // 慢网下 prepare 的 Promise 可能早于状态事件：此时不做倍速/缩放/seek，等 videoSizeChange 后再补。
+      PlaybackLog.warn('prepare.wait.timeout', 'state=' + player.state);
+      this.onPrepared();
+      if (autoPlay) {
+        await player.play();
+      }
       return;
     }
     this.applyDynamic(player);
@@ -550,6 +722,16 @@ export class PlayerService {
     });
   }
 
+  /** 是否为「状态不满足」类瞬时操作错误（5400102 / Operate Not Permit / unsupport），不应作为播放失败。 */
+  private static isTransientOperationError(code: number, message: string): boolean {
+    if (code === 5400102) {
+      return true;
+    }
+    const text: string = message.toLowerCase();
+    return text.indexOf('operate not permit') >= 0 || text.indexOf('unsupport') >= 0 ||
+      text.indexOf('not support') >= 0 || text.indexOf('not allowed') >= 0;
+  }
+
   private applyDynamic(player: media.AVPlayer): void {
     try {
       this.applySpeed(player);
@@ -558,6 +740,48 @@ export class PlayerService {
     try {
       this.applyVolume(player);
     } catch (err) {
+    }
+    this.applyScale(player);
+  }
+
+  /**
+   * 画面比例。播放页会按视频宽高比精确设置 XComponent 的尺寸：
+   * - 视频尺寸已知时 surface 宽高比 == 视频宽高比（cover 为等比放大后裁切的矩形），FIT 不会变形；
+   * - 尺寸未知时 surface 仍是全屏：用 SCALED_ASPECT 保持比例兜底，只有「拉伸」才用 FIT。
+   * 「全屏沉浸（cover）」只对竖屏视频生效，横屏视频回退为适应（不裁切）。
+   */
+  private applyScale(player: media.AVPlayer): void {
+    const mode: string = UserPrefs.videoScale();
+    const known: boolean = this.videoWidth > 0 && this.videoHeight > 0;
+    const landscape: boolean = known && this.videoWidth > this.videoHeight;
+    const effective: string = mode === 'cover' && landscape ? 'contain' : mode;
+    try {
+      if (!known) {
+        player.videoScaleType = effective === 'fill'
+          ? media.VideoScaleType.VIDEO_SCALE_TYPE_FIT
+          : media.VideoScaleType.VIDEO_SCALE_TYPE_SCALED_ASPECT;
+      } else {
+        player.videoScaleType = media.VideoScaleType.VIDEO_SCALE_TYPE_FIT;
+      }
+      PlaybackLog.info('scale.type', effective + (known ? '/geometry' : '/fallback'));
+    } catch (err) {
+      PlaybackLog.warn('scale.type.fail', PlayerService.errText(err));
+    }
+  }
+
+  /**
+   * 设置页切换「视频比例」后立即生效。
+   * videoScaleType 只允许在 prepared / playing / paused / completed 状态写入，
+   * 其它状态不处理，等 prepare 完成后的 applyDynamic 兜底。
+   */
+  refreshVideoScale(): void {
+    const player = this.syncPlayer();
+    if (player === undefined) {
+      return;
+    }
+    const state: string = player.state;
+    if (state === 'prepared' || state === 'playing' || state === 'paused' || state === 'completed') {
+      this.applyScale(player);
     }
   }
 
@@ -737,6 +961,8 @@ export class PlayerService {
     this.saveHistory(true, false);
     this.released = true;
     this.serial++;
+    this.videoWidth = 0;
+    this.videoHeight = 0;
     this.stopProxy();
     const player = this.player;
     this.player = undefined;
