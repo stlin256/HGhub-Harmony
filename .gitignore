@@ -5,6 +5,7 @@ node_modules/
 # 构建产物
 dist/
 dist-ssr/
+test-results/
 src-tauri/target/
 src-tauri/gen/
 *.local
@@ -27,3 +28,6 @@ Thumbs.db
 
 # API
 docs/API.md
+
+# Agent instructions (local)
+AGENTS.md
