@@ -26,6 +26,20 @@ Thumbs.db
 .env
 .env.*
 
+# HarmonyOS（本机私有配置与构建产物）
+harmony/build-profile.json5
+harmony/local.properties
+harmony/**/build/
+harmony/**/.hvigor/
+harmony/**/oh_modules/
+harmony/**/.preview/
+harmony/**/.cxx/
+harmony/**/node_modules/
+scripts/harmony/.local/
+*.p7b
+*.cer
+*.csr
+
 # API
 docs/API.md
 

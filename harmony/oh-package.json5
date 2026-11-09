@@ -1,0 +1,11 @@
+{
+  "modelVersion": "6.0.0",
+  "name": "hghub-harmony",
+  "version": "2.0.0",
+  "description": "HGhub HarmonyOS native client",
+  "main": "",
+  "author": "",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "dependencies": {},
+  "devDependencies": {}
+}
