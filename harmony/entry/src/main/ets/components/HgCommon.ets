@@ -116,6 +116,11 @@ export struct HgSkeletonGrid {
   @Prop dark: boolean = true;
   @Prop count: number = 6;
   @Prop columns: number = 2;
+  @State pulse: number = 0.45;
+
+  aboutToAppear(): void {
+    this.pulse = 1;
+  }
 
   build() {
     Grid() {
@@ -128,18 +133,24 @@ export struct HgSkeletonGrid {
                 .aspectRatio(0.75)
                 .backgroundColor(HgColor.skeletonBase(this.dark))
                 .borderRadius(HgRadius.row)
+                .opacity(this.pulse)
+                .animation({ duration: 900, curve: Curve.EaseInOut, iterations: -1, playMode: PlayMode.Alternate })
               Column()
                 .width('70%')
                 .height(HgFont.micro)
                 .backgroundColor(HgColor.skeletonBase(this.dark))
                 .borderRadius(4)
                 .margin({ top: HgSpace.s })
+                .opacity(this.pulse * 0.9)
+                .animation({ duration: 900, curve: Curve.EaseInOut, iterations: -1, playMode: PlayMode.Alternate })
               Column()
                 .width('40%')
                 .height(HgFont.nano)
                 .backgroundColor(HgColor.skeletonBase(this.dark))
                 .borderRadius(4)
                 .margin({ top: HgSpace.xs })
+                .opacity(this.pulse * 0.8)
+                .animation({ duration: 900, curve: Curve.EaseInOut, iterations: -1, playMode: PlayMode.Alternate })
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
