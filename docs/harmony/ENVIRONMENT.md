@@ -5,13 +5,17 @@
 > 本文命令均为本机实测；未能在本机验证的条目标注「未验证 / 需真机」。
 > 配套脚本：[env.ps1](../../scripts/harmony/env.ps1)、[build.ps1](../../scripts/harmony/build.ps1)、
 > [install.ps1](../../scripts/harmony/install.ps1)、[device.ps1](../../scripts/harmony/device.ps1)、
-> [verify-signing.ps1](../../scripts/harmony/verify-signing.ps1)、[local-sign.ps1](../../scripts/harmony/local-sign.ps1)。
+> [verify-signing.ps1](../../scripts/harmony/verify-signing.ps1)、[local-sign.ps1](../../scripts/harmony/local-sign.ps1)、
+> [preflight.ps1](../../scripts/harmony/preflight.ps1)。
 
 ---
 
 ## 0. 快速开始（TL;DR）
 
 ```powershell
+# 0) 真机就绪自检（工具链 / 构建产物 / 签名 profile / 设备连接，一条命令出矩阵）
+.\scripts\harmony\preflight.ps1
+
 # 1) 环境（设 NODE_HOME / JAVA_HOME / DEVECO_SDK_HOME / PATH）
 . .\scripts\harmony\env.ps1
 
@@ -30,7 +34,9 @@
 .\scripts\harmony\device.ps1 clear-data
 ```
 
-**当前阻塞项（唯一必须用户介入）：** 本机 `~/.ohos/config` 里没有 `io.github.stlin256.hghub` 的签名 profile，
+真机完整调试 Runbook、逐项验收清单与证据采集方式见 [DEVICE-DEBUG.md](DEVICE-DEBUG.md)。
+
+**当前阻塞项（唯一必须用户介入）：** 本机 `~/.ohos/config` 里没有 `io.github.stlin256.hghub` 的签名 profile（`preflight.ps1` 会实时报告），
 现有 profile 全部绑定到别的应用（详见 §4），直接配置签名会报 `00303074`。
 需要用 DevEco Studio 登录华为账号点一次「自动签名」为 hghub 生成 debug 签名材料（§4.4），之后 CLI 全流程可长期复用。
 
