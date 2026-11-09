@@ -41,6 +41,10 @@ struct Index {
     UiBus.openSettings = () => {
       this.navStack.pushPathByName(ROUTE_SETTINGS, null);
     };
+    UiBus.switchTab = (index: number) => {
+      this.currentTab = index;
+      this.navStack.clear();
+    };
     UiBus.toast = (message: string) => {
       promptAction.showToast({ message: message, duration: 2000 });
     };
