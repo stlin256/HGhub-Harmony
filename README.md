@@ -65,6 +65,7 @@ HGhub Harmony 是 [Minireel/HGhub](https://github.com/Minireel/HGhub) 的 **Harm
 
 ```
 . ./scripts/harmony/env.ps1        # 探测 DevEco 并设置 NODE_HOME / JAVA_HOME / DEVECO_SDK_HOME / PATH
+./scripts/harmony/preflight.ps1    # 真机就绪自检（工具链/构建产物/签名 profile/设备连接）
 ./scripts/harmony/build.ps1        # 构建 HAP（未配置签名时产出 unsigned，可先验证编译）
 ./scripts/harmony/install.ps1      # 已配置签名 + 已连接真机时：安装并启动
 ./scripts/harmony/device.ps1 log   # 日志；另有 screenshot / clear-data / uninstall
@@ -77,7 +78,8 @@ HGhub Harmony 是 [Minireel/HGhub](https://github.com/Minireel/HGhub) 的 **Harm
 **文档**
 
 - [实施 SPEC](docs/harmony/SPEC.md) · [迁移分析](docs/harmony/PORTING-ANALYSIS.md) · [接口契约](docs/harmony/API-CONTRACT.md)
-- [原生 UI/UX 设计规范](docs/harmony/DESIGN.md) · [鸿蒙平台能力指南](docs/harmony/HARMONY-GUIDE.md) · [环境与签名/真机调试](docs/harmony/ENVIRONMENT.md)
+- [原生 UI/UX 设计规范](docs/harmony/DESIGN.md) · [鸿蒙平台能力指南](docs/harmony/HARMONY-GUIDE.md)
+- [环境与签名](docs/harmony/ENVIRONMENT.md) · [真机调试 Runbook 与 P0 验收清单](docs/harmony/DEVICE-DEBUG.md)
 
 ## 当前进度
 
