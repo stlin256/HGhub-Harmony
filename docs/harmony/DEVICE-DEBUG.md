@@ -85,7 +85,8 @@
   - `5411001/5400106` 等：格式/流问题，保留日志。
 - 若直连失败：将 `PlayerService` 的 `useLocalProxy` 置为 true（或按 proxy-fallback 实现接入），重启应用复测，界面/页面无需改动。
 
-### 4.2 本地代理（Plan C，兜底，默认关闭）
+### 4.2 本地代理（Plan C，兜底，默认关闭；已实现）
+- 代码：`player/LocalProxy.ets`（127.0.0.1 TCPSocketServer）+ `player/PlaylistRewrite.ets`（m3u8 改写）；`PlayerService.useLocalProxy` 打开即可（默认 false，直连无改动）。离线单测已通过（改写用例对齐 Rust 原测试；代理 12 组断言）。
 - 代理在 `127.0.0.1:随机端口` 起 HTTP 服务，`/hls?u=` 改写播放列表、`/seg?u=` 转发分片/密钥；向上游请求带 Referer/UA。
 - 验证点：代理是否成功启动（HGPlay 日志）、AVPlayer 是否接受 `http://127.0.0.1:<port>/hls?u=...`、Range/206 是否正常、切集是否复用同一代理端口。
 - 若 AVPlayer 拒绝明文本地地址：确认 `network_config.json` 已随 HAP 打包（解包 HAP 检查 `resources/base/profile/network_config.json`）。
