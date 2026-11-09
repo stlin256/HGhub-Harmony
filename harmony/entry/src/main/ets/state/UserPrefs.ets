@@ -19,6 +19,8 @@ export const K_SEARCH_HIST = 'hgSearchHistJson';
 export const K_USER = 'hgUserJson';
 export const K_TOP_INSET = 'hgTopInset';
 export const K_BOTTOM_INSET = 'hgBottomInset';
+export const K_APP_ACTIVE = 'hgAppActive';
+export const K_SYSTEM_DARK = 'hgSystemDark';
 
 const HISTORY_MAX: number = 80;
 const SEARCH_HIST_MAX: number = 12;
@@ -85,6 +87,14 @@ export class UserPrefs {
     AppStorage.setOrCreate<string>(K_HISTORY, Prefs.getString('history', '[]'));
     AppStorage.setOrCreate<string>(K_SEARCH_HIST, Prefs.getString('search_hist', '[]'));
     AppStorage.setOrCreate<string>(K_USER, Prefs.getString('user', ''));
+    AppStorage.setOrCreate<boolean>(K_SYSTEM_DARK, systemDark);
+    AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
+  }
+
+  /** 系统当前是否深色（用于「跟随系统」主题）。 */
+  static systemDark(): boolean {
+    const value = AppStorage.get<boolean>(K_SYSTEM_DARK);
+    return value === undefined ? true : value;
   }
 
   private static resolveDark(mode: string, systemDark: boolean): boolean {
@@ -114,6 +124,7 @@ export class UserPrefs {
   }
 
   static systemDarkChanged(systemDark: boolean): void {
+    AppStorage.setOrCreate<boolean>(K_SYSTEM_DARK, systemDark);
     if (UserPrefs.themeMode() === 'system') {
       AppStorage.setOrCreate<boolean>(K_DARK, systemDark);
     }

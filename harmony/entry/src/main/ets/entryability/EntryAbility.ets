@@ -5,7 +5,7 @@ import { AppContext } from '../services/AppContext';
 import { Prefs } from '../services/Prefs';
 import { Session } from '../services/Session';
 import { Lines } from '../services/Lines';
-import { K_BOTTOM_INSET, K_TOP_INSET, UserPrefs } from '../state/UserPrefs';
+import { K_APP_ACTIVE, K_BOTTOM_INSET, K_TOP_INSET, UserPrefs } from '../state/UserPrefs';
 
 const DOMAIN = 0x0000;
 const TAG = 'HGhub';
@@ -14,8 +14,17 @@ export default class EntryAbility extends UIAbility {
   onCreate(): void {
     AppContext.init(this.context);
     const systemDark: boolean = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
     this.initServices(systemDark);
     hilog.info(DOMAIN, TAG, 'EntryAbility created');
+  }
+
+  onForeground(): void {
+    AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
+  }
+
+  onBackground(): void {
+    AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, false);
   }
 
   private async initServices(systemDark: boolean): Promise<void> {

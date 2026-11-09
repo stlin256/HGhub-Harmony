@@ -1,0 +1,356 @@
+import { Api } from '../../services/Api';
+import { Comment, CommentPage } from '../../models/Types';
+import { UserPrefs } from '../../state/UserPrefs';
+import { UiBus } from '../../services/UiBus';
+import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../../design/HgTokens';
+
+const PAGE_SIZE: number = 20;
+
+function avatarText(nickname: string): string {
+  if (nickname.length === 0) {
+    return '?';
+  }
+  return nickname.substring(0, 1).toUpperCase();
+}
+
+function avatarColor(comment: Comment): string {
+  const raw: string = comment.avatar_color === undefined || comment.avatar_color === null
+    ? '' : comment.avatar_color;
+  if (raw.startsWith('#') && (raw.length === 7 || raw.length === 9)) {
+    return raw;
+  }
+  return '#FF3A6A8A';
+}
+
+/**
+ * 评论面板：首屏分页 + 加载更多 + 发送（未登录走登录 Sheet）。
+ * 发送成功只做轻提示，不把"待审核"评论插入列表，避免与实际状态不符。
+ */
+@Component
+export struct CommentsSheet {
+  @Prop videoId: number = 0;
+  @Prop ep: number = 1;
+  @Prop kind: string = 'video';
+  @Prop dark: boolean = true;
+
+  @State private items: Comment[] = [];
+  @State private page: number = 1;
+  @State private pages: number = 1;
+  @State private total: number = 0;
+  @State private loading: boolean = true;
+  @State private loadingMore: boolean = false;
+  @State private failed: boolean = false;
+  @State private sending: boolean = false;
+  @State private draft: string = '';
+
+  aboutToAppear(): void {
+    this.reload();
+  }
+
+  private async reload(): Promise<void> {
+    this.loading = true;
+    this.failed = false;
+    this.page = 1;
+    try {
+      const result: CommentPage = this.kind === 'post'
+        ? await Api.postComments(this.videoId, 1, PAGE_SIZE)
+        : await Api.comments(this.videoId, this.ep, 1, PAGE_SIZE);
+      this.items = result.items === undefined || result.items === null ? [] : result.items;
+      this.total = result.pagination === undefined || result.pagination === null ? this.items.length
+        : result.pagination.total;
+      this.pages = result.pagination === undefined || result.pagination === null ? 1
+        : result.pagination.pages;
+      this.loading = false;
+    } catch (err) {
+      this.loading = false;
+      this.failed = true;
+    }
+  }
+
+  private async loadMore(): Promise<void> {
+    if (this.loadingMore || this.page >= this.pages) {
+      return;
+    }
+    this.loadingMore = true;
+    try {
+      const next = this.page + 1;
+      const result: CommentPage = this.kind === 'post'
+        ? await Api.postComments(this.videoId, next, PAGE_SIZE)
+        : await Api.comments(this.videoId, this.ep, next, PAGE_SIZE);
+      const list: Comment[] = result.items === undefined || result.items === null ? [] : result.items;
+      const merged: Comment[] = this.items.slice();
+      for (let i = 0; i < list.length; i++) {
+        merged.push(list[i]);
+      }
+      this.items = merged;
+      this.page = next;
+      if (result.pagination !== undefined && result.pagination !== null) {
+        this.total = result.pagination.total;
+        this.pages = result.pagination.pages;
+      }
+    } catch (err) {
+      UiBus.toast('评论加载失败，请稍后重试');
+    }
+    this.loadingMore = false;
+  }
+
+  private async send(): Promise<void> {
+    const text = this.draft.trim();
+    if (text.length === 0 || this.sending) {
+      return;
+    }
+    if (!UserPrefs.loggedIn()) {
+      UiBus.openLogin();
+      UiBus.toast('请先登录后再评论');
+      return;
+    }
+    this.sending = true;
+    try {
+      if (this.kind === 'post') {
+        await Api.commentSend(this.videoId, 1, text, 0);
+      } else {
+        await Api.commentSend(this.videoId, this.ep, text, 0);
+      }
+      this.draft = '';
+      UiBus.toastOk('评论已提交，审核通过后展示');
+    } catch (err) {
+      UiBus.toast('评论发送失败，请稍后重试');
+    }
+    this.sending = false;
+  }
+
+  private headerSubText(): string {
+    const suffix = this.kind === 'post' ? '' : ' · 第 ' + this.ep + ' 集';
+    if (this.total > 0) {
+      return '共 ' + this.total + ' 条' + suffix;
+    }
+    return '暂无' + suffix;
+  }
+
+  @Builder
+  CommentRow(comment: Comment) {
+    Row({ space: HgSpace.m }) {
+      Stack() {
+        Row()
+          .width(32)
+          .height(32)
+          .backgroundColor(avatarColor(comment))
+          .borderRadius(16)
+        Text(avatarText(comment.nickname))
+          .fontSize(HgFont.secondary)
+          .fontWeight(HgFont.weightMedium)
+          .fontColor('#FFFFFFFF')
+      }
+      .width(32)
+      .height(32)
+
+      Column({ space: HgSpace.xxs }) {
+        Row({ space: HgSpace.s }) {
+          Text(comment.nickname.length === 0 ? '匿名用户' : comment.nickname)
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.textSecondary(this.dark))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(comment.time)
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+        }
+        .width('100%')
+
+        Text(comment.text)
+          .fontSize(HgFont.body)
+          .lineHeight(HgFont.lineBody)
+          .fontColor(HgColor.textPrimary(this.dark))
+          .width('100%')
+          .maxLines(6)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        Row({ space: HgSpace.xs }) {
+          SymbolGlyph($r('sys.symbol.heart'))
+            .fontSize(HgFont.micro)
+            .fontColor([HgColor.textTertiary(this.dark)])
+          Text(comment.like_count > 0 ? String(comment.like_count) : '')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+          if (comment.reply_count > 0) {
+            Text(comment.reply_count + ' 条回复')
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.textTertiary(this.dark))
+              .margin({ left: HgSpace.s })
+          }
+        }
+        .width('100%')
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .padding({ top: HgSpace.m, bottom: HgSpace.m })
+    .alignItems(VerticalAlign.Top)
+  }
+
+  @Builder
+  InputBar() {
+    Row({ space: HgSpace.s }) {
+      TextInput({ text: this.draft, placeholder: '说点什么…' })
+        .layoutWeight(1)
+        .height(HgSize.control)
+        .fontSize(HgFont.body)
+        .fontColor(HgColor.textPrimary(this.dark))
+        .placeholderColor(HgColor.textTertiary(this.dark))
+        .backgroundColor(HgColor.surface2(this.dark))
+        .borderRadius(22)
+        .padding({ left: HgSpace.m, right: HgSpace.m })
+        .onChange((value: string) => {
+          this.draft = value;
+        })
+        .onSubmit(() => {
+          this.send();
+        })
+      Button({
+        type: ButtonType.Circle,
+        stateEffect: true
+      }) {
+        if (this.sending) {
+          LoadingProgress()
+            .width(HgFont.section)
+            .height(HgFont.section)
+            .color(HgColor.onAccent(this.dark))
+        } else {
+          SymbolGlyph($r('sys.symbol.arrowshape_turn_up_right'))
+            .fontSize(HgFont.section)
+            .fontColor([this.draft.trim().length > 0 ? HgColor.onAccent(this.dark)
+              : HgColor.textTertiary(this.dark)])
+        }
+      }
+      .width(HgSize.control)
+      .height(HgSize.control)
+      .backgroundColor(this.draft.trim().length > 0 ? HgColor.accent(this.dark)
+        : HgColor.surface3(this.dark))
+      .onClick(() => {
+        this.send();
+      })
+      .accessibilityText('发送评论')
+    }
+    .width('100%')
+    .padding({ top: HgSpace.s, bottom: HgSpace.s })
+  }
+
+  build() {
+    Column() {
+      Row({ space: HgSpace.s }) {
+        Text('评论')
+          .fontSize(HgFont.section)
+          .fontWeight(HgFont.weightBold)
+          .fontColor(HgColor.textPrimary(this.dark))
+        Text(this.headerSubText())
+          .fontSize(HgFont.caption)
+          .fontColor(HgColor.textTertiary(this.dark))
+      }
+      .width('100%')
+      .height(HgSize.topBar)
+
+      if (this.loading) {
+        Column({ space: HgSpace.m }) {
+          ForEach([0, 1, 2, 3, 4], (index: number) => {
+            Row({ space: HgSpace.m }) {
+              Row()
+                .width(32)
+                .height(32)
+                .backgroundColor(HgColor.skeletonBase(this.dark))
+                .borderRadius(16)
+              Column({ space: HgSpace.s }) {
+                Row()
+                  .width('40%')
+                  .height(HgFont.caption)
+                  .backgroundColor(HgColor.skeletonBase(this.dark))
+                  .borderRadius(4)
+                Row()
+                  .width('86%')
+                  .height(HgFont.body)
+                  .backgroundColor(HgColor.skeletonBase(this.dark))
+                  .borderRadius(4)
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+          }, (index: number) => index.toString())
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .padding({ top: HgSpace.m })
+      } else if (this.failed) {
+        Column({ space: HgSpace.m }) {
+          Text('评论加载失败')
+            .fontSize(HgFont.body)
+            .fontColor(HgColor.textSecondary(this.dark))
+          Button('重试')
+            .height(HgSize.secondaryAction)
+            .fontSize(HgFont.body)
+            .fontColor(HgColor.onAccent(this.dark))
+            .backgroundColor(HgColor.accent(this.dark))
+            .borderRadius(HgRadius.chip)
+            .onClick(() => {
+              this.reload();
+            })
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+      } else if (this.items.length === 0) {
+        Column({ space: HgSpace.s }) {
+          Text('还没有评论，来抢第一个沙发')
+            .fontSize(HgFont.rowTitle)
+            .fontWeight(HgFont.weightMedium)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text('友善发言，一起讨论剧情')
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.textTertiary(this.dark))
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+      } else {
+        List() {
+          ForEach(this.items, (comment: Comment) => {
+            ListItem() {
+              this.CommentRow(comment)
+            }
+          }, (comment: Comment) => String(comment.id))
+
+          ListItem() {
+            Column() {
+              if (this.page < this.pages) {
+                Button(this.loadingMore ? '加载中…' : '查看更多评论')
+                  .height(HgSize.secondaryAction)
+                  .fontSize(HgFont.secondary)
+                  .fontColor(HgColor.accent(this.dark))
+                  .backgroundColor(Color.Transparent)
+                  .onClick(() => {
+                    this.loadMore();
+                  })
+              } else {
+                Text('— 到底啦 —')
+                  .fontSize(HgFont.micro)
+                  .fontColor(HgColor.textTertiary(this.dark))
+                  .padding({ top: HgSpace.m, bottom: HgSpace.m })
+              }
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.Center)
+          }
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .divider({ strokeWidth: 0.5, color: HgColor.hairline(this.dark), startMargin: 44 })
+        .scrollBar(BarState.Off)
+      }
+
+      this.InputBar()
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ left: HgSpace.sheetInset, right: HgSpace.sheetInset })
+  }
+}
