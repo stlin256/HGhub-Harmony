@@ -415,6 +415,8 @@ export struct ProfilePage {
         url: item.cover,
         dark: this.dark,
         radius: 0,
+        decodeWidth: 360,
+        decodeHeight: 480,
         coverWidth: '100%',
         coverHeight: '100%'
       })
@@ -579,13 +581,14 @@ export struct ProfilePage {
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .textAlign(TextAlign.Center)
-            .margin({ top: HgSpace.l, bottom: HgSpace.xxl })
+            .margin({ top: HgSpace.l, bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.xl })
         }
         .width('100%')
         .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m })
       }
       .layoutWeight(1)
       .width('100%')
+      .align(Alignment.Top)
       .scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring)
     }

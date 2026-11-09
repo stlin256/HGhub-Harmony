@@ -20,13 +20,28 @@ export struct HgPosterFlow {
   @Prop refreshing: boolean = false;
   @Prop emptyTitle: string = '暂无内容';
   @Prop emptyDescription: string = '';
+  /**
+   * 底部预留高度（Tab 页沉浸底栏用：调用方传 HgSize.tabBarFloating + bottomInset；NavDestination 页保持 0）。
+   * 该值合并进 WaterFlow 自身的底部 padding（不再加在根容器上），内容因此可以滚到悬浮底栏下方，
+   * 由毛玻璃透出；同时最后一行仍留有足够空间，不会被底栏/FotterPill 遮挡。
+   */
+  @Prop bottomPadding: number = 0;
   onOpen: (index: number) => void = () => {};
   onLoadMore: () => void = () => {};
   onRefresh: () => void = () => {};
   onRetry: () => void = () => {};
 
+  /** 底部状态是否可见（加载更多/失败/到底）。 */
+  private footerVisible(): boolean {
+    return this.loadingMore || this.errorText.length > 0 || (this.finished && this.hasData);
+  }
+
+  /**
+   * 底部状态胶囊：浮在列表底部、不再作为固定行占位。
+   * 之前 FooterRow 固定在 WaterFlow 之外，空闲时留下一整条黑色空带并压掉可视高度。
+   */
   @Builder
-  FooterRow() {
+  FooterPill() {
     Row() {
       if (this.loadingMore) {
         LoadingProgress()
@@ -41,19 +56,22 @@ export struct HgPosterFlow {
         Text('加载失败，点击重试')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
-          .padding(HgSpace.m)
+          .padding({ left: HgSpace.s, right: HgSpace.s })
           .onClick(() => {
             this.onLoadMore();
           })
-      } else if (this.finished && this.hasData) {
+      } else {
         Text('— 已经到底啦 —')
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
       }
     }
-    .width('100%')
-    .height(HgSize.topBar)
-    .justifyContent(FlexAlign.Center)
+    .height(34)
+    .padding({ left: HgSpace.l, right: HgSpace.l })
+    .backgroundColor(this.dark ? '#CC1B1D23' : '#CCFFFFFF')
+    .borderRadius(HgRadius.chip)
+    // 胶囊本身浮在列表之上；bottomPadding 让它避开悬浮底栏，仍能被看见。
+    .margin({ bottom: HgSpace.s + this.bottomPadding })
   }
 
   build() {
@@ -69,6 +87,7 @@ export struct HgPosterFlow {
           }
           .width('100%')
           .layoutWeight(1)
+          .align(Alignment.Top)
           .scrollBar(BarState.Off)
         } else if (this.errorText.length > 0) {
           Column() {
@@ -102,8 +121,9 @@ export struct HgPosterFlow {
           .padding(HgSpace.xxl)
         }
       } else {
-        Refresh({ refreshing: this.refreshing }) {
-          WaterFlow() {
+        Stack({ alignContent: Alignment.Bottom }) {
+          Refresh({ refreshing: this.refreshing }) {
+            WaterFlow() {
             LazyForEach(this.source, (item: VideoCard, index: number) => {
               FlowItem() {
                 HgPosterCard({
@@ -121,25 +141,38 @@ export struct HgPosterFlow {
               .width('100%')
             }, (item: VideoCard) => item.id.toString())
           }
-          .columnsTemplate('1fr 1fr')
-          .columnsGap(HgSpace.s)
-          .rowsGap(HgSpace.m)
-          .cachedCount(6)
-          .scrollBar(BarState.Off)
-          .edgeEffect(EdgeEffect.Spring)
-          .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m })
+            .columnsTemplate('1fr 1fr')
+            .columnsGap(HgSpace.s)
+            .rowsGap(HgSpace.m)
+            .cachedCount(6)
+            .scrollBar(BarState.Off)
+            .edgeEffect(EdgeEffect.Spring)
+            .padding({
+              left: HgSpace.pageInset,
+              right: HgSpace.pageInset,
+              top: HgSpace.m,
+              // 沉浸底栏：预留量并入列表内边距，列表一直滚到悬浮底栏下面（毛玻璃透出），
+              // 最后一屏又能完整露出；footer 胶囊可见时多留 44vp 给它让位。
+              bottom: (this.footerVisible() ? 44 : HgSpace.m) + this.bottomPadding
+            })
+            .width('100%')
+            .height('100%')
+            .onReachEnd(() => {
+              this.onLoadMore();
+            })
+          }
           .width('100%')
           .height('100%')
-          .onReachEnd(() => {
-            this.onLoadMore();
+          .refreshOffset(64)
+          .onRefreshing(() => {
+            this.onRefresh();
           })
+          if (this.footerVisible()) {
+            this.FooterPill()
+          }
         }
         .layoutWeight(1)
-        .refreshOffset(64)
-        .onRefreshing(() => {
-          this.onRefresh();
-        })
-        this.FooterRow()
+        .width('100%')
       }
     }
     .width('100%')

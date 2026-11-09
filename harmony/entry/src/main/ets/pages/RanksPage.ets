@@ -2,7 +2,9 @@ import { Api } from '../services/Api';
 import { RankItem, RankResult } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgTopBar } from '../components/HgCommon';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgListSource } from '../components/browse/HgListSource';
+import { HgColor, HgDuration, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { K_LINE_BASE } from '../services/Lines';
 import { K_BOTTOM_INSET, K_DARK } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER } from '../state/Routes';
 import { fmt } from '../utils/Format';
@@ -19,50 +21,447 @@ const RANK_TABS: RankTab[] = [
   { key: 'potential', label: '潜力榜', desc: '按潜力值排序' }
 ];
 
-/** 排行榜：三分段切换 + 前三名大卡 + 指标归一化进度条的列表。 */
+/** 榜单行的预计算视图：数值格式化 / 进度条宽度都在数据加载后算好，build 里不再 toFixed。 */
+interface RankRowView {
+  key: string;
+  rank: number;
+  videoId: number;
+  title: string;
+  cover: string;
+  tagsText: string;
+  metricLabel: string;
+  metricText: string;
+  barWidth: string;
+}
+
+/** 单个榜单的缓存：前三名 + 第 4 名之后的行，切榜时直接回填，避免整页骨架与重建。 */
+class RankCache {
+  top: RankRowView[] = [];
+  rows: RankRowView[] = [];
+}
+
+/** 第一名大卡：封面 + 底部 60% 渐变蒙版 + 左上角名次徽标（蒙版在封面底部，避免顶部硬边脏块）。 */
+@Component
+struct RankPodiumBig {
+  @Prop rank: number = 1;
+  @Prop cover: string = '';
+  @Prop title: string = '';
+  @Prop dark: boolean = true;
+  onOpen: () => void = () => {};
+
+  @Builder
+  RankBadge() {
+    Stack() {
+      Text(this.rank.toString())
+        .fontSize(HgFont.cardTitle)
+        .fontWeight(HgFont.weightBold)
+        .fontColor(HgColor.onAccent(this.dark))
+    }
+    .width(28)
+    .height(28)
+    .borderRadius(14)
+    .backgroundColor(HgColor.accent(this.dark))
+  }
+
+  build() {
+    Column({ space: HgSpace.s }) {
+      Stack({ alignContent: Alignment.TopStart }) {
+        HgAsyncCover({
+          url: this.cover,
+          dark: this.dark,
+          radius: 0,
+          coverWidth: '100%',
+          coverHeight: '100%',
+          decodeWidth: 480,
+          decodeHeight: 640
+        })
+        Column()
+          .width('100%')
+          .height('100%')
+          .linearGradient({
+            angle: 180,
+            colors: [['#00000000', 0.38], ['#99000000', 0.72], ['#CC000000', 1.0]]
+          })
+        this.RankBadge()
+      }
+      .width(120)
+      .height(160)
+      .borderRadius(HgRadius.group)
+      .clip(true)
+
+      Text(this.title)
+        .width(120)
+        .fontSize(HgFont.body)
+        .fontWeight(HgFont.weightMedium)
+        .fontColor(HgColor.textPrimary(this.dark))
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width(120)
+    .alignItems(HorizontalAlign.Start)
+    .onClick(() => {
+      this.onOpen();
+    })
+  }
+}
+
+/** 第 2/3 名小卡：徽标 + 48x64 封面 + 标题/指标。 */
+@Component
+struct RankPodiumSmall {
+  @Prop rank: number = 2;
+  @Prop cover: string = '';
+  @Prop title: string = '';
+  @Prop metricLabel: string = '';
+  @Prop metricText: string = '';
+  @Prop dark: boolean = true;
+  onOpen: () => void = () => {};
+
+  @Builder
+  RankBadge() {
+    Stack() {
+      Text(this.rank.toString())
+        .fontSize(HgFont.cardTitle)
+        .fontWeight(HgFont.weightBold)
+        .fontColor(HgColor.onAccent(this.dark))
+    }
+    .width(24)
+    .height(24)
+    .borderRadius(12)
+    .backgroundColor(HgColor.accent(this.dark))
+  }
+
+  build() {
+    Row({ space: HgSpace.s }) {
+      this.RankBadge()
+      HgAsyncCover({
+        url: this.cover,
+        dark: this.dark,
+        radius: HgRadius.inline,
+        coverWidth: 48,
+        coverHeight: 64,
+        decodeWidth: 200,
+        decodeHeight: 260
+      })
+      Column({ space: 2 }) {
+        Text(this.title)
+          .width('100%')
+          .fontSize(HgFont.secondary)
+          .fontWeight(HgFont.weightMedium)
+          .fontColor(HgColor.textPrimary(this.dark))
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.metricLabel + ' ' + this.metricText)
+          .fontSize(HgFont.micro)
+          .fontColor(HgColor.textTertiary(this.dark))
+          .maxLines(1)
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height(76)
+    .onClick(() => {
+      this.onOpen();
+    })
+  }
+}
+
+/** 第 4 名之后的榜单行：名次 + 封面 + 标题/标签/指标条，水平内边距由外层 List 统一提供。 */
+@Component
+struct RankRowCard {
+  @Prop rank: number = 4;
+  @Prop cover: string = '';
+  @Prop title: string = '';
+  @Prop tagsText: string = '';
+  @Prop metricLabel: string = '';
+  @Prop metricText: string = '';
+  @Prop barWidth: string = '6%';
+  @Prop dark: boolean = true;
+  onOpen: () => void = () => {};
+
+  @Builder
+  RankBadge() {
+    Stack() {
+      if (this.rank <= 3) {
+        Text(this.rank.toString())
+          .fontSize(HgFont.cardTitle)
+          .fontWeight(HgFont.weightBold)
+          .fontColor(HgColor.onAccent(this.dark))
+      } else {
+        Text(this.rank.toString())
+          .fontSize(HgFont.pageTitle)
+          .fontWeight(HgFont.weightBold)
+          .fontColor(HgColor.textTertiary(this.dark))
+      }
+    }
+    .width(28)
+    .height(28)
+    .borderRadius(14)
+    .backgroundColor(this.rank <= 3 ? HgColor.accent(this.dark) : Color.Transparent)
+  }
+
+  build() {
+    Row({ space: HgSpace.m }) {
+      Column() {
+        this.RankBadge()
+      }
+      .width(28)
+
+      HgAsyncCover({
+        url: this.cover,
+        dark: this.dark,
+        radius: HgRadius.inline,
+        coverWidth: 56,
+        coverHeight: 74,
+        decodeWidth: 240,
+        decodeHeight: 320
+      })
+
+      Column({ space: 2 }) {
+        Text(this.title)
+          .width('100%')
+          .fontSize(HgFont.cardTitle)
+          .fontWeight(HgFont.weightMedium)
+          .fontColor(HgColor.textPrimary(this.dark))
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.tagsText)
+          .width('100%')
+          .fontSize(HgFont.micro)
+          .fontColor(HgColor.textTertiary(this.dark))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Row({ space: HgSpace.xs }) {
+          Text(this.metricLabel)
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(1)
+          Stack({ alignContent: Alignment.Start }) {
+            Column()
+              .width('100%')
+              .height(4)
+              .backgroundColor(HgColor.surface4(this.dark))
+              .borderRadius(2)
+            Column()
+              .width(this.barWidth)
+              .height(4)
+              .backgroundColor(HgColor.accent(this.dark))
+              .borderRadius(2)
+          }
+          .layoutWeight(1)
+          .height(4)
+          Text(this.metricText)
+            .fontSize(HgFont.caption)
+            .fontWeight(HgFont.weightMedium)
+            .fontColor(HgColor.accent(this.dark))
+            .maxLines(1)
+        }
+        .width('100%')
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height(84)
+    .padding({ left: HgSpace.m, right: HgSpace.m })
+    .backgroundColor(HgColor.surface1(this.dark))
+    .borderRadius(HgRadius.row)
+    .margin({ bottom: HgSpace.s })
+    .onClick(() => {
+      this.onOpen();
+    })
+  }
+}
+
+/**
+ * 排行榜：三分段切换 + 前三名大卡 + 指标归一化进度条的列表。
+ * 每个榜的数据/预计算行按 kind 缓存，切回已看过的榜立即渲染；首次加载才显示骨架，
+ * 无缓存切榜保留旧列表 + 轻量 loading，避免整页闪烁。
+ */
 @Component
 export struct RanksPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  @StorageProp(K_LINE_BASE) @Watch('onLineChanged') lineBase: string = '';
   @State kind: string = 'hot';
-  @State items: RankItem[] = [];
   @State loading: boolean = true;
+  @State switching: boolean = false;
   @State errorText: string = '';
   @State refreshing: boolean = false;
-  private maxMetric: number = 1;
+  @State topRows: RankRowView[] = [];
+  /** 分段控件实测宽度（vp）：用于计算滑动胶囊的宽度/偏移。 */
+  @State segWidth: number = 0;
+  /** 切榜时旧内容淡出→新内容淡入的透明度。 */
+  @State listOpacity: number = 1;
+  private restRows: RankRowView[] = [];
+  private source: HgListSource<RankRowView> = new HgListSource<RankRowView>();
   private loadSeq: number = 0;
+  private preloadSeq: number = 0;
+  private transitionSeq: number = 0;
+  private pageGone: boolean = false;
+  /** 当前列表里展示的是哪个榜（用于预加载落地时判断是否需要替换内容）。 */
+  private shownKind: string = '';
+  /** kind -> preloadSeq：标记三榜预加载中，切 TAB 时避免重复请求。 */
+  private inflightKinds: Map<string, number> = new Map<string, number>();
+  private cache: Map<string, RankCache> = new Map<string, RankCache>();
+  private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
-    this.load();
+    this.loading = true;
+    this.preloadAll();
   }
 
-  private async load(): Promise<void> {
-    const seq = ++this.loadSeq;
-    this.loading = true;
-    this.errorText = '';
+  aboutToDisappear(): void {
+    this.pageGone = true;
+    this.transitionSeq++;
+    this.preloadSeq++;
+  }
+
+  /**
+   * 一次性并行预加载三个榜（当前榜优先发起）：当前榜先落地先渲染，其余两榜后台补齐，
+   * 之后切换 TAB 直接命中 cache、无 loading。
+   */
+  private preloadAll(): void {
+    const seq = ++this.preloadSeq;
+    const order: string[] = [this.kind];
+    for (let i = 0; i < RANK_TABS.length; i++) {
+      if (RANK_TABS[i].key !== this.kind) {
+        order.push(RANK_TABS[i].key);
+      }
+    }
+    for (let i = 0; i < order.length; i++) {
+      this.preloadKind(seq, order[i]);
+    }
+  }
+
+  private async preloadKind(seq: number, kind: string): Promise<void> {
+    this.inflightKinds.set(kind, seq);
     try {
-      const res: RankResult = await Api.rank(this.kind);
+      const res: RankResult = await Api.rank(kind);
+      if (seq !== this.preloadSeq) {
+        return;
+      }
+      const items: RankItem[] = res.items !== undefined && res.items !== null ? res.items : [];
+      const cached: RankCache = this.buildCache(items);
+      this.cache.set(kind, cached);
+      if (this.kind !== kind) {
+        return;
+      }
+      this.errorText = '';
+      this.loading = false;
+      this.switching = false;
+      // 若列表展示的还是别的榜（无缓存切榜/首次进入），落地后替换；刷新场景不重复替换。
+      if (this.shownKind !== kind) {
+        this.applyKindData(cached);
+      }
+    } catch (err) {
+      if (seq === this.preloadSeq && this.kind === kind) {
+        this.errorText = (err as Error).message;
+        this.loading = false;
+        this.switching = false;
+      }
+    } finally {
+      if (this.inflightKinds.get(kind) === seq) {
+        this.inflightKinds.delete(kind);
+      }
+    }
+  }
+
+  /** 线路切换：所有榜单数据作废，清缓存后重新并行预加载三个榜。 */
+  onLineChanged(): void {
+    this.preloadSeq++;
+    this.loadSeq++;
+    this.transitionSeq++;
+    this.cache.clear();
+    this.inflightKinds.clear();
+    this.shownKind = '';
+    this.topRows = [];
+    this.restRows = [];
+    this.source.resetAll([]);
+    this.listOpacity = 1;
+    this.loading = true;
+    this.switching = false;
+    this.errorText = '';
+    this.refreshing = false;
+    this.preloadAll();
+  }
+
+  /** 数据加载后一次性完成数值格式化、最大值归一化与行 key 预计算。 */
+  private buildCache(items: RankItem[]): RankCache {
+    let max = 1;
+    for (let i = 0; i < items.length; i++) {
+      const value: number = items[i].metric_value || 0;
+      if (value > max) {
+        max = value;
+      }
+    }
+    const top: RankRowView[] = [];
+    const rows: RankRowView[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const value: number = item.metric_value || 0;
+      let percent = value / max * 100;
+      if (percent < 6) {
+        percent = 6;
+      }
+      const tagsText = item.tags !== undefined && item.tags.length > 0 ? item.tags.join(' · ') : item.cate_name;
+      const view: RankRowView = {
+        key: 'rank-' + i + '-' + item.video_id,
+        rank: item.rank,
+        videoId: item.video_id,
+        title: item.title,
+        cover: item.cover,
+        tagsText: tagsText,
+        metricLabel: item.metric_label,
+        metricText: fmt(value),
+        barWidth: Math.round(percent).toString() + '%'
+      };
+      if (i < 3) {
+        top.push(view);
+      } else {
+        rows.push(view);
+      }
+    }
+    const cache: RankCache = new RankCache();
+    cache.top = top;
+    cache.rows = rows;
+    return cache;
+  }
+
+  private applyCache(cached: RankCache): void {
+    this.topRows = cached.top;
+    this.restRows = cached.rows;
+    // 用 LazyForEach 重建可见行：数据整体替换时不会出现旧属主/旧数值残留，且只创建可见行。
+    this.source.resetAll(cached.rows);
+    this.shownKind = this.kind;
+  }
+
+  private async fetchKind(kind: string): Promise<void> {
+    const seq = ++this.loadSeq;
+    try {
+      const res: RankResult = await Api.rank(kind);
       if (seq !== this.loadSeq) {
         return;
       }
-      this.items = res.items !== undefined && res.items !== null ? res.items : [];
-      let max = 1;
-      for (let i = 0; i < this.items.length; i++) {
-        const value = this.items[i].metric_value || 0;
-        if (value > max) {
-          max = value;
-        }
+      const items: RankItem[] = res.items !== undefined && res.items !== null ? res.items : [];
+      const cached: RankCache = this.buildCache(items);
+      this.cache.set(kind, cached);
+      if (this.kind !== kind) {
+        return;
       }
-      this.maxMetric = max;
+      this.errorText = '';
+      this.loading = false;
+      this.switching = false;
+      this.applyKindData(cached);
     } catch (err) {
-      if (seq === this.loadSeq) {
-        this.items = [];
+      if (seq === this.loadSeq && this.kind === kind) {
         this.errorText = (err as Error).message;
+        this.loading = false;
+        this.switching = false;
       }
     } finally {
       if (seq === this.loadSeq) {
-        this.loading = false;
         this.refreshing = false;
       }
     }
@@ -72,9 +471,73 @@ export struct RanksPage {
     if (this.kind === key) {
       return;
     }
-    this.kind = key;
-    this.items = [];
-    this.load();
+    const cached: RankCache | undefined = this.cache.get(key);
+    this.errorText = '';
+    // 选中胶囊滑动 / 文字颜色过渡（190ms，EaseOut），由 animateTo 统一驱动。
+    animateTo({ duration: HgDuration.overlay, curve: Curve.EaseOut }, () => {
+      this.kind = key;
+    });
+    if (cached !== undefined) {
+      this.loading = false;
+      this.switching = false;
+      this.refreshing = false;
+      this.applyKindData(cached);
+      return;
+    }
+    // 三榜预加载还在路上：保留旧列表 + 轻量 loading，等 preloadKind 落地后自动应用，不重复请求。
+    if (this.inflightKinds.has(key)) {
+      this.transitionSeq++;
+      this.listOpacity = 1;
+      this.switching = true;
+      this.scrollToTop();
+      return;
+    }
+    // 该榜预加载失败/未发起过：单独重试，保留旧列表 + 轻量 loading。
+    this.transitionSeq++;
+    this.listOpacity = 1;
+    this.switching = true;
+    this.scrollToTop();
+    this.fetchKind(key);
+  }
+
+  /** 数据替换：切榜走「旧内容淡出 → 换数据 → 新内容淡入」；首屏/下拉刷新直接替换。 */
+  private applyKindData(cached: RankCache): void {
+    if (this.topRows.length > 0 && !this.refreshing) {
+      this.transitionTo(cached);
+      return;
+    }
+    this.transitionSeq++;
+    this.applyCache(cached);
+    this.listOpacity = 1;
+  }
+
+  private transitionTo(cached: RankCache): void {
+    const seq = ++this.transitionSeq;
+    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
+      this.listOpacity = 0;
+    });
+    setTimeout(() => {
+      if (this.pageGone || seq !== this.transitionSeq) {
+        return;
+      }
+      this.applyCache(cached);
+      this.scrollToTop();
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        this.listOpacity = 1;
+      });
+    }, HgDuration.microExit);
+  }
+
+  /** 切榜后回到顶部（此时列表还是旧数据，用 jump 不带动画避免抖动）。 */
+  private scrollToTop(): void {
+    if (this.topRows.length === 0 && this.restRows.length === 0) {
+      return;
+    }
+    try {
+      this.scroller.scrollToIndex(0);
+    } catch (err) {
+      // 列表尚未挂载时忽略。
+    }
   }
 
   private refresh(): void {
@@ -82,16 +545,27 @@ export struct RanksPage {
       return;
     }
     this.refreshing = true;
-    this.load();
+    this.fetchKind(this.kind);
+  }
+
+  private retry(): void {
+    if (this.topRows.length === 0 && this.restRows.length === 0) {
+      this.loading = true;
+    }
+    this.errorText = '';
+    this.fetchKind(this.kind);
   }
 
   private openAt(index: number): void {
-    if (index < 0 || index >= this.items.length) {
-      return;
-    }
     const ids: number[] = [];
-    for (let i = 0; i < this.items.length; i++) {
-      ids.push(this.items[i].video_id);
+    for (let i = 0; i < this.topRows.length; i++) {
+      ids.push(this.topRows[i].videoId);
+    }
+    for (let i = 0; i < this.restRows.length; i++) {
+      ids.push(this.restRows[i].videoId);
+    }
+    if (index < 0 || index >= ids.length) {
+      return;
     }
     const param: PlayerParam = {
       videoIds: ids,
@@ -105,14 +579,6 @@ export struct RanksPage {
     this.navStack.pushPathByName(ROUTE_PLAYER, param);
   }
 
-  private percentOf(item: RankItem): number {
-    if (this.maxMetric <= 0) {
-      return 6;
-    }
-    const ratio = (item.metric_value || 0) / this.maxMetric * 100;
-    return ratio < 6 ? 6 : ratio;
-  }
-
   private tabDesc(): string {
     for (let i = 0; i < RANK_TABS.length; i++) {
       if (RANK_TABS[i].key === this.kind) {
@@ -122,216 +588,123 @@ export struct RanksPage {
     return '';
   }
 
+  /** 当前选中的榜在 Segmented 里的下标（用于计算胶囊指示器偏移）。 */
+  private kindIndex(): number {
+    for (let i = 0; i < RANK_TABS.length; i++) {
+      if (RANK_TABS[i].key === this.kind) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
+  private indicatorWidth(): number {
+    const inner: number = this.segWidth - 6;
+    if (inner <= 0) {
+      return 0;
+    }
+    return inner / RANK_TABS.length;
+  }
+
+  private indicatorX(): number {
+    return 3 + this.kindIndex() * this.indicatorWidth();
+  }
+
+  /** 分段控件：滑动的胶囊指示器（animateTo 驱动 position/width），选中文字色同步过渡。 */
   @Builder
   Segmented() {
-    Row() {
-      ForEach(RANK_TABS, (tab: RankTab) => {
-        Text(tab.label)
-          .fontSize(HgFont.secondary)
-          .fontWeight(this.kind === tab.key ? HgFont.weightMedium : HgFont.weightRegular)
-          .fontColor(this.kind === tab.key ? HgColor.textPrimary(this.dark) : HgColor.textSecondary(this.dark))
-          .textAlign(TextAlign.Center)
-          .layoutWeight(1)
+    Stack({ alignContent: Alignment.TopStart }) {
+      if (this.segWidth > 0) {
+        Column()
+          .width(this.indicatorWidth())
           .height(30)
-          .backgroundColor(this.kind === tab.key ? HgColor.surface1(this.dark) : Color.Transparent)
+          .backgroundColor(HgColor.surface1(this.dark))
           .borderRadius(HgRadius.chip)
-          .onClick(() => {
-            this.switchKind(tab.key);
-          })
-      }, (tab: RankTab) => tab.key)
+          .position({ x: this.indicatorX(), y: 3 })
+          // 属性动画兜底：即使 animateTo 上下文失效，位置/宽度变化也按 190ms EaseOut 滑动。
+          .animation({ duration: HgDuration.overlay, curve: Curve.EaseOut })
+      }
+      Row() {
+        ForEach(RANK_TABS, (tab: RankTab) => {
+          Text(tab.label)
+            .fontSize(HgFont.secondary)
+            .fontWeight(this.kind === tab.key ? HgFont.weightMedium : HgFont.weightRegular)
+            .fontColor(this.kind === tab.key ? HgColor.textPrimary(this.dark) : HgColor.textSecondary(this.dark))
+            .textAlign(TextAlign.Center)
+            .layoutWeight(1)
+            .height(30)
+            .onClick(() => {
+              this.switchKind(tab.key);
+            })
+        }, (tab: RankTab) => tab.key)
+      }
+      .width('100%')
+      .height(36)
+      .padding(3)
     }
     .width('100%')
     .height(36)
-    .padding(3)
     .backgroundColor(HgColor.surface3(this.dark))
     .borderRadius(18)
-    .margin({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.s, bottom: HgSpace.s })
-  }
-
-  @Builder
-  RankBadge(rank: number, size: number) {
-    Stack() {
-      if (rank <= 3) {
-        Text(rank.toString())
-          .fontSize(HgFont.cardTitle)
-          .fontWeight(HgFont.weightBold)
-          .fontColor(HgColor.onAccent(this.dark))
-      } else {
-        Text(rank.toString())
-          .fontSize(HgFont.pageTitle)
-          .fontWeight(HgFont.weightBold)
-          .fontColor(HgColor.textTertiary(this.dark))
+    .onAreaChange((oldValue: Area, newValue: Area) => {
+      const width = parseFloat(String(newValue.width));
+      if (!isNaN(width) && width > 0 && Math.abs(width - this.segWidth) > 0.5) {
+        this.segWidth = width;
       }
-    }
-    .width(size)
-    .height(size)
-    .borderRadius(size / 2)
-    .backgroundColor(rank <= 3 ? HgColor.accent(this.dark) : Color.Transparent)
-  }
-
-  @Builder
-  PodiumBig(item: RankItem) {
-    Column({ space: HgSpace.s }) {
-      Stack({ alignContent: Alignment.TopStart }) {
-        HgAsyncCover({
-          url: item.cover,
-          dark: this.dark,
-          radius: 0,
-          coverWidth: '100%',
-          coverHeight: '100%'
-        })
-        Column()
-          .width('100%')
-          .height('60%')
-          .linearGradient({ angle: 180, colors: [['#00000000', 0.0], ['#CC000000', 0.9]] })
-        this.RankBadge(item.rank, 28)
-      }
-      .width(120)
-      .height(160)
-      .borderRadius(HgRadius.group)
-      .clip(true)
-
-      Text(item.title)
-        .width(120)
-        .fontSize(HgFont.body)
-        .fontWeight(HgFont.weightMedium)
-        .fontColor(HgColor.textPrimary(this.dark))
-        .maxLines(2)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-    }
-    .width(120)
-    .alignItems(HorizontalAlign.Start)
-  }
-
-  @Builder
-  PodiumSmall(item: RankItem) {
-    Row({ space: HgSpace.s }) {
-      this.RankBadge(item.rank, 24)
-      HgAsyncCover({
-        url: item.cover,
-        dark: this.dark,
-        radius: HgRadius.inline,
-        coverWidth: 48,
-        coverHeight: 64
-      })
-      Column({ space: 2 }) {
-        Text(item.title)
-          .width('100%')
-          .fontSize(HgFont.secondary)
-          .fontWeight(HgFont.weightMedium)
-          .fontColor(HgColor.textPrimary(this.dark))
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(item.metric_label + ' ' + fmt(item.metric_value))
-          .fontSize(HgFont.micro)
-          .fontColor(HgColor.textTertiary(this.dark))
-          .maxLines(1)
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-    }
-    .width('100%')
-    .height(76)
+    })
   }
 
   @Builder
   TopThree() {
     Row({ space: HgSpace.m }) {
       Column() {
-        this.PodiumBig(this.items[0])
+        RankPodiumBig({
+          rank: this.topRows[0].rank,
+          cover: this.topRows[0].cover,
+          title: this.topRows[0].title,
+          dark: this.dark,
+          onOpen: () => {
+            this.openAt(0);
+          }
+        })
       }
-      .onClick(() => {
-        this.openAt(0);
-      })
       Column({ space: HgSpace.xs }) {
-        if (this.items.length > 1) {
+        if (this.topRows.length > 1) {
           Column() {
-            this.PodiumSmall(this.items[1])
+            RankPodiumSmall({
+              rank: this.topRows[1].rank,
+              cover: this.topRows[1].cover,
+              title: this.topRows[1].title,
+              metricLabel: this.topRows[1].metricLabel,
+              metricText: this.topRows[1].metricText,
+              dark: this.dark,
+              onOpen: () => {
+                this.openAt(1);
+              }
+            })
           }
-          .onClick(() => {
-            this.openAt(1);
-          })
         }
-        if (this.items.length > 2) {
+        if (this.topRows.length > 2) {
           Column() {
-            this.PodiumSmall(this.items[2])
+            RankPodiumSmall({
+              rank: this.topRows[2].rank,
+              cover: this.topRows[2].cover,
+              title: this.topRows[2].title,
+              metricLabel: this.topRows[2].metricLabel,
+              metricText: this.topRows[2].metricText,
+              dark: this.dark,
+              onOpen: () => {
+                this.openAt(2);
+              }
+            })
           }
-          .onClick(() => {
-            this.openAt(2);
-          })
         }
       }
       .layoutWeight(1)
       .justifyContent(FlexAlign.SpaceBetween)
     }
     .width('100%')
-    .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m, bottom: HgSpace.m })
-  }
-
-  @Builder
-  RankRow(item: RankItem) {
-    Row({ space: HgSpace.m }) {
-      Column() {
-        this.RankBadge(item.rank, 28)
-      }
-      .width(28)
-
-      HgAsyncCover({
-        url: item.cover,
-        dark: this.dark,
-        radius: HgRadius.inline,
-        coverWidth: 56,
-        coverHeight: 74
-      })
-
-      Column({ space: 2 }) {
-        Text(item.title)
-          .width('100%')
-          .fontSize(HgFont.cardTitle)
-          .fontWeight(HgFont.weightMedium)
-          .fontColor(HgColor.textPrimary(this.dark))
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(item.tags !== undefined && item.tags.length > 0 ? item.tags.join(' · ') : item.cate_name)
-          .width('100%')
-          .fontSize(HgFont.micro)
-          .fontColor(HgColor.textTertiary(this.dark))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Row({ space: HgSpace.xs }) {
-          Text(item.metric_label)
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-          Stack({ alignContent: Alignment.Start }) {
-            Column()
-              .width('100%')
-              .height(4)
-              .backgroundColor(HgColor.surface4(this.dark))
-              .borderRadius(2)
-            Column()
-              .width(this.percentOf(item).toFixed(1) + '%')
-              .height(4)
-              .backgroundColor(HgColor.accent(this.dark))
-              .borderRadius(2)
-          }
-          .layoutWeight(1)
-          .height(4)
-          Text(fmt(item.metric_value))
-            .fontSize(HgFont.caption)
-            .fontWeight(HgFont.weightMedium)
-            .fontColor(HgColor.accent(this.dark))
-        }
-        .width('100%')
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-    }
-    .width('100%')
-    .height(84)
-    .padding({ left: HgSpace.m, right: HgSpace.m })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.row)
-    .margin({ left: HgSpace.pageInset, right: HgSpace.pageInset, bottom: HgSpace.s })
+    .padding({ top: HgSpace.m, bottom: HgSpace.m })
   }
 
   @Builder
@@ -386,14 +759,44 @@ export struct RanksPage {
             this.navStack.pop();
           }
         })
-        Text(this.tabDesc() + ' · 每 10 分钟更新')
-          .width('100%')
-          .fontSize(HgFont.micro)
-          .fontColor(HgColor.textTertiary(this.dark))
-          .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, bottom: HgSpace.xs })
-        this.Segmented()
+        Row({ space: HgSpace.s }) {
+          Text(this.tabDesc() + ' · 每 10 分钟更新')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.switching) {
+            LoadingProgress()
+              .width(14)
+              .height(14)
+              .color(HgColor.accent(this.dark))
+          }
+        }
+        .width('100%')
+        .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, bottom: HgSpace.xs })
 
-        if (this.loading && this.items.length === 0) {
+        Row() {
+          this.Segmented()
+        }
+        .width('100%')
+        .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.s, bottom: HgSpace.s })
+
+        if (this.errorText.length > 0 && (this.topRows.length > 0 || this.restRows.length > 0)) {
+          Row() {
+            Text('加载失败，点击重试')
+              .fontSize(HgFont.caption)
+              .fontColor(HgColor.accent(this.dark))
+          }
+          .width('100%')
+          .height(HgSize.hitTarget)
+          .justifyContent(FlexAlign.Center)
+          .onClick(() => {
+            this.retry();
+          })
+        }
+
+        if (this.topRows.length === 0 && (this.loading || this.switching)) {
           Scroll() {
             Column() {
               this.ListSkeleton()
@@ -403,8 +806,9 @@ export struct RanksPage {
           }
           .layoutWeight(1)
           .width('100%')
+          .align(Alignment.Top)
           .scrollBar(BarState.Off)
-        } else if (this.items.length === 0) {
+        } else if (this.topRows.length === 0) {
           Column() {
             HgEmptyState({
               dark: this.dark,
@@ -413,7 +817,7 @@ export struct RanksPage {
               actionText: this.errorText.length > 0 ? '重试' : '',
               glyph: $r('sys.symbol.bolt_fill'),
               onAction: () => {
-                this.load();
+                this.retry();
               }
             })
           }
@@ -423,20 +827,27 @@ export struct RanksPage {
           .padding(HgSpace.xxl)
         } else {
           Refresh({ refreshing: this.refreshing }) {
-            List() {
-              if (this.items.length >= 1) {
-                ListItem() {
-                  this.TopThree()
-                }
+            List({ scroller: this.scroller }) {
+              ListItem() {
+                this.TopThree()
               }
-              ForEach(this.items.slice(3), (item: RankItem, index: number) => {
+              LazyForEach(this.source, (row: RankRowView, index: number) => {
                 ListItem() {
-                  this.RankRow(item)
+                  RankRowCard({
+                    rank: row.rank,
+                    cover: row.cover,
+                    title: row.title,
+                    tagsText: row.tagsText,
+                    metricLabel: row.metricLabel,
+                    metricText: row.metricText,
+                    barWidth: row.barWidth,
+                    dark: this.dark,
+                    onOpen: () => {
+                      this.openAt(index + 3);
+                    }
+                  })
                 }
-                .onClick(() => {
-                  this.openAt(index + 3);
-                })
-              }, (item: RankItem) => 'rank-' + item.rank + '-' + item.video_id)
+              }, (row: RankRowView) => row.key)
               ListItem() {
                 Row() {
                   Text('— 榜单已加载完 —')
@@ -453,6 +864,9 @@ export struct RanksPage {
             .scrollBar(BarState.Off)
             .edgeEffect(EdgeEffect.Spring)
             .cachedCount(4)
+            .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+            // 切榜过渡：旧内容淡出 → 换数据 → 新内容淡入（120/140ms），避免硬切。
+            .opacity(this.listOpacity)
           }
           .layoutWeight(1)
           .width('100%')

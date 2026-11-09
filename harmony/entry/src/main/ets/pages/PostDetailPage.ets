@@ -165,6 +165,8 @@ export struct PostDetailPage {
           url: this.cover,
           dark: true,
           radius: 0,
+          decodeWidth: 1080,
+          decodeHeight: 1200,
           coverWidth: '100%',
           coverHeight: '100%'
         })
@@ -188,6 +190,8 @@ export struct PostDetailPage {
         url: this.cover,
         dark: true,
         radius: 0,
+        decodeWidth: 1080,
+        decodeHeight: 1200,
         coverWidth: '100%',
         coverHeight: '100%'
       })
@@ -441,6 +445,7 @@ export struct PostDetailPage {
       .width('100%')
     }
     .layoutWeight(1)
+    .align(Alignment.Top)
     .scrollBar(BarState.Off)
   }
 
@@ -520,6 +525,7 @@ export struct PostDetailPage {
           }
           .layoutWeight(1)
           .width('100%')
+          .align(Alignment.Top)
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
         }

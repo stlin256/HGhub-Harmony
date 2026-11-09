@@ -284,6 +284,8 @@ export struct VideoDetailPage {
             url: this.coverUrl,
             dark: this.dark,
             radius: 0,
+            decodeWidth: 900,
+            decodeHeight: 1200,
             coverWidth: '100%',
             coverHeight: '100%'
           })
@@ -548,6 +550,7 @@ export struct VideoDetailPage {
     }
     .width('100%')
     .height('100%')
+    .align(Alignment.Top)
     .scrollBar(BarState.Off)
   }
 
@@ -690,6 +693,7 @@ export struct VideoDetailPage {
           }
           .width('100%')
           .height('100%')
+          .align(Alignment.Top)
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
 

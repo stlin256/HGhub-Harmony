@@ -2,7 +2,7 @@ import { Api } from '../services/Api';
 import { Paged, Post, VideoCard } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_DARK, K_TOP_INSET } from '../state/UserPrefs';
+import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET } from '../state/UserPrefs';
 import {
   ChannelParam, PlayerParam, PostParam, ROUTE_CHANNEL, ROUTE_PLAYER, ROUTE_POST,
   ROUTE_POSTS, ROUTE_RANKS
@@ -34,6 +34,7 @@ export struct CategoryPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
+  @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
   @State rowData: VideoCard[][] = [[], [], [], []];
   @State rowLoading: boolean[] = [true, true, true, true];
   @State rowError: string[] = ['', '', '', ''];
@@ -192,7 +193,7 @@ export struct CategoryPage {
     .padding({ left: HgSpace.m, right: HgSpace.m })
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
-    .margin({ left: HgSpace.pageInset, right: HgSpace.pageInset, bottom: HgSpace.xl })
+    .margin({ bottom: HgSpace.xl })
     .onClick(() => {
       this.navStack.pushPathByName(ROUTE_RANKS, null);
     })
@@ -252,6 +253,8 @@ export struct CategoryPage {
           url: item.cover,
           dark: this.dark,
           radius: 0,
+          decodeWidth: 360,
+          decodeHeight: 480,
           coverWidth: '100%',
           coverHeight: '100%'
         })
@@ -297,6 +300,8 @@ export struct CategoryPage {
           url: item.cover,
           dark: this.dark,
           radius: 0,
+          decodeWidth: 360,
+          decodeHeight: 480,
           coverWidth: '100%',
           coverHeight: '100%'
         })
@@ -495,7 +500,11 @@ export struct CategoryPage {
       Refresh({ refreshing: this.refreshing }) {
         Scroll() {
           Column() {
-            this.RankEntry()
+            Column() {
+              this.RankEntry()
+            }
+            .width('100%')
+            .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
 
             ForEach(CHANNELS, (info: CateInfo, index: number) => {
               this.CateSection(index)
@@ -511,10 +520,11 @@ export struct CategoryPage {
               .margin({ bottom: HgSpace.xxl })
           }
           .width('100%')
-          .padding({ top: HgSpace.m })
+          .padding({ top: HgSpace.m, bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.l })
         }
         .width('100%')
         .height('100%')
+        .align(Alignment.Top)
         .scrollBar(BarState.Off)
         .edgeEffect(EdgeEffect.Spring)
       }
