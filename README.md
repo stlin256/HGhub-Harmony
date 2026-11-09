@@ -178,5 +178,43 @@ Release 里的 dmg 没有用 Apple 开发者证书签名和公证，从网上下
 xattr -cr /Applications/HGhub.app
 ```
 
+## HarmonyOS 原生版（`harmony` 分支，默认分支）
+
+本仓库的 `harmony` 分支是 **完全鸿蒙原生（ArkTS/ArkUI）** 的 HarmonyOS NEXT 客户端重写版，不使用 WebView/H5 承载业务界面；`main` 分支保留上游 Tauri 2 版本。
+
+> 目标端：HarmonyOS NEXT 手机 / 平板。工程配置：`compatibleSdkVersion 6.1.0(23)`、`targetSdkVersion 26.0.0`、`runtimeOS HarmonyOS`（DevEco Studio 26.0.0 / SDK API 26 实测构建通过）。
+
+**目录**
+
+```text
+harmony/            # HarmonyOS 原生工程（ArkTS/ArkUI）
+docs/harmony/       # 迁移分析 / 接口契约 / 设计规范 / 平台指南 / 环境与签名 / 实施 SPEC
+scripts/harmony/    # CLI 构建、签名校验、安装、真机日志/截图脚本
+```
+
+**快速开始（Windows CLI）**
+
+```powershell
+. .\scripts\harmony\env.ps1        # 探测 DevEco 并设置 NODE_HOME/JAVA_HOME/DEVECO_SDK_HOME/PATH
+.\scripts\harmony\build.ps1        # 构建 HAP（未配置签名时产出 unsigned，可编译验证）
+.\scripts\harmony\install.ps1      # 安装到已连接真机并启动
+.\scripts\harmony\device.ps1 log  # 真机日志；另有 screenshot / clear-data 等
+```
+
+**签名（真机安装前需一次性操作）**
+
+真机 debug 安装需要与 `io.github.stlin256.hghub` 绑定的签名 profile。当前本机签名材料属于其它应用，不能复用；请按
+[docs/harmony/ENVIRONMENT.md](docs/harmony/ENVIRONMENT.md) 的 Plan A：在 DevEco Studio 登录华为开发者账号 → Project Structure → Signing Configs → 勾选 Automatically generate signature，生成后 CLI 构建/安装可长期复用（`build-profile.json5` 已被 gitignore，不会提交签名材料）。
+
+**文档索引**
+
+- [实施 SPEC](docs/harmony/SPEC.md) —— 架构、决策、路由、状态、验收与里程碑
+- [迁移分析](docs/harmony/PORTING-ANALYSIS.md) / [接口契约](docs/harmony/API-CONTRACT.md)
+- [原生 UI/UX 设计规范](docs/harmony/DESIGN.md)
+- [鸿蒙平台能力指南](docs/harmony/HARMONY-GUIDE.md)
+- [本机环境、签名与真机调试](docs/harmony/ENVIRONMENT.md)
+
+> 与原项目一致：仅供个人学习/研究，禁止商用；不提供、不存储、不分发任何音视频内容。
+
 ## LinuxDO
 https://linux.do/
