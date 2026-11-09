@@ -8,6 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && tsc --project tsconfig.tests.json && vite build",
     "preview": "vite preview",
+    "test:playback": "node scripts/test-playback.mjs",
+    "test:api-loading": "node scripts/test-api-loading.mjs",
     "tauri": "tauri",
     "app:dev": "tauri dev",
     "app:build": "tauri build",
@@ -20,7 +22,7 @@
     "@tauri-apps/api": "^2.12.4",
     "clsx": "2.1.1",
     "dompurify": "3.4.17",
-    "hls.js": "1.6.15",
+    "hls.js": "1.6.19",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "tailwind-merge": "3.4.0"
@@ -32,6 +34,7 @@
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "playwright-core": "1.63.0",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.3.2"
