@@ -8,23 +8,28 @@
  * 由代理带着 Referer/UA 去取上游，天然覆盖子清单、分片与密钥。
  *
  * 端点：
- *   GET /hls?u=  → 拉上游 m3u8（校验必须 #EXTM3U 开头）→ 改写所有 URI → mpegurl
- *   GET /seg?u=  → 拉分片/密钥；若响应仍是 m3u8 则继续改写（嵌套播放列表）→ 原样二进制
+ *   GET /hls?u=  → 取上游 m3u8（校验必须 #EXTM3U 开头）→ 改写所有 URI → mpegurl
+ *   GET /seg?u=  → 取分片/密钥；若响应仍是 m3u8 则继续改写（嵌套播放列表）→ 原样二进制
  * 支持 Range（bytes=a-b / a- / -n）→ 206 + Content-Range；解析失败按普通 200 返回。
  * 上游失败返回 502（绝不静默 200），所有异常只记 PlaybackLog.warn，不向 UI 抛出。
+ *
+ * 缓存：/hls 与 /seg 都先查 MediaCache（进程内 LRU → 磁盘 → 上游）。MediaPrefetch 预热过的
+ * 主清单/子清单/开头分片/AES KEY 在这里直接命中：播放列表命中后即时改写返回；分片命中完整
+ * body 后按 Range 切 206（无需回源）。MediaCache.enabled=false 时退化为原“每次回源”行为。
  *
  * 设计约束：
  * - 只监听 127.0.0.1，端口由系统分配（listen port=0 + getLocalAddress 取回）；
  * - 同一播放会话只 start 一次，端口固定；stop 时关闭监听与已建立连接；
  * - Connection: close，每个请求一个连接（HLS 短剧码率下可接受，避免 keep-alive 状态机）；
- * - 上游并发上限 6（分片较大，带宽优先）；socket 回调里只做轻量解析，HTTP 拉取全异步。
+ * - 上游并发/优先级由 MediaCache 统一控制（前台播放请求优先、预加载让路）；socket 回调里只做轻量解析。
  */
 
 import { socket } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { Net, RawBytes, RawText } from '../services/Net';
+import { USER_AGENT } from '../services/Net';
 import { Lines } from '../services/Lines';
+import { MediaCache, MediaFetch, MEDIA_KIND_MEDIA, MEDIA_KIND_PLAYLIST } from './MediaCache';
 import { PlaybackLog } from './PlaybackLog';
 import {
   decodeComponent,
@@ -37,12 +42,12 @@ import {
 const LOOPBACK: string = '127.0.0.1';
 const PLAYLIST_TYPE: string = 'application/vnd.apple.mpegurl';
 const OCTET_TYPE: string = 'application/octet-stream';
-/** 上游拉取超时（与原 net.rs 的 20s 一致）。 */
-const FETCH_TIMEOUT_MS: number = 20000;
+/** 上游请求头：播放列表 / 分片（Referer/UA 由本代理注入，与原 net.rs 一致）。 */
+const PLAYLIST_ACCEPT: string = 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*;q=0.8';
+const MEDIA_ACCEPT: string = '*/*';
 /** 单连接等请求头的上限：HLS 播放器请求头很小，超时说明客户端异常。 */
 const CLIENT_TIMEOUT_MS: number = 15000;
 const MAX_HEADER_BYTES: number = 16 * 1024;
-const MAX_FETCH_CONCURRENCY: number = 6;
 
 /** 请求头（大小写不敏感）。 */
 class HttpHeaders {
@@ -90,8 +95,8 @@ export class LocalProxy {
   private running: boolean = false;
   private starting: Promise<number> | undefined = undefined;
   private connections: socket.TCPSocketConnection[] = [];
-  private activeFetches: number = 0;
-  private fetchWaiters: (() => void)[] = [];
+  /** 额外上游请求头（CDN 鉴权等），由 PlayerService 在解析出 PlaybackInfo 后注入；为空则只用 Referer/UA。 */
+  private upstreamExtra: Record<string, string> = {};
 
   /** 实际监听端口；未启动时为 0。 */
   get port(): number {
@@ -115,6 +120,25 @@ export class LocalProxy {
   /** 测试/诊断用：任意资源包成 /seg 地址。 */
   wrapSegmentUrl(upstream: string): string {
     return this.baseUrl + '/seg?u=' + encodeComponent(upstream);
+  }
+
+  /**
+   * 注入上游额外请求头（CDN 鉴权 x-cdn-auth / x-cdn-app 等）。
+   * PlayerService 在解析出 PlaybackInfo 后调用（PlayerService.cdnHeaders(info)）；不调用则行为与之前一致。
+   * 传 null 清空。
+   */
+  setUpstreamHeaders(headers: Record<string, string> | null): void {
+    if (headers === null) {
+      this.upstreamExtra = {};
+      return;
+    }
+    const copy: Record<string, string> = {};
+    const keys: string[] = Object.keys(headers);
+    for (let i = 0; i < keys.length; i++) {
+      copy[keys[i]] = headers[keys[i]];
+    }
+    this.upstreamExtra = copy;
+    PlaybackLog.info('proxy.headers', 'extra=' + keys.length);
   }
 
   /**
@@ -144,11 +168,6 @@ export class LocalProxy {
     this.server = undefined;
     this.running = false;
     this.portNum = 0;
-    const waiters: (() => void)[] = this.fetchWaiters;
-    this.fetchWaiters = [];
-    for (let i = 0; i < waiters.length; i++) {
-      waiters[i]();
-    }
     const connections: socket.TCPSocketConnection[] = this.connections;
     this.connections = [];
     for (let i = 0; i < connections.length; i++) {
@@ -289,12 +308,16 @@ export class LocalProxy {
       this.respond(client, 400, 'text/plain', LocalProxy.textBytes('missing u'), 'no-store', '');
       return;
     }
+    // 每个请求一行：确认 AVPlayer 是否真的连到了本地代理（排障关键，体量 ≈ 每分片一行）。
+    const rangeHeader: string = request.headers.get('range');
+    PlaybackLog.info('proxy.route', path + ' range=' + (rangeHeader.length > 0 ? '1' : '0') +
+      ' ' + LocalProxy.describe(upstream));
     if (path === '/hls') {
       await this.handlePlaylist(client, upstream);
       return;
     }
     if (path === '/seg') {
-      await this.handleSegment(client, upstream, request.headers.get('range'));
+      await this.handleSegment(client, upstream, rangeHeader);
       return;
     }
     this.respond(client, 404, 'text/plain', LocalProxy.textBytes('not found'), 'no-store', '');
@@ -304,27 +327,31 @@ export class LocalProxy {
 
   private async handlePlaylist(client: socket.TCPSocketConnection, upstream: string): Promise<void> {
     const started: number = Date.now();
-    let text: string = '';
+    let fetched: MediaFetch;
     try {
-      const raw: RawText = await this.fetchText(upstream);
-      if (raw.code < 200 || raw.code >= 300) {
-        throw new Error('HTTP ' + raw.code);
-      }
-      text = raw.text;
+      // 先内存/磁盘缓存，未命中再由 MediaCache 回源（带 Referer/UA/CDN 鉴权头）。
+      // MediaPrefetch 预热过的主清单会在这里命中：省掉切换时的首个网络往返。
+      fetched = await MediaCache.load(upstream, this.playlistHeaders(), MEDIA_KIND_PLAYLIST, true);
     } catch (err) {
       PlaybackLog.warn('proxy.hls.fail', LocalProxy.describe(upstream) + ' ' + LocalProxy.errText(err));
       this.respond(client, 502, 'text/plain', LocalProxy.textBytes('upstream playlist failed'), 'no-store', '');
       return;
     }
+    const text: string = LocalProxy.decodeText(fetched.bytes);
     if (!isPlaylistText(text)) {
       // 绝不静默 200：返回 502 让播放器/UI 明确失败。
       PlaybackLog.warn('proxy.hls.invalid', LocalProxy.describe(upstream));
       this.respond(client, 502, 'text/plain', LocalProxy.textBytes('upstream is not an HLS playlist'), 'no-store', '');
       return;
     }
+    // 缓存里保存的是上游原始文本，改写必须按当前代理基址实时做（端口/会话可能变化）。
     const body: Uint8Array = LocalProxy.textBytes(rewritePlaylist(upstream, text, this.baseUrl));
-    PlaybackLog.info('proxy.hls', 'bytes=' + body.length + ' ms=' + (Date.now() - started) + ' ' +
-      LocalProxy.describe(upstream));
+    if (fetched.fromCache) {
+      PlaybackLog.info('mediacache.hit', 'kind=hls bytes=' + fetched.bytes.length +
+        ' ms=' + (Date.now() - started) + ' ' + LocalProxy.describe(upstream));
+    }
+    PlaybackLog.info('proxy.hls', 'bytes=' + body.length + ' ms=' + (Date.now() - started) +
+      ' cache=' + (fetched.fromCache ? '1' : '0') + ' ' + LocalProxy.describe(upstream));
     this.respond(client, 200, PLAYLIST_TYPE, body, 'no-store', '');
   }
 
@@ -333,23 +360,23 @@ export class LocalProxy {
   private async handleSegment(client: socket.TCPSocketConnection, upstream: string,
     rangeHeader: string): Promise<void> {
     const started: number = Date.now();
-    let raw: RawBytes;
+    let fetched: MediaFetch;
     try {
-      raw = await this.fetchBytes(upstream);
-      if (raw.code < 200 || raw.code >= 300) {
-        throw new Error('HTTP ' + raw.code);
-      }
+      // 分片/AES KEY/嵌套子清单共用一个入口：MediaPrefetch 预热的开头分片与 key 在这里命中。
+      // Range 请求也先取完整 body（命中缓存则零回源），再按 Range 切 206 返回。
+      fetched = await MediaCache.load(upstream, this.mediaHeaders(), MEDIA_KIND_MEDIA, true);
     } catch (err) {
       PlaybackLog.warn('proxy.seg.fail', LocalProxy.describe(upstream) + ' ' + LocalProxy.errText(err));
       this.respond(client, 502, 'text/plain', LocalProxy.textBytes('upstream segment failed'), 'no-store', '');
       return;
     }
-    const contentType: string = raw.contentType.length > 0 ? raw.contentType : OCTET_TYPE;
-    if (isPlaylistBytes(raw.bytes) || contentType.toLowerCase().indexOf('mpegurl') >= 0) {
+    const raw: Uint8Array = fetched.bytes;
+    const contentType: string = fetched.contentType.length > 0 ? fetched.contentType : OCTET_TYPE;
+    if (isPlaylistBytes(raw) || contentType.toLowerCase().indexOf('mpegurl') >= 0) {
       // 主清单里的子清单同样经 /seg 返回：必须继续改写，不能把内层 URL 原样交给播放器。
       let text: string = '';
       try {
-        text = new util.TextDecoder('utf-8').decodeToString(raw.bytes);
+        text = new util.TextDecoder('utf-8').decodeToString(raw);
       } catch (err) {
         text = '';
       }
@@ -359,70 +386,61 @@ export class LocalProxy {
         return;
       }
       const body: Uint8Array = LocalProxy.textBytes(rewritePlaylist(upstream, text, this.baseUrl));
-      PlaybackLog.info('proxy.seg.playlist', 'bytes=' + body.length + ' ' + LocalProxy.describe(upstream));
+      if (fetched.fromCache) {
+        PlaybackLog.info('mediacache.hit', 'kind=pl-seg bytes=' + raw.length + ' ' + LocalProxy.describe(upstream));
+      }
+      PlaybackLog.info('proxy.seg.playlist', 'bytes=' + body.length +
+        ' cache=' + (fetched.fromCache ? '1' : '0') + ' ' + LocalProxy.describe(upstream));
       this.respond(client, 200, PLAYLIST_TYPE, body, 'public, max-age=3600', '');
       return;
     }
-    const range: ByteRange | undefined = LocalProxy.parseRange(rangeHeader, raw.bytes.length);
+    const range: ByteRange | undefined = LocalProxy.parseRange(rangeHeader, raw.length);
     if (range === undefined) {
-      PlaybackLog.info('proxy.seg', 'bytes=' + raw.bytes.length + ' ms=' + (Date.now() - started) + ' ' +
-        LocalProxy.describe(upstream));
-      this.respond(client, 200, contentType, raw.bytes, 'public, max-age=3600', '');
+      if (fetched.fromCache) {
+        PlaybackLog.info('mediacache.hit', 'kind=seg bytes=' + raw.length +
+          ' ms=' + (Date.now() - started) + ' ' + LocalProxy.describe(upstream));
+      }
+      PlaybackLog.info('proxy.seg', 'bytes=' + raw.length + ' ms=' + (Date.now() - started) +
+        ' cache=' + (fetched.fromCache ? '1' : '0') + ' ' + LocalProxy.describe(upstream));
+      this.respond(client, 200, contentType, raw, 'public, max-age=3600', '');
       return;
     }
-    const body: Uint8Array = raw.bytes.subarray(range.start, range.end + 1);
-    const contentRange: string = 'bytes ' + range.start + '-' + range.end + '/' + raw.bytes.length;
-    PlaybackLog.info('proxy.seg.range', contentRange + ' ' + LocalProxy.describe(upstream));
+    const body: Uint8Array = raw.subarray(range.start, range.end + 1);
+    const contentRange: string = 'bytes ' + range.start + '-' + range.end + '/' + raw.length;
+    if (fetched.fromCache) {
+      PlaybackLog.info('mediacache.hit', 'kind=seg-range bytes=' + raw.length + ' ' + contentRange);
+    }
+    PlaybackLog.info('proxy.seg.range', contentRange + ' cache=' + (fetched.fromCache ? '1' : '0') +
+      ' ' + LocalProxy.describe(upstream));
     this.respond(client, 206, contentType, body, 'public, max-age=3600', contentRange);
   }
 
-  /* ── 上游请求（带 Referer/UA + 并发闸门） ─────────── */
+  /* ── 上游请求头（带 Referer/UA/可选 CDN 鉴权；并发闸门在 MediaCache） ── */
 
   private referer(): string {
     return Lines.current() + '/';
   }
 
-  private async fetchText(upstream: string): Promise<RawText> {
-    await this.acquire();
-    try {
-      // Net.getText 自带 User-Agent=USER_AGENT；Referer 与原 net.rs 的 {base}/ 一致。
-      return await Net.getText(upstream, this.referer(), FETCH_TIMEOUT_MS);
-    } finally {
-      this.release();
-    }
+  private playlistHeaders(): Record<string, string> {
+    return this.upstreamHeaders(PLAYLIST_ACCEPT);
   }
 
-  private async fetchBytes(upstream: string): Promise<RawBytes> {
-    await this.acquire();
-    try {
-      return await Net.getBytes(upstream, this.referer(), FETCH_TIMEOUT_MS);
-    } finally {
-      this.release();
-    }
+  private mediaHeaders(): Record<string, string> {
+    return this.upstreamHeaders(MEDIA_ACCEPT);
   }
 
-  private async acquire(): Promise<void> {
-    if (this.activeFetches < MAX_FETCH_CONCURRENCY) {
-      this.activeFetches++;
-      return;
+  /** 基础头（UA/Referer 与原 net.rs 一致）+ 注入的 CDN 鉴权头（后者优先）。 */
+  private upstreamHeaders(accept: string): Record<string, string> {
+    const headers: Record<string, string> = {
+      'User-Agent': USER_AGENT,
+      'Accept': accept,
+      'Referer': this.referer()
+    };
+    const keys: string[] = Object.keys(this.upstreamExtra);
+    for (let i = 0; i < keys.length; i++) {
+      headers[keys[i]] = this.upstreamExtra[keys[i]];
     }
-    // 槽位由 release() 直接移交给下一个等待者，这里不再自增。
-    await new Promise<void>((resolve: () => void): void => {
-      this.fetchWaiters.push(resolve);
-    });
-  }
-
-  private release(): void {
-    if (this.fetchWaiters.length > 0) {
-      const next: (() => void) | undefined = this.fetchWaiters.shift();
-      if (next !== undefined) {
-        next();
-      }
-      return;
-    }
-    if (this.activeFetches > 0) {
-      this.activeFetches--;
-    }
+    return headers;
   }
 
   /* ── 响应 ─────────────────────────────────────────── */
@@ -500,6 +518,14 @@ export class LocalProxy {
 
   private static textBytes(text: string): Uint8Array {
     return new util.TextEncoder().encodeInto(text);
+  }
+
+  private static decodeText(bytes: Uint8Array): string {
+    try {
+      return new util.TextDecoder('utf-8').decodeToString(bytes);
+    } catch (err) {
+      return '';
+    }
   }
 
   private static concat(left: Uint8Array, right: Uint8Array): Uint8Array {
