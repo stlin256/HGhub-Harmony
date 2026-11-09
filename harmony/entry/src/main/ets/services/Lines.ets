@@ -55,6 +55,19 @@ function validHost(host: string): boolean {
   return labelLength > 0 && labelLength <= 63;
 }
 
+function isIpv4Literal(host: string): boolean {
+  const parts = host.split('.');
+  if (parts.length !== 4) {
+    return false;
+  }
+  for (let i = 0; i < parts.length; i++) {
+    if (!allDigits(parts[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function scriptSrc(html: string): string {
   let rest = html;
   while (true) {
@@ -221,7 +234,12 @@ export class Lines {
     if (!validHost(host)) {
       return '';
     }
-    const normalized = 'https://' + host.toLowerCase() + (port.length > 0 ? ':' + port : '');
+    const lowerHost = host.toLowerCase();
+    // 线路必须是真实域名：拒绝 IP 字面量与 localhost（与原项目私网/内网限制的意图一致）
+    if (lowerHost === 'localhost' || isIpv4Literal(lowerHost)) {
+      return '';
+    }
+    const normalized = 'https://' + lowerHost + (port.length > 0 ? ':' + port : '');
     return normalized;
   }
 
