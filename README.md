@@ -87,6 +87,17 @@ pnpm android:dev      # 真机 / 模拟器调试
 pnpm android:build    # 产出 APK
 ```
 
+iOS（需 Xcode、xcodegen、CocoaPods 与 Apple 开发者账号；自行签名安装到自己的设备）：
+
+```bash
+export APPLE_DEVELOPMENT_TEAM=<你的 Team ID>
+pnpm tauri ios init --ci                          # 首次生成 Xcode 工程（src-tauri/gen/apple）
+pnpm tauri ios build --export-method debugging    # 产出 src-tauri/gen/apple/build/arm64/HGhub.ipa
+xcrun devicectl device install app --device <UDID> <解压后的 Payload/HGhub.app>
+```
+
+最低系统版本写在 `src-tauri/tauri.ios.conf.json`（iOS 15）。iOS 复用安卓的触屏界面；自定义协议与 macOS 相同，为 `hg://localhost`。
+
 ### 环境注意
 
 - 工程若放在 **exFAT** 盘（不支持符号链接），需保留 `.npmrc` 中的 `node-linker=hoisted`。
