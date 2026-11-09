@@ -75,40 +75,66 @@ function expandKey(key: Uint8Array): number[] {
   return w;
 }
 
+function invMixColumn(a0: number[], a1: number[], a2: number[], a3: number[]): void {
+  // 原地对一列做 InvMixColumns
+  const b0 = mul(a0[0], 14) ^ mul(a1[0], 11) ^ mul(a2[0], 13) ^ mul(a3[0], 9);
+  const b1 = mul(a0[0], 9) ^ mul(a1[0], 14) ^ mul(a2[0], 11) ^ mul(a3[0], 13);
+  const b2 = mul(a0[0], 13) ^ mul(a1[0], 9) ^ mul(a2[0], 14) ^ mul(a3[0], 11);
+  const b3 = mul(a0[0], 11) ^ mul(a1[0], 13) ^ mul(a2[0], 9) ^ mul(a3[0], 14);
+  a0[0] = b0;
+  a1[0] = b1;
+  a2[0] = b2;
+  a3[0] = b3;
+}
+
+/**
+ * 标准 AES-128 解密（非等价逆密码路线，状态变换顺序最直白）：
+ * AddRoundKey(Nr) → 9 轮 [InvShiftRows → InvSubBytes → AddRoundKey(r) → InvMixColumns]
+ * → InvShiftRows → InvSubBytes → AddRoundKey(0)
+ */
 function decryptBlock(input: number[], roundKeys: number[], out: number[]): void {
+  const state: number[] = zeros(16);
   for (let i = 0; i < 16; i++) {
-    out[i] = input[i] ^ roundKeys[160 + i];
+    state[i] = input[i] ^ roundKeys[160 + i];
   }
   for (let round = 9; round >= 1; round--) {
-    // InvShiftRows
-    const s: number[] = zeros(16);
+    // InvShiftRows：第 r 行右移 r 位
+    const shifted: number[] = zeros(16);
     for (let row = 0; row < 4; row++) {
       for (let col = 0; col < 4; col++) {
-        s[(row + 4 * ((col + 4 - row) % 4))] = out[row + 4 * col];
+        shifted[row + 4 * ((col + row) % 4)] = state[row + 4 * col];
       }
     }
-    // InvSubBytes + InvMixColumns
+    // InvSubBytes
+    for (let i = 0; i < 16; i++) {
+      shifted[i] = SBOX_INV[shifted[i]];
+    }
+    // AddRoundKey(round)
+    for (let i = 0; i < 16; i++) {
+      shifted[i] = shifted[i] ^ roundKeys[round * 16 + i];
+    }
+    // InvMixColumns
     for (let col = 0; col < 4; col++) {
-      const c0 = SBOX_INV[s[4 * col]];
-      const c1 = SBOX_INV[s[4 * col + 1]];
-      const c2 = SBOX_INV[s[4 * col + 2]];
-      const c3 = SBOX_INV[s[4 * col + 3]];
-      const base = 160 + round * 16 + 4 * col;
-      out[4 * col] = mul(c0, 14) ^ mul(c1, 11) ^ mul(c2, 13) ^ mul(c3, 9) ^ roundKeys[base];
-      out[4 * col + 1] = mul(c0, 9) ^ mul(c1, 14) ^ mul(c2, 11) ^ mul(c3, 13) ^ roundKeys[base + 1];
-      out[4 * col + 2] = mul(c0, 13) ^ mul(c1, 9) ^ mul(c2, 14) ^ mul(c3, 11) ^ roundKeys[base + 2];
-      out[4 * col + 3] = mul(c0, 11) ^ mul(c1, 13) ^ mul(c2, 9) ^ mul(c3, 14) ^ roundKeys[base + 3];
+      const c0: number[] = [shifted[4 * col]];
+      const c1: number[] = [shifted[4 * col + 1]];
+      const c2: number[] = [shifted[4 * col + 2]];
+      const c3: number[] = [shifted[4 * col + 3]];
+      invMixColumn(c0, c1, c2, c3);
+      state[4 * col] = c0[0];
+      state[4 * col + 1] = c1[0];
+      state[4 * col + 2] = c2[0];
+      state[4 * col + 3] = c3[0];
     }
   }
-  // final round: InvShiftRows + InvSubBytes + AddRoundKey(0)
-  const s: number[] = zeros(16);
+  // 最后一轮：InvShiftRows → InvSubBytes → AddRoundKey(0)
+  const finalState: number[] = zeros(16);
   for (let row = 0; row < 4; row++) {
     for (let col = 0; col < 4; col++) {
-      s[row + 4 * ((col + 4 - row) % 4)] = SBOX_INV[out[row + 4 * col]];
+      finalState[row + 4 * ((col + row) % 4)] = state[row + 4 * col];
     }
   }
   for (let i = 0; i < 16; i++) {
-    out[i] = s[i] ^ roundKeys[i];
+    out[i] = SBOX_INV[finalState[i]] ^ roundKeys[i];
   }
 }
 
