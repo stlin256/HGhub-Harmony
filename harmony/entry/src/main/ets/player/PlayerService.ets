@@ -6,6 +6,7 @@ import { USER_AGENT } from '../services/Net';
 import { PlayInfo } from '../models/Types';
 import { UserPrefs } from '../state/UserPrefs';
 import { PlaybackLog } from './PlaybackLog';
+import { LocalProxy } from './LocalProxy';
 
 const HISTORY_INTERVAL_MS: number = 5000;
 const UI_INTERVAL_MS: number = 250;
@@ -66,11 +67,15 @@ export class PlayerService {
   private volume: number = 1;
 
   /**
-   * 直连/本地代理开关：v1 走直连（createMediaSourceWithUrl + headers）。
-   * 真机若验证 headers 不透传 HLS 子请求，可改为本地 127.0.0.1 代理（已放开 network_config 明文），
-   * 只需在 openUrl 内按此开关改 URL 构造，页面无需改动。
+   * 直连/本地代理开关（默认 false，走原有直连 createMediaSourceWithUrl + headers）。
+   * 置 true 时：播 m3u8 前启动 127.0.0.1 回环代理（端口固定、整个会话复用），把上游地址包装成
+   * http://127.0.0.1:<port>/hls?u=<encoded> 交给 AVPlayer，由代理注入 Referer/UA 并改写
+   * 子清单/分片/密钥；代理启动失败自动回退直连，不阻塞播放。
    */
   useLocalProxy: boolean = false;
+
+  /** 本地回环代理：整个 PlayerService 生命周期内复用同一实例，端口固定。 */
+  private proxy: LocalProxy = new LocalProxy();
 
   private queue: Promise<void> = Promise.resolve();
 
@@ -437,12 +442,35 @@ export class PlayerService {
       }
     }
     PlaybackLog.info('source.open', PlaybackLog.safeUrl(url));
-    const headers: Record<string, string> = {
+    let sourceUrl: string = url;
+    let viaProxy: boolean = false;
+    if (this.useLocalProxy && PlayerService.looksHls(url)) {
+      // 兜底方案 C：先起本地代理（固定端口），把上游 m3u8 包装成 /hls?u= 交给 AVPlayer。
+      const port: number = await this.ensureProxy();
+      if (serial !== this.serial || this.released) {
+        return;
+      }
+      if (port > 0) {
+        sourceUrl = this.proxy.wrapUrl(url);
+        viaProxy = true;
+        PlaybackLog.info('source.proxy', PlaybackLog.safeUrl(sourceUrl));
+      } else {
+        // 代理启动失败不阻塞播放：自动回退直连（headers 照旧）。
+        PlaybackLog.warn('source.proxy.fallback', 'proxy unavailable, direct');
+      }
+    } else if (this.useLocalProxy) {
+      PlaybackLog.warn('source.proxy.skip', 'not an HLS url');
+    }
+    let headers: Record<string, string> = {
       'Referer': Lines.current() + '/',
       'User-Agent': USER_AGENT,
       'Accept': '*/*'
     };
-    const source: media.MediaSource = media.createMediaSourceWithUrl(url, headers);
+    if (viaProxy) {
+      // 本地代理自己注入 Referer/UA，播放器侧只需最小请求头。
+      headers = { 'Accept': '*/*' };
+    }
+    const source: media.MediaSource = media.createMediaSourceWithUrl(sourceUrl, headers);
     await player.setMediaSource(source);
     if (serial !== this.serial || this.released) {
       return;
@@ -491,6 +519,35 @@ export class PlayerService {
     if (autoPlay) {
       await player.play();
     }
+  }
+
+  /* ── 本地代理（方案 C 兜底，默认关闭） ────────────── */
+
+  /** 确保代理已启动并返回端口；失败返回 0（调用方回退直连，不阻塞播放）。 */
+  private async ensureProxy(): Promise<number> {
+    if (this.proxy.isRunning()) {
+      return this.proxy.port;
+    }
+    try {
+      const port: number = await this.proxy.start();
+      PlaybackLog.info('proxy.ready', 'port=' + port);
+      return port;
+    } catch (err) {
+      PlaybackLog.warn('proxy.ready.fail', PlayerService.errText(err));
+      return 0;
+    }
+  }
+
+  /** 只有明确的 HLS 地址才值得经代理包装；mp4 直链保持直连语义。 */
+  private static looksHls(url: string): boolean {
+    return url.toLowerCase().indexOf('m3u8') >= 0;
+  }
+
+  /** 释放时停代理：端口随播放会话回收，避免端口/连接泄漏。 */
+  private stopProxy(): void {
+    this.proxy.stop().catch((err: Object) => {
+      PlaybackLog.warn('proxy.stop.fail', PlayerService.errText(err));
+    });
   }
 
   private applyDynamic(player: media.AVPlayer): void {
@@ -680,6 +737,7 @@ export class PlayerService {
     this.saveHistory(true, false);
     this.released = true;
     this.serial++;
+    this.stopProxy();
     const player = this.player;
     this.player = undefined;
     if (player === undefined) {
