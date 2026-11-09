@@ -1,0 +1,31 @@
+{
+  "network-security-config": {
+    "base-config": {
+      "cleartextTrafficPermitted": false
+    },
+    "domain-config": [
+      {
+        "domains": [
+          {
+            "include-subdomains": true,
+            "name": "127.0.0.1"
+          }
+        ],
+        "cleartextTrafficPermitted": true
+      },
+      {
+        "domains": [
+          {
+            "include-subdomains": true,
+            "name": "localhost"
+          }
+        ],
+        "cleartextTrafficPermitted": true
+      }
+    ],
+    "component-config": {
+      "Network Kit": true,
+      "Media Kit": true
+    }
+  }
+}
