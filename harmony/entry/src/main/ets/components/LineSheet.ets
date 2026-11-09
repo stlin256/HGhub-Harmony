@@ -3,7 +3,7 @@ import { Lines } from '../services/Lines';
 import { Api } from '../services/Api';
 import { UiBus } from '../services/UiBus';
 import { UserPrefs } from '../state/UserPrefs';
-import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { hostOf } from '../utils/Format';
 
 /** 线路（数据源）面板：固定线路 + 地址发布页镜像。 */
@@ -38,9 +38,16 @@ export struct LineSheet {
   }
 
   private switchTo(url: string): void {
+    const before: string = Lines.current();
     try {
-      const next = Api.setLine(url);
+      const next: string = Api.setLine(url);
       this.current = next;
+      // 点当前已选线路不算切换：不能清会话/提示重新登录，否则会误把已登录用户踢下线。
+      if (next === before) {
+        UiBus.toastInfo('当前已在该线路');
+        this.onClose();
+        return;
+      }
       UserPrefs.setUser(null);
       UiBus.toastOk('已切换线路，需要重新登录');
       this.onClose();
@@ -71,9 +78,77 @@ export struct LineSheet {
     }
     .width('100%')
     .height(HgSize.listRowDouble)
+    .padding({ right: HgSpace.s })
     .onClick(() => {
       this.switchTo(item.url);
     })
+  }
+
+  /** 镜像线路加载中：标题下方直接给 3 行骨架 + 进度提示，不等列表底部。 */
+  @Builder
+  MirrorSkeleton() {
+    Column({ space: HgSpace.m }) {
+      Row({ space: HgSpace.s }) {
+        LoadingProgress()
+          .width(18)
+          .height(18)
+          .color(HgColor.accent(this.dark))
+        Text('正在获取镜像线路…')
+          .fontSize(HgFont.caption)
+          .fontColor(HgColor.textTertiary(this.dark))
+      }
+      .width('100%')
+      .padding({ top: HgSpace.m })
+
+      ForEach([0, 1, 2], (index: number) => {
+        Row() {
+          Column({ space: 2 }) {
+            Row()
+              .width('46%')
+              .height(HgFont.rowTitle)
+              .backgroundColor(HgColor.skeletonBase(this.dark))
+              .borderRadius(4)
+            Row()
+              .width('70%')
+              .height(HgFont.caption)
+              .backgroundColor(HgColor.skeletonBase(this.dark))
+              .borderRadius(4)
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          Row()
+            .width(HgIconSize.compact)
+            .height(HgIconSize.compact)
+            .backgroundColor(HgColor.skeletonBase(this.dark))
+            .borderRadius(HgIconSize.compact / 2)
+        }
+        .width('100%')
+        .height(HgSize.listRowDouble)
+        .padding({ right: HgSpace.s })
+      }, (index: number) => 'mirror-skeleton-' + index)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /** 镜像线路拉取失败：在标题下方给错误与重试，而不是沉到列表底部。 */
+  @Builder
+  MirrorError() {
+    Row({ space: HgSpace.s }) {
+      Text(this.error)
+        .fontSize(HgFont.caption)
+        .fontColor(HgColor.danger(this.dark))
+        .layoutWeight(1)
+        .maxLines(2)
+      Text('重试')
+        .fontSize(HgFont.secondary)
+        .fontColor(HgColor.accent(this.dark))
+        .onClick(() => {
+          this.loadMirrors();
+        })
+    }
+    .width('100%')
+    .padding({ top: HgSpace.s, bottom: HgSpace.s, right: HgSpace.s })
   }
 
   build() {
@@ -105,6 +180,7 @@ export struct LineSheet {
           Text('固定线路')
             .fontSize(HgFont.caption)
             .fontColor(HgColor.textTertiary(this.dark))
+            .padding({ right: HgSpace.s })
         }
         ForEach(Lines.fixed(), (item: LineItem) => {
           ListItem() {
@@ -116,7 +192,16 @@ export struct LineSheet {
           Text('镜像线路')
             .fontSize(HgFont.caption)
             .fontColor(HgColor.textTertiary(this.dark))
-            .margin({ top: HgSpace.m })
+            .padding({ top: HgSpace.m, right: HgSpace.s })
+        }
+        if (this.loading) {
+          ListItem() {
+            this.MirrorSkeleton()
+          }
+        } else if (this.error.length > 0) {
+          ListItem() {
+            this.MirrorError()
+          }
         }
         ForEach(this.mirrors, (item: LineItem) => {
           ListItem() {
@@ -126,26 +211,9 @@ export struct LineSheet {
       }
       .width('100%')
       .layoutWeight(1)
+      // 关闭悬浮滚动条：避免默认滚动条压在行内容/对勾上。
+      .scrollBar(BarState.Off)
       .divider({ strokeWidth: 0.5, color: HgColor.hairline(this.dark) })
-
-      if (this.loading) {
-        Row() {
-          LoadingProgress().width(16).height(16).color(HgColor.accent(this.dark))
-          Text('正在获取镜像线路…')
-            .fontSize(HgFont.caption)
-            .fontColor(HgColor.textTertiary(this.dark))
-            .margin({ left: HgSpace.s })
-        }
-        .width('100%')
-        .padding(HgSpace.m)
-      }
-      if (this.error.length > 0) {
-        Text(this.error)
-          .width('100%')
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.danger(this.dark))
-          .padding(HgSpace.m)
-      }
     }
     .width('100%')
     .padding({ left: HgSpace.sheetInset, right: HgSpace.sheetInset, bottom: HgSpace.xxl })

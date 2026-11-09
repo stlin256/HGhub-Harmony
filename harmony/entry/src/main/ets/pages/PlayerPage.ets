@@ -1,22 +1,30 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { vibrator } from '@kit.SensorServiceKit';
 import { Api } from '../services/Api';
-import { Lines } from '../services/Lines';
+import { K_LINE_BASE, Lines } from '../services/Lines';
 import { UiBus } from '../services/UiBus';
-import { K_APP_ACTIVE, K_BOTTOM_INSET, K_TOP_INSET, UserPrefs } from '../state/UserPrefs';
+import { WindowChrome } from '../services/WindowChrome';
+import { K_APP_ACTIVE, K_BOTTOM_INSET, K_TOP_INSET, K_VIDEO_SCALE, UserPrefs } from '../state/UserPrefs';
 import { PlayerParam } from '../state/Routes';
 import { Detail, Post, WatchProgress } from '../models/Types';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { PlayerService } from '../player/PlayerService';
+import { MediaPrefetch } from '../player/MediaPrefetch';
+import { PlaybackLog } from '../player/PlaybackLog';
 import { PlayerSeekBar } from '../components/player/PlayerSeekBar';
 import { EpisodeSheet } from '../components/player/EpisodeSheet';
 import { CommentsSheet } from '../components/player/CommentsSheet';
 import { DetailSheet } from '../components/player/DetailSheet';
+import { LineSheet } from '../components/LineSheet';
 import { HgAsyncCover } from '../components/HgAsyncCover';
-import { fmt, fmtTime, hostOf } from '../utils/Format';
+import { fmt, fmtTime } from '../utils/Format';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
 const CHROME_HIDE_MS: number = 3000;
+/** 顶部安全区兜底（vp）：topInset 上报 0 时保证标题/返回键不与状态栏/挖孔重叠。 */
+const TOP_SAFE_FALLBACK: number = HgSpace.xxl;
+/** 横屏视频「适应」时，视频中心所在屏幕高度比例（略高于正中心，给底部控件留空间）。 */
+const LANDSCAPE_CENTER_Y_RATIO: number = 0.42;
 const LONG_PRESS_MS: number = 380;
 const SEEK_FULL_WIDTH_SECONDS: number = 120;
 
@@ -31,6 +39,22 @@ class StartPoint {
 }
 
 /**
+ * feed 中单个条目的最小展示信息：当前页/相邻页的标题、作者、集数、互动计数占位。
+ * 由 Api.video/Api.post 预取填充，切换 Swiper 页时直接复用，避免标题/计数先空白再跳变。
+ */
+class PageMeta {
+  title: string = '';
+  author: string = '';
+  cover: string = '';
+  episodeCount: number = 0;
+  score: number = 0;
+  likeCount: number = 0;
+  collectCount: number = 0;
+  commentCount: number = 0;
+  hasDetail: boolean = false;
+}
+
+/**
  * 沉浸式播放页（HGhub 原生播放器：单实例 AVPlayer + 垂直 Swiper + 手势层 + Sheet）
  *：垂直 Swiper 切剧 + 单实例 AVPlayer + 手势层 + Chrome + 面板。
  * 结构：黑底/XComponent → 当前集海报占位 → Swiper（当前页透明手势层，邻页海报）
@@ -42,6 +66,10 @@ export struct PlayerPage {
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
   @StorageProp(K_APP_ACTIVE) @Watch('onAppActiveChanged') appActive: boolean = true;
+  /** 设置页持久化的画面比例（contain/fill/cover）：切换后立即重设 AVPlayer 缩放模式。 */
+  @StorageProp(K_VIDEO_SCALE) @Watch('onVideoScaleChanged') videoScale: string = 'contain';
+  /** 当前线路（Lines.setBase 写入 AppStorage）：切换后立即用新线路重新解析播放地址。 */
+  @StorageProp(K_LINE_BASE) @Watch('onLineBaseChanged') lineBase: string = '';
   params: PlayerParam = {
     videoIds: [], index: 0, title: '', source: '', feedKind: 'video', startEp: 1, startTime: 0
   };
@@ -88,9 +116,23 @@ export struct PlayerPage {
   @State speedLocked: boolean = false;
   @State screenW: number = 360;
   @State screenH: number = 780;
-  @State showEpisodes: boolean = false;
-  @State showComments: boolean = false;
-  @State showDetail: boolean = false;
+  /**
+   * 单 Sheet 复用：同一节点叠多个 bindSheet 在本机只生效一个/层级异常（表现为点了没反应、UI 消失且无法恢复）。
+   * 改为一个 bindSheet + sheetKind 切换内容，所有面板共用同一套层级与关闭逻辑。
+   */
+  @State sheetVisible: boolean = false;
+  @State sheetKind: string = '';
+  /** 右上角「更多」自定义面板（bindMenu 的勾选态不会随状态刷新，改为页面内弹层）。 */
+  @State menuVisible: boolean = false;
+  /** feed 相邻条目的预取元数据（与 ids 下标对齐）。 */
+  @State pageMeta: PageMeta[] = [];
+  /** 视频展示矩形：XComponent 按视频宽高比缩放定位，避免拉伸/裁切错误（单位 vp）。 */
+  @State videoW: number = 0;
+  @State videoH: number = 0;
+  @State videoRectX: number = 0;
+  @State videoRectY: number = 0;
+  @State videoRectW: number = 360;
+  @State videoRectH: number = 780;
 
   private service: PlayerService = new PlayerService();
   private xController: XComponentController = new XComponentController();
@@ -105,13 +147,19 @@ export struct PlayerPage {
   private metaSerial: number = 0;
   private prefetchDone: boolean = false;
   private coverPending: Set<number> = new Set<number>();
+  /** 详情缓存（id → Detail）：feed 后续条目预取后切页秒开，标题/计数不空白。 */
+  private detailCache: Map<number, Detail> = new Map<number, Detail>();
+  /** 正在预取详情的 id，避免重复请求。 */
+  private metaPending: Set<number> = new Set<number>();
+  /** 详情缓存代际：换线/清空缓存时自增，丢弃在途的旧线路响应。 */
+  private metaEpoch: number = 0;
 
   private hideTimer: number = -1;
   private tapTimer: number = -1;
-  private lineWatchTimer: number = -1;
-  private lineWatchCount: number = 0;
   private longPressTimer: number = -1;
   private bufferingTimer: number = -1;
+  /** 播放页不可见时发生线路切换：回到前台再重载，避免后台起播。 */
+  private pendingLineReload: boolean = false;
 
   private gestureMode: number = 0;
   private touchStartX: number = 0;
@@ -129,10 +177,14 @@ export struct PlayerPage {
     }
     if (!this.appActive) {
       this.service.setActive(false);
+      MediaPrefetch.pause();
       return;
     }
     if (this.pageShown) {
       this.service.setActive(true);
+      MediaPrefetch.resume();
+      // 回到前台时兜底再隐藏一次（EntryAbility 可能在后台/前台恢复过系统栏）。
+      WindowChrome.hideStatusBar();
     }
   }
 
@@ -152,10 +204,13 @@ export struct PlayerPage {
     this.currentIndex = index;
     this.initialIndex = index;
     const covers: string[] = [];
+    const metas: PageMeta[] = [];
     for (let i = 0; i < ids.length; i++) {
       covers.push('');
+      metas.push(new PageMeta());
     }
     this.coverList = covers;
+    this.pageMeta = metas;
     this.params.startEp = this.params.startEp > 0 ? this.params.startEp : 1;
 
     this.service.setVolume(UserPrefs.volume());
@@ -163,13 +218,52 @@ export struct PlayerPage {
     this.service.setMuted(this.muted);
     this.bindService();
     this.loadedBase = Lines.current();
+    // 播放页全屏：进入即隐藏状态栏（通知栏），离开时恢复（EntryAbility 另有兜底）。
+    WindowChrome.hideStatusBar();
     this.openVideo(index, false);
   }
 
   aboutToDisappear(): void {
     this.destroyed = true;
+    WindowChrome.showStatusBar();
     this.clearAllTimers();
+    this.detailCache.clear();
+    this.metaPending.clear();
+    MediaPrefetch.reset();
     this.service.release();
+  }
+
+  /** 设置页/播放页面板切换「视频比例」：立即重设 AVPlayer 缩放模式并重算展示矩形（动画过渡）。 */
+  onVideoScaleChanged(): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.service.refreshVideoScale();
+    this.recomputeVideoRect(true);
+  }
+
+  /** 线路切换：立即清空旧线路的播放地址缓存，并按新线路重新解析当前播放地址。 */
+  onLineBaseChanged(): void {
+    if (this.destroyed || this.lineBase.length === 0 || this.lineBase === this.loadedBase) {
+      return;
+    }
+    if (!this.pageShown) {
+      this.pendingLineReload = true;
+      return;
+    }
+    this.applyLineSwitch(this.lineBase);
+  }
+
+  /** 换线重载：关闭线路面板、丢弃旧线路缓存、重新 resolve 当前视频/帖子的播放地址。 */
+  private applyLineSwitch(base: string): void {
+    this.pendingLineReload = false;
+    this.sheetVisible = false;
+    this.menuVisible = false;
+    this.loadedBase = base;
+    this.clearMetaCache();
+    this.service.clearCache();
+    this.retryPlayback();
+    this.prefetchMeta();
   }
 
   private bindService(): void {
@@ -185,6 +279,7 @@ export struct PlayerPage {
     this.service.onPrepared = () => {
       this.loading = false;
       this.showChrome();
+      this.warmNextUp();
     };
     this.service.onFirstFrame = () => {
       this.starting = false;
@@ -227,6 +322,13 @@ export struct PlayerPage {
     this.service.onSeekDone = (ms: number) => {
       this.positionMs = ms;
     };
+    // 视频原始尺寸 → 重算 XComponent 展示矩形（横屏垂直位置 42%、竖屏 contain/cover 切换）。
+    // 尺寸归零（切换视频/集数瞬间）直接复位不播动画，拿到真实尺寸后再平滑过渡。
+    this.service.onVideoSize = (width: number, height: number) => {
+      this.videoW = width;
+      this.videoH = height;
+      this.recomputeVideoRect(width > 0 && height > 0);
+    };
   }
 
   private clearAllTimers(): void {
@@ -245,10 +347,6 @@ export struct PlayerPage {
     if (this.tapTimer >= 0) {
       clearTimeout(this.tapTimer);
       this.tapTimer = -1;
-    }
-    if (this.lineWatchTimer >= 0) {
-      clearTimeout(this.lineWatchTimer);
-      this.lineWatchTimer = -1;
     }
   }
 
@@ -334,6 +432,12 @@ export struct PlayerPage {
     this.dragging = false;
     this.prefetchDone = false;
     this.playVideoId = id;
+    // 切条：先把展示矩形按「尺寸未知」复位，等 onVideoSize 回调后再动画到正确比例。
+    this.videoW = 0;
+    this.videoH = 0;
+    this.recomputeVideoRect(false);
+    // 命中预取的详情时直接填充标题/计数，避免切页后空白再跳变。
+    this.applyCachedMeta(id);
     this.metaSerial++;
     const serial = this.metaSerial;
     if (this.params.feedKind === 'post') {
@@ -343,6 +447,7 @@ export struct PlayerPage {
       this.playNow(id, point.ep, point.sec, force);
     }
     this.prefetchNeighbors();
+    this.prefetchMeta();
     this.showChrome();
   }
 
@@ -352,9 +457,14 @@ export struct PlayerPage {
   }
 
   private async fetchDetail(id: number, serial: number): Promise<void> {
+    const epoch: number = this.metaEpoch;
     try {
       const detail: Detail = await Api.video(id);
-      if (serial !== this.metaSerial || this.destroyed) {
+      if (this.destroyed || epoch !== this.metaEpoch) {
+        return;
+      }
+      this.cacheDetail(detail, id);
+      if (serial !== this.metaSerial) {
         return;
       }
       this.applyDetail(detail);
@@ -401,6 +511,186 @@ export struct PlayerPage {
     }
     if (this.playVideoId <= 0 && detail.id > 0) {
       this.playVideoId = detail.id;
+    }
+    this.warmNextUp();
+  }
+
+  /** 把详情写入缓存，并同步对应页的最小展示信息（切页/相邻页占位直接复用）。 */
+  private cacheDetail(detail: Detail, id: number): void {
+    const key: number = detail.id > 0 ? detail.id : id;
+    if (key <= 0) {
+      return;
+    }
+    this.detailCache.set(key, detail);
+    const index: number = this.ids.indexOf(key);
+    if (index < 0 || index >= this.pageMeta.length) {
+      return;
+    }
+    const meta = new PageMeta();
+    meta.title = detail.title === undefined || detail.title === null ? '' : detail.title;
+    meta.cover = detail.cover === undefined || detail.cover === null ? '' : detail.cover;
+    meta.score = detail.score;
+    let total: number = detail.episode_count === undefined || detail.episode_count === null ? 0
+      : detail.episode_count;
+    const episodes = detail.episodes;
+    if (episodes !== undefined && episodes !== null && episodes.length > total) {
+      total = episodes.length;
+    }
+    meta.episodeCount = total;
+    const author = detail.author;
+    if (author !== undefined && author !== null && author.name !== undefined && author.name !== null) {
+      meta.author = author.name;
+    }
+    const counts = detail.counts;
+    if (counts !== undefined && counts !== null) {
+      meta.likeCount = counts.like;
+      meta.collectCount = counts.collect;
+      meta.commentCount = counts.comment;
+    }
+    meta.hasDetail = true;
+    const next: PageMeta[] = this.pageMeta.slice();
+    next[index] = meta;
+    this.pageMeta = next;
+    if (meta.cover.length > 0) {
+      this.setCoverAt(index, meta.cover);
+    }
+  }
+
+  /** 帖子 feed 的最小元数据缓存（标题/作者/封面/计数），供相邻页占位与切页秒开。 */
+  private cachePostMeta(post: Post, index: number): void {
+    if (index < 0 || index >= this.pageMeta.length) {
+      return;
+    }
+    const meta = new PageMeta();
+    meta.title = post.title === undefined || post.title === null ? '' : post.title;
+    meta.cover = post.cover === undefined || post.cover === null ? '' : post.cover;
+    const author = post.author;
+    if (author !== undefined && author !== null && author.name !== undefined && author.name !== null) {
+      meta.author = author.name;
+    }
+    const counts = post.counts;
+    if (counts !== undefined && counts !== null) {
+      meta.likeCount = counts.like;
+      meta.collectCount = counts.collect;
+      meta.commentCount = counts.comment;
+    }
+    meta.hasDetail = true;
+    const next: PageMeta[] = this.pageMeta.slice();
+    next[index] = meta;
+    this.pageMeta = next;
+    if (meta.cover.length > 0) {
+      this.setCoverAt(index, meta.cover);
+    }
+  }
+
+  /** 切到某条时先用缓存详情填充标题/计数，避免先空白再跳变（随后仍会静默刷新）。 */
+  private applyCachedMeta(id: number): void {
+    const cached: Detail | undefined = this.detailCache.get(id);
+    if (cached !== undefined) {
+      this.applyDetail(cached);
+      return;
+    }
+    // 帖子 feed：用预取的最小元数据先填充，切页时标题/计数不空白（网络请求随后仍会刷新）。
+    const index: number = this.ids.indexOf(id);
+    const meta: PageMeta = this.metaAt(index);
+    if (!meta.hasDetail) {
+      return;
+    }
+    if (meta.title.length > 0) {
+      this.title = meta.title;
+    }
+    if (meta.author.length > 0) {
+      this.authorName = meta.author;
+    }
+    if (meta.cover.length > 0) {
+      this.coverUrl = meta.cover;
+      this.setCoverAt(index, meta.cover);
+    }
+    if (meta.episodeCount > 0) {
+      this.episodeCount = meta.episodeCount;
+    }
+    if (meta.score > 0) {
+      this.score = meta.score;
+    }
+    this.likeCount = meta.likeCount;
+    this.collectCount = meta.collectCount;
+    this.commentCount = meta.commentCount;
+  }
+
+  /**
+   * 预取当前 index 之后 2 个条目的详情（标题/封面/点赞/收藏/评论数/集数）。
+   * 失败静默；已有缓存或请求在途时跳过；切页后相邻页占位与切页首屏都受益。
+   */
+  private prefetchMeta(): void {
+    const epoch: number = this.metaEpoch;
+    const end: number = Math.min(this.ids.length - 1, this.currentIndex + 2);
+    for (let index = this.currentIndex + 1; index <= end; index++) {
+      const id: number = this.ids[index];
+      if (id <= 0 || this.detailCache.has(id) || this.metaPending.has(id) || this.coverPending.has(index)) {
+        continue;
+      }
+      this.metaPending.add(id);
+      if (this.params.feedKind === 'post') {
+        Api.post(id).then((post: Post) => {
+          this.metaPending.delete(id);
+          if (this.destroyed || epoch !== this.metaEpoch) {
+            return;
+          }
+          this.cachePostMeta(post, index);
+        }).catch(() => {
+          this.metaPending.delete(id);
+        });
+      } else {
+        Api.video(id).then((detail: Detail) => {
+          this.metaPending.delete(id);
+          if (this.destroyed || epoch !== this.metaEpoch) {
+            return;
+          }
+          this.cacheDetail(detail, id);
+        }).catch(() => {
+          this.metaPending.delete(id);
+        });
+      }
+    }
+  }
+
+  /** 换线/离开时清空详情缓存与相邻页占位信息（旧线路数据不复用）。 */
+  private clearMetaCache(): void {
+    this.metaEpoch++;
+    this.detailCache.clear();
+    this.metaPending.clear();
+    const next: PageMeta[] = [];
+    for (let i = 0; i < this.ids.length; i++) {
+      next.push(new PageMeta());
+    }
+    this.pageMeta = next;
+  }
+
+  /**
+   * 预加载：当前视频的下一集 + feed 接下来 2 条视频（各自续播集）。
+   * 走本地代理缓存，切集/上滑时首帧直接从缓存起播。失败静默，不阻塞播放。
+   */
+  private warmNextUp(): void {
+    if (this.destroyed || this.params.feedKind === 'post' || !this.service.useLocalProxy) {
+      return;
+    }
+    const id = this.currentId();
+    if (id > 0 && (this.episodeCount <= 0 || this.ep < this.episodeCount)) {
+      MediaPrefetch.warmEpisode(id, this.ep + 1);
+    }
+    // 收缩 feed 预热窗口：丢弃已滑过视频的排队任务，避免流量浪费。
+    MediaPrefetch.retainFeedWindow(this.ids, this.currentIndex + 1, 2);
+    for (let k = 1; k <= 2; k++) {
+      const idx = this.currentIndex + k;
+      if (idx < 0 || idx >= this.ids.length) {
+        break;
+      }
+      const nextId = this.ids[idx];
+      if (nextId <= 0) {
+        continue;
+      }
+      const point = this.startPointFor(nextId, false);
+      MediaPrefetch.warmEpisode(nextId, point.ep);
     }
   }
 
@@ -470,6 +760,20 @@ export struct PlayerPage {
     if (id <= 0 || this.coverAt(index).length > 0 || this.coverPending.has(index)) {
       return;
     }
+    // 预取元数据/详情已带回封面时直接复用，避免重复请求。
+    const meta: PageMeta = this.metaAt(index);
+    if (meta.cover.length > 0) {
+      this.setCoverAt(index, meta.cover);
+      return;
+    }
+    const cached: Detail | undefined = this.detailCache.get(id);
+    if (cached !== undefined) {
+      const cachedCover: string = cached.cover === undefined || cached.cover === null ? '' : cached.cover;
+      if (cachedCover.length > 0) {
+        this.setCoverAt(index, cachedCover);
+        return;
+      }
+    }
     this.coverPending.add(index);
     if (this.params.feedKind === 'post') {
       Api.post(id).then((post: Post) => {
@@ -479,6 +783,7 @@ export struct PlayerPage {
         }
         const cover: string = post.cover === undefined || post.cover === null ? '' : post.cover;
         this.setCoverAt(index, cover);
+        this.cachePostMeta(post, index);
       }).catch(() => {
         this.coverPending.delete(index);
       });
@@ -488,6 +793,8 @@ export struct PlayerPage {
         if (this.destroyed) {
           return;
         }
+        // 顺带写入详情缓存：标题/计数在切页时可直接复用。
+        this.cacheDetail(detail, id);
         const cover: string = detail.cover === undefined || detail.cover === null ? '' : detail.cover;
         this.setCoverAt(index, cover);
       }).catch(() => {
@@ -536,7 +843,7 @@ export struct PlayerPage {
   }
 
   private switchEpisode(ep: number): void {
-    this.showEpisodes = false;
+    this.sheetVisible = false;
     if (ep < 1 || ep === this.ep) {
       return;
     }
@@ -664,11 +971,24 @@ export struct PlayerPage {
   }
 
   /* ── Chrome 显隐 / 锁定 / 倍速 / 静音 ─────────────── */
+  /** chrome 显隐统一入口：快速淡入（140ms）/淡出（120ms），由 transition + animateTo 共同渲染。 */
+  private setChromeVisible(visible: boolean): void {
+    if (this.destroyed || this.chromeVisible === visible) {
+      return;
+    }
+    animateTo({
+      duration: visible ? HgDuration.micro : HgDuration.microExit,
+      curve: Curve.FastOutSlowIn
+    }, () => {
+      this.chromeVisible = visible;
+    });
+  }
+
   private showChrome(): void {
     if (this.locked || this.destroyed) {
       return;
     }
-    this.chromeVisible = true;
+    this.setChromeVisible(true);
     this.scheduleHideChrome();
   }
 
@@ -677,22 +997,30 @@ export struct PlayerPage {
       clearTimeout(this.hideTimer);
       this.hideTimer = -1;
     }
-    if (!this.playing || this.destroyed) {
+    if (!this.playing || this.destroyed || this.menuVisible) {
       return;
     }
     this.hideTimer = setTimeout(() => {
       this.hideTimer = -1;
-      if (!this.destroyed && this.playing && !this.locked && !this.dragging) {
-        this.chromeVisible = false;
+      if (!this.destroyed && this.playing && !this.locked && !this.dragging && !this.menuVisible) {
+        this.setChromeVisible(false);
       }
     }, CHROME_HIDE_MS);
   }
 
   private toggleLock(): void {
-    this.locked = !this.locked;
+    const next: boolean = !this.locked;
     this.haptic(10);
-    if (this.locked) {
-      this.chromeVisible = false;
+    animateTo({
+      duration: next ? HgDuration.microExit : HgDuration.micro,
+      curve: Curve.FastOutSlowIn
+    }, () => {
+      this.locked = next;
+      if (next) {
+        this.chromeVisible = false;
+      }
+    });
+    if (next) {
       if (this.hideTimer >= 0) {
         clearTimeout(this.hideTimer);
         this.hideTimer = -1;
@@ -796,11 +1124,90 @@ export struct PlayerPage {
         }
       } else if (this.gestureMode === 0) {
         if (Date.now() - this.touchStartAt < 320) {
-          this.handleTap();
+          // chrome 整体设为 hitTest None（保证视频手势/上下滑可用），控件点击在这里按坐标分发。
+          if (!this.handleChromeTap(x, y)) {
+            this.handleTap();
+          }
         }
       }
       this.gestureMode = 0;
     }
+  }
+
+  /**
+   * 控件点击手动分发：chrome 层为了不挡视频手势被设为 hitTestBehavior(None)，
+   * 因此按钮点击由手势层按坐标命中后分发（避免整层拦截导致上下滑/单击显隐失效）。
+   */
+  private handleChromeTap(px: number, py: number): boolean {
+    if (!this.chromeVisible || this.locked) {
+      return false;
+    }
+    const w: number = this.screenW > 0 ? this.screenW : 360;
+    const h: number = this.screenH > 0 ? this.screenH : 780;
+    const inset: number = this.bottomInset;
+    const hit: number = HgSize.hitTarget;
+    // 顶部栏
+    if (py <= this.topSafePad() + hit + HgSpace.s) {
+      if (px <= HgSpace.l + hit) {
+        this.navStack.pop();
+        return true;
+      }
+      if (px >= w - HgSpace.l - hit) {
+        this.setMenuVisible(true);
+        return true;
+      }
+      if (px >= w - HgSpace.l - hit - 8 - 76 && px < w - HgSpace.l - hit - 6) {
+        this.openLines();
+        return true;
+      }
+      return false;
+    }
+    // 底部控制条（播放/静音/倍速/选集/锁）
+    const rowBottom: number = h - inset - HgSpace.m;
+    const rowTop: number = rowBottom - hit;
+    if (py >= rowTop - HgSpace.m && py <= rowBottom + HgSpace.l) {
+      if (px >= w - HgSpace.pageInset - hit) {
+        this.toggleLock();
+        return true;
+      }
+      if (px >= w - HgSpace.pageInset - hit - HgSpace.s - 84 &&
+        px < w - HgSpace.pageInset - hit - HgSpace.s) {
+        this.openSheet('episode');
+        return true;
+      }
+      if (px <= HgSpace.pageInset + hit) {
+        this.togglePlay();
+        return true;
+      }
+      if (px <= HgSpace.pageInset + hit * 2 + HgSpace.s) {
+        this.toggleMute();
+        return true;
+      }
+      // 倍速 chip：点按循环切换倍速（手动路由无法弹 bindMenu）。
+      if (px >= w - 200 && px < w - 134) {
+        const rates: number[] = [1, 1.25, 1.5, 2];
+        const at: number = rates.indexOf(this.rate);
+        this.changeRate(rates[(at + 1) % rates.length]);
+        return true;
+      }
+      return false;
+    }
+    // 右侧互动栏（点赞/收藏/评论/分享）
+    if (px >= w - 88 && py > h * 0.28 && py < h * 0.60) {
+      const ratio: number = py / h;
+      if (ratio < 0.36) {
+        this.toggleLike();
+      } else if (ratio < 0.435) {
+        this.toggleFav();
+      } else if (ratio < 0.50) {
+        this.openSheet('comments');
+        this.showChrome();
+      } else {
+        this.share();
+      }
+      return true;
+    }
+    return false;
   }
 
   /** 单击=显示/隐藏 chrome；双击=播放/暂停；单击延迟 280ms 等待双击判定。 */
@@ -832,8 +1239,9 @@ export struct PlayerPage {
     if (this.locked) {
       return;
     }
+    PlaybackLog.info('ui.chrome', this.chromeVisible ? 'hide' : 'show');
     if (this.chromeVisible) {
-      this.chromeVisible = false;
+      this.setChromeVisible(false);
       if (this.hideTimer >= 0) {
         clearTimeout(this.hideTimer);
         this.hideTimer = -1;
@@ -894,71 +1302,124 @@ export struct PlayerPage {
     }, 1500);
   }
 
-  /* ── 线路变化监听（线路 Sheet 为全局弹层，关闭无回调，用短轮询兜底） ── */
-  private watchLineChange(): void {
-    const base = Lines.current();
-    this.lineWatchCount = 0;
-    if (this.lineWatchTimer >= 0) {
-      clearTimeout(this.lineWatchTimer);
-      this.lineWatchTimer = -1;
-    }
-    this.lineWatchTimer = setTimeout(() => {
-      this.lineWatchTick(base);
-    }, 500);
+  /* ── 线路面板 ─────────────────────────────────────── */
+  /**
+   * 打开线路面板：用播放页自身 NavDestination 上的 bindSheet，而不是 Index 根节点的全局 Sheet。
+   * 全局 Sheet 挂在 Page 层（Navigation 之下），Navigation(Stack 模式) 推起的播放页会盖在它上面，
+   * 表现为面板被播放页遮住/无法操作；绑到播放页后层级在播放器与控件之上，样式与全局一致。
+   * 选线后 Lines.setBase 写 AppStorage(K_LINE_BASE)，由 onLineBaseChanged 立即重载，无需轮询。
+   */
+  private openLines(): void {
+    this.openSheet('lines');
   }
 
-  private lineWatchTick(base: string): void {
-    if (this.destroyed) {
-      return;
-    }
-    this.lineWatchCount++;
-    if (Lines.current() !== base) {
-      this.lineWatchTimer = -1;
-      this.loadedBase = Lines.current();
-      this.retryPlayback();
-      return;
-    }
-    if (this.lineWatchCount > 60) {
-      this.lineWatchTimer = -1;
-      return;
-    }
-    this.lineWatchTimer = setTimeout(() => {
-      this.lineWatchTick(base);
-    }, 500);
+  /** 打开底部面板（选集/评论/详情/线路共用同一个 Sheet）。 */
+  private openSheet(kind: string): void {
+    this.sheetKind = kind;
+    this.sheetVisible = true;
   }
 
-  /* ── 面板 / 菜单 ──────────────────────────────────── */
-  private moreItems(): MenuElement[] {
-    const items: MenuElement[] = [];
-    const detailItem: MenuElement = {
-      value: '详情与简介',
-      action: () => {
-        this.showDetail = true;
-      }
-    };
-    items.push(detailItem);
-    const episodeItem: MenuElement = {
-      value: '选集',
-      action: () => {
-        this.showEpisodes = true;
-      }
-    };
-    items.push(episodeItem);
-    const commentItem: MenuElement = {
-      value: '评论',
-      action: () => {
-        this.showComments = true;
-      }
-    };
-    items.push(commentItem);
-    const shareItem: MenuElement = {
-      value: '分享链接',
-      action: () => {
-        this.share();
-      }
-    };
-    items.push(shareItem);
-    return items;
+  /** 各面板高度。 */
+  private sheetHeight(): string {
+    if (this.sheetKind === 'comments') {
+      return '76%';
+    }
+    if (this.sheetKind === 'detail') {
+      return '66%';
+    }
+    if (this.sheetKind === 'lines') {
+      return '90%';
+    }
+    return '64%';
+  }
+
+  /* ── 更多面板（画面比例 + 面板入口） ──────────────── */
+  /**
+   * 右上角「更多」改为页面内自定义弹层：bindMenu 的菜单项在展开时按快照渲染，
+   * 勾选态不会随 UserPrefs/@StorageProp 变化刷新，导致切了比例后 ✓ 不动、画面也不变。
+   * 自定义弹层直接读 @StorageProp(K_VIDEO_SCALE) 渲染 ✓，点击可靠，并复用 chrome 的 140ms 渐隐动画。
+   */
+  private setMenuVisible(visible: boolean): void {
+    if (this.destroyed || this.menuVisible === visible) {
+      return;
+    }
+    if (visible && this.hideTimer >= 0) {
+      clearTimeout(this.hideTimer);
+      this.hideTimer = -1;
+    }
+    animateTo({
+      duration: visible ? HgDuration.micro : HgDuration.microExit,
+      curve: Curve.FastOutSlowIn
+    }, () => {
+      this.menuVisible = visible;
+    });
+    if (!visible) {
+      this.showChrome();
+    }
+  }
+
+  private toggleMenu(): void {
+    this.setMenuVisible(!this.menuVisible);
+  }
+
+  /** 点选画面比例：写偏好 → AVPlayer 立即换模式 → 重算展示矩形；面板保持打开以便看到 ✓ 与画面变化。 */
+  private pickScale(mode: string): void {
+    if (this.scaleRowDisabled(mode)) {
+      UiBus.toastInfo('横屏视频自动适应，不裁切');
+      return;
+    }
+    const normalized: string = UserPrefs.normalizeVideoScale(mode);
+    if (UserPrefs.videoScale() === normalized) {
+      return;
+    }
+    UserPrefs.setVideoScale(normalized);
+    this.service.refreshVideoScale();
+    this.recomputeVideoRect(true);
+    this.haptic(8);
+    if (normalized === 'cover' && this.isLandscapeVideo()) {
+      UiBus.toastInfo('横屏视频自动适应（不裁切）');
+    } else {
+      UiBus.toastInfo(normalized === 'cover' ? '画面比例：全屏沉浸'
+        : normalized === 'fill' ? '画面比例：拉伸铺满' : '画面比例：适应');
+    }
+  }
+
+  private scaleLabel(mode: string): string {
+    if (mode === 'cover') {
+      return '全屏沉浸（裁切铺满）';
+    }
+    if (mode === 'fill') {
+      return '拉伸铺满';
+    }
+    return '适应画面（完整显示）';
+  }
+
+  /** 当前是否勾选某比例：按「实际生效」模式判断（横屏视频的 cover 回退为 contain），面板打开时实时刷新。 */
+  private menuCheck(mode: string): boolean {
+    return this.effectiveVideoScale() === mode;
+  }
+
+  /** 横屏视频禁用「全屏沉浸」项：避免出现「勾了裁切但画面是适应」的错觉。 */
+  private scaleRowDisabled(mode: string): boolean {
+    return mode === 'cover' && this.isLandscapeVideo();
+  }
+
+  private scaleRowColor(mode: string): string {
+    return this.scaleRowDisabled(mode) ? HgColor.textDisabled(true) : HgColor.textPrimary(true);
+  }
+
+  /** 面板里的普通入口：先关面板再打开对应 Sheet。 */
+  private onMenuAction(action: string): void {
+    this.setMenuVisible(false);
+    if (action === 'detail') {
+      this.openSheet('detail');
+    } else if (action === 'episodes') {
+      this.openSheet('episode');
+    } else if (action === 'comments') {
+      this.openSheet('comments');
+    } else if (action === 'share') {
+      this.share();
+    }
   }
 
   private rateItems(): MenuElement[] {
@@ -1019,12 +1480,163 @@ export struct PlayerPage {
     return text;
   }
 
-  private lineHost(): string {
-    const host = hostOf(Lines.current());
-    if (host.length > 12) {
-      return host.substring(0, 12) + '…';
+  /**
+   * 顶部安全区：本机 setWindowLayoutFullScreen(true) 下 topInset 可能上报 0，
+   * 用最小内边距兜底，保证标题/返回键不被状态栏或挖孔压住（隐藏状态栏后也留有呼吸空间）。
+   */
+  private topSafePad(): number {
+    return this.topInset > 0 ? this.topInset : TOP_SAFE_FALLBACK;
+  }
+
+  /** 当前视频是否横屏（宽 > 高）；尺寸未知时返回 false。 */
+  private isLandscapeVideo(): boolean {
+    return this.videoW > 0 && this.videoH > 0 && this.videoW > this.videoH;
+  }
+
+  /** 实际生效的画面模式：横屏视频即使选「全屏沉浸」也回退为「适应」（不裁切）。 */
+  private effectiveVideoScale(): string {
+    const mode: string = UserPrefs.normalizeVideoScale(this.videoScale);
+    if (mode === 'cover' && this.isLandscapeVideo()) {
+      return 'contain';
     }
-    return host;
+    return mode;
+  }
+
+  /**
+   * 按视频宽高比计算 XComponent 的展示矩形（vp，由 AVPlayer FIT 渲染，surface 宽高比始终等于视频比例）：
+   * - 拉伸：全屏，交给 AVPlayer FIT 变形；
+   * - 适应（含横屏回退）：min 比例缩放完整显示，横屏视频中心放在屏幕高度 42% 处（略偏上），竖屏居中；
+   * - 全屏沉浸（仅竖屏）：max 比例等比放大，超出窗口部分由窗口裁切（cover）。
+   * 尺寸/位置变化走 140ms 动画，切比例或切视频时不跳变。
+   */
+  private recomputeVideoRect(animated: boolean): void {
+    const sw: number = this.screenW > 0 ? this.screenW : 360;
+    const sh: number = this.screenH > 0 ? this.screenH : 780;
+    const mode: string = this.effectiveVideoScale();
+    const vw: number = this.videoW;
+    const vh: number = this.videoH;
+    let w: number = sw;
+    let h: number = sh;
+    let x: number = 0;
+    let y: number = 0;
+    if (mode !== 'fill' && vw > 0 && vh > 0) {
+      if (mode === 'cover') {
+        // 竖屏全屏沉浸：等比放大到覆盖整屏，居中裁切（surface 比屏幕大，左右/上下超出部分被窗口裁剪）。
+        const cover: number = Math.max(sw / vw, sh / vh);
+        w = vw * cover;
+        h = vh * cover;
+        x = (sw - w) / 2;
+        y = (sh - h) / 2;
+      } else {
+        const fit: number = Math.min(sw / vw, sh / vh);
+        w = vw * fit;
+        h = vh * fit;
+        x = (sw - w) / 2;
+        y = vw > vh ? sh * LANDSCAPE_CENTER_Y_RATIO - h / 2 : (sh - h) / 2;
+        if (y < 0) {
+          y = 0;
+        }
+        if (y + h > sh) {
+          y = sh - h;
+        }
+      }
+    }
+    if (this.videoRectX === x && this.videoRectY === y &&
+      this.videoRectW === w && this.videoRectH === h) {
+      return;
+    }
+    const apply = () => {
+      this.videoRectX = x;
+      this.videoRectY = y;
+      this.videoRectW = w;
+      this.videoRectH = h;
+    };
+    if (animated) {
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, apply);
+    } else {
+      apply();
+    }
+  }
+
+  /* ── 相邻页最小信息占位（随 Swiper 滑动展示，数据来自预取元数据） ── */
+  private metaAt(index: number): PageMeta {
+    if (index < 0 || index >= this.pageMeta.length) {
+      return new PageMeta();
+    }
+    return this.pageMeta[index];
+  }
+
+  private pageTitleAt(index: number): string {
+    const meta: PageMeta = this.metaAt(index);
+    if (meta.title.length > 0) {
+      return meta.title;
+    }
+    if (index === this.currentIndex) {
+      return this.titleText();
+    }
+    return '第 ' + (index + 1) + ' 条';
+  }
+
+  private pageSubtitleAt(index: number): string {
+    const id: number = index >= 0 && index < this.ids.length ? this.ids[index] : 0;
+    const progress: WatchProgress | null = id > 0 ? UserPrefs.progressOf(id) : null;
+    const meta: PageMeta = this.metaAt(index);
+    const parts: string[] = [];
+    if (progress !== null && progress.ep > 1) {
+      parts.push('看到第 ' + progress.ep + ' 集');
+    }
+    if (meta.episodeCount > 1) {
+      parts.push('共 ' + meta.episodeCount + ' 集');
+    }
+    if (parts.length === 0) {
+      return index === this.currentIndex ? this.subtitleText() : '';
+    }
+    let text: string = parts[0];
+    for (let i = 1; i < parts.length; i++) {
+      text = text + ' · ' + parts[i];
+    }
+    return text;
+  }
+
+  private pageMetaTextAt(index: number): string {
+    const meta: PageMeta = this.metaAt(index);
+    const parts: string[] = [];
+    if (meta.author.length > 0) {
+      parts.push(meta.author);
+    }
+    if (meta.episodeCount > 1) {
+      parts.push('共 ' + meta.episodeCount + ' 集');
+    }
+    if (meta.score > 0) {
+      parts.push('★ ' + meta.score.toFixed(1));
+    }
+    if (parts.length === 0) {
+      return '正在加载…';
+    }
+    let text: string = parts[0];
+    for (let i = 1; i < parts.length; i++) {
+      text = text + ' · ' + parts[i];
+    }
+    return text;
+  }
+
+  private pageProgressPercentAt(index: number): string {
+    const id: number = index >= 0 && index < this.ids.length ? this.ids[index] : 0;
+    if (id <= 0) {
+      return '0%';
+    }
+    const progress: WatchProgress | null = UserPrefs.progressOf(id);
+    if (progress === null || progress.dur <= 0 || progress.t <= 0) {
+      return '0%';
+    }
+    let ratio: number = progress.t / progress.dur;
+    if (ratio < 0) {
+      ratio = 0;
+    }
+    if (ratio > 1) {
+      ratio = 1;
+    }
+    return (ratio * 100).toFixed(2) + '%';
   }
 
   private rateLabel(): string {
@@ -1090,7 +1702,7 @@ export struct PlayerPage {
         .margin({ left: HgSpace.s, right: HgSpace.s })
 
         Row({ space: 2 }) {
-          Text(this.lineHost())
+          Text('线路')
             .fontSize(HgFont.micro)
             .fontColor(HgColor.videoInk2)
             .maxLines(1)
@@ -1103,8 +1715,7 @@ export struct PlayerPage {
         .backgroundColor(HgColor.videoChip)
         .borderRadius(16)
         .onClick(() => {
-          UiBus.openLines();
-          this.watchLineChange();
+          this.openLines();
         })
         .accessibilityText('切换线路')
 
@@ -1115,7 +1726,9 @@ export struct PlayerPage {
         }
         .width(HgSize.hitTarget)
         .height(HgSize.hitTarget)
-        .bindMenu(this.moreItems())
+        .onClick(() => {
+          this.toggleMenu();
+        })
         .accessibilityText('更多')
       }
       .width('100%')
@@ -1123,11 +1736,12 @@ export struct PlayerPage {
       .padding({ left: HgSpace.s, right: HgSpace.s })
     }
     .width('100%')
-    .padding({ top: this.topInset, bottom: HgSpace.xxl })
+    .padding({ top: this.topSafePad(), bottom: HgSpace.xxl })
     .linearGradient({
       angle: 180,
       colors: [['#B3000000', 0.0], ['#00000000', 1.0]]
     })
+    .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
   }
 
   @Builder
@@ -1190,7 +1804,7 @@ export struct PlayerPage {
         }
         .width(48)
         .onClick(() => {
-          this.showComments = true;
+          this.openSheet('comments');
           this.showChrome();
         })
         .accessibilityText('评论')
@@ -1221,6 +1835,7 @@ export struct PlayerPage {
     .width('100%')
     .height('100%')
     .hitTestBehavior(HitTestMode.None)
+    .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
   }
 
   @Builder
@@ -1246,7 +1861,7 @@ export struct PlayerPage {
         .alignItems(HorizontalAlign.Start)
         .padding({ right: 72 })
         .onClick(() => {
-          this.showDetail = true;
+          this.openSheet('detail');
         })
 
         PlayerSeekBar({
@@ -1328,7 +1943,8 @@ export struct PlayerPage {
             .backgroundColor(HgColor.videoChip)
             .borderRadius(16)
             .onClick(() => {
-              this.showEpisodes = true;
+              PlaybackLog.info('ui.episode', 'tap');
+              this.openSheet('episode');
             })
             .accessibilityText('选集')
           }
@@ -1365,6 +1981,7 @@ export struct PlayerPage {
     .width('100%')
     .height('100%')
     .hitTestBehavior(HitTestMode.None)
+    .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
   }
 
   @Builder
@@ -1466,7 +2083,7 @@ export struct PlayerPage {
               .backgroundColor(HgColor.videoChip)
               .borderRadius(HgRadius.chip)
               .onClick(() => {
-                UiBus.openLines();
+                this.openLines();
               })
           }
           .margin({ top: HgSpace.xs })
@@ -1497,7 +2114,8 @@ export struct PlayerPage {
     }
     .width('100%')
     .height('100%')
-    .hitTestBehavior(HitTestMode.None)
+    // 加载/缓冲/拖拽提示不拦手势；错误态有「重试/切换线路」按钮，需要可点击。
+    .hitTestBehavior(this.errorText.length > 0 ? HitTestMode.Default : HitTestMode.None)
   }
 
   @Builder
@@ -1511,7 +2129,8 @@ export struct PlayerPage {
           .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.xs, bottom: HgSpace.xs })
           .backgroundColor(this.speedLocked ? HgColor.accent(true) : HgColor.videoChipStrong)
           .borderRadius(HgRadius.chip)
-          .margin({ top: this.topInset + 52 })
+          .margin({ top: this.topSafePad() + 52 })
+          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
           .onClick(() => {
             if (this.speedLocked) {
               this.speedLocked = false;
@@ -1526,36 +2145,129 @@ export struct PlayerPage {
     .hitTestBehavior(HitTestMode.None)
   }
 
+  /**
+   * 锁定态：只保留一个无背景的「锁住」图标（轻微阴影保证深色画面上可见），
+   * 不显示 mask/半透明底板/解锁按钮，避免遮挡视频；44x44vp 热区点击解锁后恢复原有 chrome。
+   */
   @Builder
   LockLayer() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Stack({ alignContent: Alignment.End }) {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.lock_open'))
-            .fontSize(HgIconSize.emphasis)
-            .fontColor([HgColor.videoInk])
-        }
-        .width(HgSize.hitTarget)
-        .height(HgSize.hitTarget)
-        .borderRadius(HgSize.hitTarget / 2)
-        .backgroundColor(HgColor.videoChip)
-        .margin({ right: HgSpace.l })
-        .onClick(() => {
-          this.toggleLock();
-        })
-        .accessibilityText('解锁')
+    Stack({ alignContent: Alignment.BottomEnd }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.lock'))
+          .fontSize(HgIconSize.emphasis)
+          .fontColor([HgColor.videoInk])
+          .shadow({ radius: 6, color: HgColor.shadowElev3, offsetX: 0, offsetY: 1 })
       }
-      .width('100%')
-      .height('100%')
-      .hitTestBehavior(HitTestMode.None)
-
-      Text(fmtTime(Math.floor(this.positionMs / 1000)) + ' / ' + fmtTime(Math.floor(this.durationMs / 1000)))
-        .fontSize(HgFont.micro)
-        .fontColor(HgColor.videoInk3)
-        .margin({ bottom: this.bottomInset + HgSpace.l })
+      .width(HgSize.hitTarget)
+      .height(HgSize.hitTarget)
+      .onClick(() => {
+        this.toggleLock();
+      })
+      .accessibilityText('已锁定，点按解锁')
+      .margin({ right: HgSpace.l, bottom: this.bottomInset + HgSpace.xxl })
     }
     .width('100%')
     .height('100%')
+    .hitTestBehavior(HitTestMode.None)
+    .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+  }
+
+  /* ── 「更多」自定义弹层（遮罩 + 右上角面板） ──────── */
+  @Builder
+  MoreMenuMask() {
+    Column()
+      .width('100%')
+      .height('100%')
+      .backgroundColor(HgColor.mask(true))
+      .onClick(() => {
+        this.setMenuVisible(false);
+      })
+      .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+  }
+
+  @Builder
+  MenuScaleRow(mode: string) {
+    Row() {
+      Text(this.scaleLabel(mode))
+        .fontSize(HgFont.body)
+        .fontColor(this.scaleRowColor(mode))
+        .layoutWeight(1)
+      if (!this.scaleRowDisabled(mode) && this.menuCheck(mode)) {
+        SymbolGlyph($r('sys.symbol.checkmark'))
+          .fontSize(HgIconSize.compact)
+          .fontColor([HgColor.accent(true)])
+      }
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: HgSpace.m, right: HgSpace.m })
+    .onClick(() => {
+      this.pickScale(mode);
+    })
+    .accessibilityText(this.scaleLabel(mode) + (this.menuCheck(mode) ? '，已选' : ''))
+  }
+
+  @Builder
+  MenuActionRow(action: string, label: string) {
+    Row() {
+      Text(label)
+        .fontSize(HgFont.body)
+        .fontColor(HgColor.textPrimary(true))
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: HgSpace.m, right: HgSpace.m })
+    .onClick(() => {
+      this.onMenuAction(action);
+    })
+    .accessibilityText(label)
+  }
+
+  @Builder
+  MoreMenuPanel() {
+    Column() {
+      Row() {
+        Text('画面比例')
+          .fontSize(HgFont.caption)
+          .fontColor(HgColor.textTertiary(true))
+          .layoutWeight(1)
+        if (this.isLandscapeVideo()) {
+          Text('横屏自动适应')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.videoInk3)
+        }
+      }
+      .width('100%')
+      .height(32)
+      .padding({ left: HgSpace.m, right: HgSpace.m })
+
+      this.MenuScaleRow('cover')
+      this.MenuScaleRow('contain')
+      this.MenuScaleRow('fill')
+
+      Divider()
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(true))
+        .margin({ top: HgSpace.xs, bottom: HgSpace.xs })
+
+      this.MenuActionRow('detail', '详情与简介')
+      this.MenuActionRow('episodes', '选集')
+      this.MenuActionRow('comments', '评论')
+      this.MenuActionRow('share', '分享链接')
+    }
+    .width(232)
+    .padding({ top: HgSpace.s, bottom: HgSpace.s })
+    .backgroundColor(HgColor.surface1(true))
+    .borderRadius(HgRadius.group)
+    .border({ width: 1, color: HgColor.hairline(true) })
+    .shadow({ radius: 24, color: HgColor.shadowElev3, offsetX: 0, offsetY: 8 })
+    .position({ x: this.screenW - 232 - HgSpace.m, y: this.topSafePad() + 52 })
+    .onClick(() => {
+    })
+    .transition(TransitionEffect.OPACITY
+      .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
+      .combine(TransitionEffect.translate({ y: -10 })))
   }
 
   @Builder
@@ -1579,21 +2291,33 @@ export struct PlayerPage {
     .hitTestBehavior(HitTestMode.None)
   }
 
+  /**
+   * 当前页：手势层 + chrome。chrome 放进 Swiper 页内，
+   * 这样上滑切条时标题/返回、右侧点赞栏、底部控件会跟着页面一起移动，而不是固定悬浮。
+   */
   @Builder
   CurrentPage() {
-    Stack() {
+    Stack({ alignContent: Alignment.TopStart }) {
       Column()
         .width('100%')
         .height('100%')
         .backgroundColor(Color.Transparent)
+        .onTouch((event: TouchEvent) => {
+          this.handleTouch(event);
+        })
+      if (this.chromeVisible && !this.locked) {
+        this.TopChrome()
+        this.RailChrome()
+        this.BottomChrome()
+      }
+      // 加载/缓冲/播放/错误浮层也放进页内，滑动时跟着一起走，不会悬停在固定位置。
+      this.OverlayLayer()
     }
     .width('100%')
     .height('100%')
-    .onTouch((event: TouchEvent) => {
-      this.handleTouch(event);
-    })
   }
 
+  /** 相邻页：海报 + 与当前页同位置的标题/作者/进度最小信息占位（滑到该条前先有内容）。 */
   @Builder
   PosterPage(index: number) {
     Stack() {
@@ -1610,14 +2334,98 @@ export struct PlayerPage {
           coverHeight: '100%'
         })
       }
-      Text('第 ' + (index + 1) + ' / ' + this.ids.length + ' 条')
-        .fontSize(HgFont.micro)
-        .fontColor(HgColor.videoInk3)
-        .margin({ bottom: this.bottomInset + HgSpace.xl })
-        .align(Alignment.Bottom)
+      Column() {
+        this.PosterTopInfo(index)
+        Blank()
+        this.PosterBottomInfo(index)
+      }
+      .width('100%')
+      .height('100%')
     }
     .width('100%')
     .height('100%')
+  }
+
+  @Builder
+  PosterTopInfo(index: number) {
+    Column() {
+      Row() {
+        Row().width(HgSize.hitTarget)
+        Column({ space: 2 }) {
+          Text(this.pageTitleAt(index))
+            .fontSize(HgFont.playerTitle)
+            .fontWeight(HgFont.weightMedium)
+            .fontColor(HgColor.videoInk)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+          Text(this.pageSubtitleAt(index))
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.videoInk3)
+            .maxLines(1)
+            .width('100%')
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: HgSpace.s, right: HgSpace.s })
+        Row().width(HgSize.hitTarget)
+      }
+      .width('100%')
+      .height(44)
+      .padding({ left: HgSpace.s, right: HgSpace.s })
+    }
+    .width('100%')
+    .padding({ top: this.topSafePad(), bottom: HgSpace.xxl })
+    .linearGradient({
+      angle: 180,
+      colors: [['#B3000000', 0.0], ['#00000000', 1.0]]
+    })
+  }
+
+  @Builder
+  PosterBottomInfo(index: number) {
+    Column({ space: HgSpace.xs }) {
+      Text(this.pageTitleAt(index))
+        .fontSize(HgFont.playerTitle)
+        .fontWeight(HgFont.weightMedium)
+        .fontColor(HgColor.videoInk)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+      Text(this.pageMetaTextAt(index))
+        .fontSize(HgFont.playerMeta)
+        .fontColor(HgColor.videoInk2)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+      Stack({ alignContent: Alignment.Start }) {
+        Row()
+          .width('100%')
+          .height(3)
+          .backgroundColor('#4DFFFFFF')
+          .borderRadius(2)
+        Row()
+          .width(this.pageProgressPercentAt(index))
+          .height(3)
+          .backgroundColor(HgColor.videoInk)
+          .borderRadius(2)
+      }
+      .width('100%')
+      .height(24)
+      .margin({ top: HgSpace.m })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding({
+      left: HgSpace.pageInset,
+      right: HgSpace.pageInset,
+      top: HgSpace.xxl,
+      bottom: this.bottomInset + HgSpace.m
+    })
+    .linearGradient({
+      angle: 180,
+      colors: [['#00000000', 0.0], ['#66000000', 0.45], ['#E6000000', 1.0]]
+    })
   }
 
   @Builder
@@ -1659,6 +2467,31 @@ export struct PlayerPage {
     })
   }
 
+  @Builder
+  LineSheetBuilder() {
+    LineSheet({
+      // 与全局线路面板一致的配色（跟随主题），播放页本身固定深色背景。
+      dark: UserPrefs.dark(),
+      onClose: () => {
+        this.sheetVisible = false;
+      }
+    })
+  }
+
+  /** 单一 Sheet 的内容路由。 */
+  @Builder
+  SheetContent() {
+    if (this.sheetKind === 'comments') {
+      this.CommentsSheetBuilder()
+    } else if (this.sheetKind === 'detail') {
+      this.DetailSheetBuilder()
+    } else if (this.sheetKind === 'lines') {
+      this.LineSheetBuilder()
+    } else {
+      this.EpisodeSheetBuilder()
+    }
+  }
+
   build() {
     NavDestination() {
       Stack({ alignContent: Alignment.TopStart }) {
@@ -1667,13 +2500,16 @@ export struct PlayerPage {
           .height('100%')
           .backgroundColor(HgColor.playerBackground)
 
+        // 画面尺寸 = 按视频宽高比计算出的矩形（适应模式精确 letterbox，横屏垂直位置略偏上）；
+        // 拉伸模式矩形为全屏，由 AVPlayer FIT 变形铺满。
         XComponent({
           id: 'hgPlayerSurface',
           type: XComponentType.SURFACE,
           controller: this.xController
         })
-          .width('100%')
-          .height('100%')
+          .width(this.videoRectW)
+          .height(this.videoRectH)
+          .position({ x: this.videoRectX, y: this.videoRectY })
           .onLoad(() => {
             try {
               this.service.attachSurface(this.xController.getXComponentSurfaceId());
@@ -1695,6 +2531,9 @@ export struct PlayerPage {
             }
           }, (id: number, index: number) => index + ':' + id)
         }
+        // 关键：Swiper 必须从点击的那一条开始，否则进入时停在 0 号 PosterPage，
+        // 而实际视频在别的页里播放（黑屏 +「第一条没法看」）。
+        .index(this.initialIndex)
         .vertical(true)
         .loop(false)
         .indicator(false)
@@ -1713,16 +2552,13 @@ export struct PlayerPage {
         .width('100%')
         .height('100%')
 
-        if (this.chromeVisible && !this.locked) {
-          this.TopChrome()
-          this.RailChrome()
-          this.BottomChrome()
-        }
-
-        this.OverlayLayer()
         this.SpeedChip()
         if (this.locked) {
           this.LockLayer()
+        }
+        if (this.menuVisible) {
+          this.MoreMenuMask()
+          this.MoreMenuPanel()
         }
       }
       .width('100%')
@@ -1737,32 +2573,20 @@ export struct PlayerPage {
         if (!isNaN(height) && height > 0) {
           this.screenH = height;
         }
+        this.recomputeVideoRect(false);
       })
-      .bindSheet($$this.showEpisodes, this.EpisodeSheetBuilder(), {
-        height: '64%',
+      // 单一 Sheet：选集/评论/详情/线路共用（多 bindSheet 叠加在本机只生效一个、且可能残留遮罩挡住触摸）。
+      .bindSheet($$this.sheetVisible, this.SheetContent(), {
+        height: this.sheetHeight(),
         dragBar: true,
         showClose: true,
         backgroundColor: HgColor.surface1(true),
+        onAppear: () => {
+          PlaybackLog.info('ui.sheet', 'appear kind=' + this.sheetKind);
+        },
         onDisappear: () => {
-          this.showEpisodes = false;
-        }
-      })
-      .bindSheet($$this.showComments, this.CommentsSheetBuilder(), {
-        height: '76%',
-        dragBar: true,
-        showClose: true,
-        backgroundColor: HgColor.surface1(true),
-        onDisappear: () => {
-          this.showComments = false;
-        }
-      })
-      .bindSheet($$this.showDetail, this.DetailSheetBuilder(), {
-        height: '66%',
-        dragBar: true,
-        showClose: true,
-        backgroundColor: HgColor.surface1(true),
-        onDisappear: () => {
-          this.showDetail = false;
+          PlaybackLog.info('ui.sheet', 'disappear kind=' + this.sheetKind);
+          this.sheetVisible = false;
         }
       })
     }
@@ -1773,27 +2597,32 @@ export struct PlayerPage {
         return;
       }
       this.pageShown = true;
+      WindowChrome.hideStatusBar();
       this.service.setActive(this.appActive);
-      if (this.loadedBase.length > 0 && Lines.current() !== this.loadedBase) {
-        this.loadedBase = Lines.current();
-        this.retryPlayback();
+      MediaPrefetch.resume();
+      if (this.pendingLineReload || (this.loadedBase.length > 0 && Lines.current() !== this.loadedBase)) {
+        this.applyLineSwitch(Lines.current());
         return;
       }
       this.showChrome();
     })
     .onHidden(() => {
       this.pageShown = false;
+      WindowChrome.showStatusBar();
       this.service.setActive(false);
+      MediaPrefetch.pause();
     })
     .onBackPressed(() => {
+      if (this.menuVisible) {
+        this.setMenuVisible(false);
+        return true;
+      }
       if (this.locked) {
         this.toggleLock();
         return true;
       }
-      if (this.showEpisodes || this.showComments || this.showDetail) {
-        this.showEpisodes = false;
-        this.showComments = false;
-        this.showDetail = false;
+      if (this.sheetVisible) {
+        this.sheetVisible = false;
         return true;
       }
       return false;

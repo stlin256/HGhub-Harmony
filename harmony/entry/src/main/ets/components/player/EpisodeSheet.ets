@@ -48,17 +48,26 @@ export struct EpisodeSheet {
   @Builder
   Cell(ep: number) {
     Stack({ alignContent: Alignment.Bottom }) {
-      Text(String(ep))
-        .fontSize(HgFont.cardTitle)
-        .fontWeight(ep === this.current ? HgFont.weightMedium : HgFont.weightRegular)
-        .fontColor(this.labelColor(ep))
-        .width('100%')
-        .textAlign(TextAlign.Center)
+      // 数字始终水平/垂直居中；已看集用底部居中的小圆角指示条（不再用整行横向蓝线，避免错位感）。
+      Column() {
+        Text(String(ep))
+          .fontSize(HgFont.cardTitle)
+          .fontWeight(ep === this.current ? HgFont.weightMedium : HgFont.weightRegular)
+          .fontColor(this.labelColor(ep))
+          .width('100%')
+          .textAlign(TextAlign.Center)
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
+
       if (ep < this.current) {
         Row()
-          .width('100%')
+          .width(20)
           .height(2)
+          .borderRadius(1)
           .backgroundColor(HgColor.accent(this.dark))
+          .margin({ bottom: 5 })
       }
     }
     .width('100%')
@@ -88,6 +97,8 @@ export struct EpisodeSheet {
       }
       .width('100%')
       .height(HgSize.topBar)
+      // 右侧给系统 Sheet 关闭按钮（X）留位，避免与「第 N 集」重叠。
+      .padding({ right: 40 })
 
       Grid(this.scroller) {
         ForEach(this.numbers, (ep: number) => {
@@ -106,6 +117,6 @@ export struct EpisodeSheet {
     }
     .width('100%')
     .height('100%')
-    .padding({ left: HgSpace.sheetInset, right: HgSpace.sheetInset, bottom: HgSpace.l })
+    .padding({ left: HgSpace.sheetInset, right: HgSpace.sheetInset, top: HgSpace.s, bottom: HgSpace.l })
   }
 }
