@@ -1,16 +1,22 @@
 import { Api } from '../services/Api';
-import { Lines } from '../services/Lines';
+import { K_LINE_BASE, Lines } from '../services/Lines';
 import { ImageCache } from '../services/ImageCache';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_BOTTOM_INSET, K_DARK, UserPrefs } from '../state/UserPrefs';
+import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, UserPrefs } from '../state/UserPrefs';
 import { hostOf } from '../utils/Format';
 
 interface ThemeOption {
   key: string;
   label: string;
+}
+
+interface ScaleOption {
+  key: string;
+  label: string;
+  desc: string;
 }
 
 const THEME_OPTIONS: ThemeOption[] = [
@@ -19,19 +25,29 @@ const THEME_OPTIONS: ThemeOption[] = [
   { key: 'light', label: '浅色' }
 ];
 
+/** 画面比例：contain=适应（默认，完整不裁切）/ fill=拉伸铺满 / cover=裁切铺满。 */
+const SCALE_OPTIONS: ScaleOption[] = [
+  { key: 'contain', label: '适应', desc: '适应（推荐）：完整显示画面，不裁切；比例不符时留黑边' },
+  { key: 'fill', label: '拉伸', desc: '拉伸：铺满屏幕，画面可能被拉伸变形' },
+  { key: 'cover', label: '裁切', desc: '裁切：保持画面比例铺满屏幕，裁掉超出画面的边缘' }
+];
+
 /** 设置：外观/播放/网络/本地数据/其他 分组卡片，全部立即生效并持久化。 */
 @Component
 export struct SettingsPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  @StorageProp(K_VIDEO_SCALE) videoScale: string = 'contain';
   @State themeMode: string = 'system';
   @State muteOnStartup: boolean = true;
   @State cacheSize: number = 0;
+  @State cacheDiskCount: number = 0;
   @State favCount: number = 0;
   @State historyCount: number = 0;
   @State searchHistCount: number = 0;
   @State lineHost: string = '';
+  @StorageProp(K_LINE_BASE) @Watch('onLineChanged') lineBase: string = '';
   @State checking: boolean = false;
   @State clearing: boolean = false;
 
@@ -39,10 +55,15 @@ export struct SettingsPage {
     this.themeMode = UserPrefs.themeMode();
     this.muteOnStartup = UserPrefs.muteOnStartup();
     this.cacheSize = ImageCache.size();
+    this.cacheDiskCount = ImageCache.diskCount();
     this.favCount = UserPrefs.favs().length;
     this.historyCount = UserPrefs.history().length;
     this.searchHistCount = UserPrefs.searchHist().length;
-    this.lineHost = hostOf(Lines.current());
+    this.lineHost = hostOf(this.lineBase.length > 0 ? this.lineBase : Lines.current());
+  }
+
+  onLineChanged(): void {
+    this.lineHost = hostOf(this.lineBase.length > 0 ? this.lineBase : Lines.current());
   }
 
   private setTheme(mode: string): void {
@@ -51,10 +72,23 @@ export struct SettingsPage {
     UiBus.toastInfo('主题已切换');
   }
 
+  private setScale(key: string, label: string): void {
+    if (this.videoScale === key) {
+      return;
+    }
+    UserPrefs.setVideoScale(key);
+    UiBus.toastInfo('画面比例：' + label);
+  }
+
+  private cacheSummary(): string {
+    // 内存（PixelMap）与磁盘持久化封面数量分开展示，与 ImageCache 的双层缓存一致。
+    return '内存 ' + this.cacheSize + ' 张 · 磁盘 ' + this.cacheDiskCount + ' 张封面';
+  }
+
   private clearCache(): void {
     AlertDialog.show({
       title: '清理缓存',
-      message: '只清除封面内存缓存，收藏、观看记录、搜索历史与登录状态都会保留。',
+      message: '将清除内存与磁盘封面缓存；收藏、观看记录、搜索历史与登录状态都会保留。',
       primaryButton: {
         value: '取消',
         action: () => {
@@ -64,10 +98,11 @@ export struct SettingsPage {
         value: '清理',
         action: () => {
           this.clearing = true;
-          Api.clearCache();
+          ImageCache.clear();
           this.cacheSize = ImageCache.size();
+          this.cacheDiskCount = ImageCache.diskCount();
           this.clearing = false;
-          UiBus.toastOk('缓存已清理');
+          UiBus.toastOk('封面缓存已清理');
         }
       }
     });
@@ -254,6 +289,57 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(HgSize.listRowDouble)
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      Column() {
+        Row({ space: HgSpace.m }) {
+          this.RowIcon($r('sys.symbol.aspect_ratio'))
+          Text('画面比例')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+            .layoutWeight(1)
+        }
+        .width('100%')
+        .height(HgSize.listRow)
+
+        Row({ space: HgSpace.s }) {
+          ForEach(SCALE_OPTIONS, (option: ScaleOption) => {
+            Text(option.label)
+              .fontSize(HgFont.caption)
+              .fontWeight(this.videoScale === option.key ? HgFont.weightMedium : HgFont.weightRegular)
+              .fontColor(this.videoScale === option.key ? HgColor.onAccent(this.dark) : HgColor.textSecondary(this.dark))
+              .height(HgSize.chipHeight)
+              .padding({ left: HgSpace.m, right: HgSpace.m })
+              .backgroundColor(this.videoScale === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
+              .borderRadius(HgRadius.chip)
+              .onClick(() => {
+                this.setScale(option.key, option.label);
+              })
+          }, (option: ScaleOption) => 'scale-' + option.key)
+        }
+        .width('100%')
+        .padding({ bottom: HgSpace.s })
+
+        Column({ space: HgSpace.xxs }) {
+          ForEach(SCALE_OPTIONS, (option: ScaleOption) => {
+            Text(option.desc)
+              .width('100%')
+              .fontSize(HgFont.micro)
+              .lineHeight(HgFont.lineMicro)
+              .fontColor(this.videoScale === option.key ? HgColor.textSecondary(this.dark) : HgColor.textTertiary(this.dark))
+              .maxLines(2)
+          }, (option: ScaleOption) => 'desc-' + option.key)
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        .padding({ bottom: HgSpace.m })
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
     .padding({ left: HgSpace.l, right: HgSpace.l })
@@ -299,7 +385,7 @@ export struct SettingsPage {
           Text('封面缓存')
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('内存中已缓存 ' + this.cacheSize + ' 张封面')
+          Text(this.cacheSummary())
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
         }
@@ -446,33 +532,77 @@ export struct SettingsPage {
             this.navStack.pop();
           }
         })
-        Scroll() {
-          Column() {
-            this.GroupTitle('外观')
-            this.ThemeGroup()
-            this.GroupTitle('播放')
-            this.PlayGroup()
-            this.GroupTitle('网络')
-            this.NetworkGroup()
-            this.GroupTitle('本地数据')
-            this.LocalGroup()
-            this.GroupTitle('其他')
-            this.OtherGroup()
-            Text('HGhub ' + Api.appVersion() + ' · HarmonyOS NEXT 客户端 · 仅限非商业使用')
+        Column() {
+          List() {
+            ListItem() {
+              Column() {
+                this.GroupTitle('外观')
+                this.ThemeGroup()
+              }
               .width('100%')
-              .fontSize(HgFont.micro)
-              .fontColor(HgColor.textTertiary(this.dark))
-              .textAlign(TextAlign.Center)
-              .margin({ top: HgSpace.xxl, bottom: HgSpace.xxl })
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+
+            ListItem() {
+              Column() {
+                this.GroupTitle('播放')
+                this.PlayGroup()
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+
+            ListItem() {
+              Column() {
+                this.GroupTitle('网络')
+                this.NetworkGroup()
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+
+            ListItem() {
+              Column() {
+                this.GroupTitle('本地数据')
+                this.LocalGroup()
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+
+            ListItem() {
+              Column() {
+                this.GroupTitle('其他')
+                this.OtherGroup()
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+
+            ListItem() {
+              Text('HGhub ' + Api.appVersion() + ' · HarmonyOS NEXT 客户端 · 仅限非商业使用')
+                .width('100%')
+                .fontSize(HgFont.micro)
+                .fontColor(HgColor.textTertiary(this.dark))
+                .textAlign(TextAlign.Center)
+                .padding({ top: HgSpace.xxl, bottom: HgSpace.xxl })
+            }
+            .width('100%')
           }
           .width('100%')
-          .alignItems(HorizontalAlign.Start)
-          .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+          .layoutWeight(1)
+          .scrollBar(BarState.Off)
+          .edgeEffect(EdgeEffect.Spring)
+          .cachedCount(4)
         }
         .layoutWeight(1)
         .width('100%')
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
+        .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
       }
       .width('100%')
       .height('100%')

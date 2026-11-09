@@ -5,7 +5,7 @@ import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
 import { HgEmptyState, HgSkeletonGrid } from '../components/HgCommon';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_DARK, K_TOP_INSET } from '../state/UserPrefs';
+import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 
 /** 12 个热门题材（从原 Web src/pages/Search.tsx 克隆）。 */
@@ -20,6 +20,7 @@ export struct SearchPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
+  @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
   @State keyword: string = '';
   @State submitted: string = '';
   @State hist: string[] = [];
@@ -59,6 +60,7 @@ export struct SearchPage {
     this.total = 0;
     this.loading = true;
     this.searchFirst();
+    this.getUIContext().getFocusController().clearFocus();
   }
 
   private async searchFirst(): Promise<void> {
@@ -276,25 +278,25 @@ export struct SearchPage {
   @Builder
   IdleView() {
     Scroll() {
-      Column() {
+      Column({ space: HgSpace.xl }) {
         if (this.hist.length > 0) {
-          this.SectionTitle('搜索历史', '清空', () => {
-            UserPrefs.clearSearchHist();
-            this.hist = UserPrefs.searchHist();
-          })
-          Flex({ wrap: FlexWrap.Wrap }) {
-            ForEach(this.hist, (word: string) => {
-              this.SmallChip(word, () => {
-                this.submit(word);
-              })
-            }, (word: string) => 'hist-' + word)
+          Column({ space: HgSpace.s }) {
+            this.SectionTitle('搜索历史', '清空', () => {
+              UserPrefs.clearSearchHist();
+              this.hist = UserPrefs.searchHist();
+            })
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(this.hist, (word: string) => {
+                this.SmallChip(word, () => {
+                  this.submit(word);
+                })
+              }, (word: string) => 'hist-' + word)
+            }
+            .width('100%')
           }
           .width('100%')
-          .padding({ bottom: HgSpace.s })
+          .alignItems(HorizontalAlign.Start)
         }
-
-        Row()
-          .height(HgSpace.l)
 
         Column() {
           Row() {
@@ -336,15 +338,21 @@ export struct SearchPage {
           .width('100%')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))
-          .margin({ top: HgSpace.xl })
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
-      .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m, bottom: HgSpace.xxl })
+      .padding({
+        left: HgSpace.pageInset,
+        right: HgSpace.pageInset,
+        top: HgSpace.xl,
+        bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.l
+      })
     }
     .width('100%')
     .layoutWeight(1)
+    .align(Alignment.Top)
     .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
   }
 
   @Builder
@@ -377,6 +385,7 @@ export struct SearchPage {
     }
     .width('100%')
     .layoutWeight(1)
+    .align(Alignment.Top)
     .scrollBar(BarState.Off)
   }
 
@@ -439,6 +448,7 @@ export struct SearchPage {
           errorText: this.errorText,
           refreshing: this.refreshing,
           emptyTitle: '没有找到相关内容',
+          bottomPadding: HgSize.tabBarFloating + this.bottomInset,
           onOpen: (index: number) => {
             this.openAt(index);
           },
