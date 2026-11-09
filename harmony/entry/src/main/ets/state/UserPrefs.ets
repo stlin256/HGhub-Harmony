@@ -17,6 +17,7 @@ export const K_FOLLOWS = 'hgFollowsJson';
 export const K_HISTORY = 'hgHistoryJson';
 export const K_SEARCH_HIST = 'hgSearchHistJson';
 export const K_USER = 'hgUserJson';
+export const K_VIDEO_SCALE = 'hgVideoScale';
 export const K_TOP_INSET = 'hgTopInset';
 export const K_BOTTOM_INSET = 'hgBottomInset';
 export const K_APP_ACTIVE = 'hgAppActive';
@@ -81,6 +82,7 @@ export class UserPrefs {
     AppStorage.setOrCreate<boolean>(K_MUTED, Prefs.getBool('muted', true));
     AppStorage.setOrCreate<boolean>(K_MUTE_ON_STARTUP, Prefs.getBool('mute_on_startup', true));
     AppStorage.setOrCreate<number>(K_VOLUME, Prefs.getNumber('volume', 0.7));
+    AppStorage.setOrCreate<string>(K_VIDEO_SCALE, UserPrefs.normalizeVideoScale(Prefs.getString('video_scale', 'contain')));
     AppStorage.setOrCreate<string>(K_LIKES, Prefs.getString('likes', '[]'));
     AppStorage.setOrCreate<string>(K_FAVS, Prefs.getString('favs', '[]'));
     AppStorage.setOrCreate<string>(K_FOLLOWS, Prefs.getString('follows', '[]'));
@@ -174,6 +176,26 @@ export class UserPrefs {
     } else {
       UserPrefs.setMuted(false);
     }
+  }
+
+  /* ── 画面比例（播放器缩放模式） ───────────────────── */
+  /** 画面比例：contain=缩小适应（默认，不裁切）/ fill=拉伸铺满 / cover=裁切铺满。 */
+  static normalizeVideoScale(mode: string): string {
+    if (mode === 'fill' || mode === 'cover' || mode === 'contain') {
+      return mode;
+    }
+    return 'contain';
+  }
+
+  static videoScale(): string {
+    const value = AppStorage.get<string>(K_VIDEO_SCALE);
+    return UserPrefs.normalizeVideoScale(value === undefined ? 'contain' : value);
+  }
+
+  static setVideoScale(mode: string): void {
+    const next = UserPrefs.normalizeVideoScale(mode);
+    Prefs.putString('video_scale', next);
+    AppStorage.setOrCreate<string>(K_VIDEO_SCALE, next);
   }
 
   /* ── 收藏 / 喜欢 / 关注 / 历史 ─────────────────────── */

@@ -95,6 +95,35 @@ export interface Detail {
   created_at?: string;
 }
 
+/** 新版播放接口（POST /api/videos/{id}/episodes/{ep}/playback）响应。 */
+export interface PlaybackCdn {
+  m3u8Enabled?: boolean;
+  otherEnabled?: boolean;
+  authKey?: string;
+  authValue?: string;
+  app?: string;
+  imgEnabled?: boolean;
+  imgAuthKey?: string;
+  imgAuthValue?: string;
+}
+
+export interface PlaybackStreams {
+  main?: string;
+  hevc?: string;
+}
+
+export interface PlaybackInfo {
+  id?: string;
+  ep?: number;
+  duration?: number;
+  media_id?: string;
+  mode?: number;
+  timestamp?: number;
+  manifest_method?: string;
+  streams?: PlaybackStreams;
+  cdn?: PlaybackCdn;
+}
+
 export interface PlayInfo {
   id: number;
   ep_num: number;

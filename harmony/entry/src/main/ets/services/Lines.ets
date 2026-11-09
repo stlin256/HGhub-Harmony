@@ -1,4 +1,5 @@
 import { JSON } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Net, RawText } from './Net';
 import { Prefs } from './Prefs';
 import { Session } from './Session';
@@ -6,6 +7,8 @@ import { LineItem, LineMirrors, LineProbe } from '../models/Types';
 
 /** 默认固定线路 1（与原项目 net.rs 的 DEFAULT_BASE 一致）。 */
 export const DEFAULT_BASE: string = 'https://example.invalid';
+/** AppStorage key：当前线路（供页面响应式刷新；切换线路后内容页重新加载）。 */
+export const K_LINE_BASE = 'hgLineBase';
 
 const PUBLISH_PAGE: string = 'https://example.invalid';
 const MIRROR_MAX: number = 60;
@@ -203,6 +206,8 @@ export class Lines {
     if (normalized.length > 0) {
       Lines.base = normalized;
     }
+    AppStorage.setOrCreate<string>(K_LINE_BASE, Lines.base);
+    hilog.info(0x0000, 'HGLine', 'line loaded: %{public}s', Lines.base);
   }
 
   static normalize(raw: string): string {
@@ -252,6 +257,8 @@ export class Lines {
     const previous = Lines.base;
     Lines.base = next;
     Prefs.putString('line_base', next);
+    AppStorage.setOrCreate<string>(K_LINE_BASE, next);
+    hilog.info(0x0000, 'HGLine', 'line switched: %{public}s -> %{public}s', previous, next);
     if (previous !== next) {
       Session.clear();
     }

@@ -1,6 +1,7 @@
 import { http } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { util, JSON } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { EdgeRequestBody, Envelope } from '../models/Types';
 
 /** 与原项目一致的桌面 Chrome UA。 */
@@ -73,12 +74,28 @@ function truncate(text: string, limit: number): string {
   return text.length > limit ? text.substring(0, limit) : text;
 }
 
+/** 只取 host 用于日志（不含路径/查询参数）。 */
+function hostOfUrl(raw: string): string {
+  const schemeEnd = raw.indexOf('://');
+  if (schemeEnd < 0) {
+    return raw;
+  }
+  const hostEnd = raw.indexOf('/', schemeEnd + 3);
+  return hostEnd < 0 ? raw.substring(schemeEnd + 3) : raw.substring(schemeEnd + 3, hostEnd);
+}
+
 /** 网络层：统一封装 @ohos.net.http、边缘信封、错误归一与重试。 */
 export class Net {
   static errorText(err: Object): string {
     const be = err as BusinessError;
     const message: string | undefined = be.message;
     const code: number | undefined = be.code;
+    if (code !== undefined && code !== null) {
+      const friendly = Net.networkErrorText(code);
+      if (friendly.length > 0) {
+        return friendly;
+      }
+    }
     if (message !== undefined && message !== null && message.length > 0) {
       if (code !== undefined && code !== null) {
         return message + ' (' + code + ')';
@@ -86,6 +103,29 @@ export class Net {
       return message;
     }
     return '网络请求失败';
+  }
+
+  /** 网络错误码 → 用户可读中文（2300xxx 为 Network Kit 错误码）。 */
+  static networkErrorText(code: number): string {
+    if (code === 2300028) {
+      return '网络请求超时，请检查网络或切换线路';
+    }
+    if (code === 2300006) {
+      return '无法解析服务器地址，请检查网络或切换线路';
+    }
+    if (code === 2300007) {
+      return '无法连接服务器，请检查网络或切换线路';
+    }
+    if (code === 2300035 || code === 2300036) {
+      return '网络连接被中断，请重试';
+    }
+    if (code === 2300052) {
+      return '网络不可用，请检查网络连接';
+    }
+    if (code === 2300997) {
+      return '系统拦截了明文 HTTP 请求';
+    }
+    return '';
   }
 
   private static retryable(message: string): boolean {
@@ -114,8 +154,7 @@ export class Net {
         header: headers,
         connectTimeout: 10000,
         readTimeout: timeoutMs,
-        expectDataType: asBytes ? http.HttpDataType.ARRAY_BUFFER : http.HttpDataType.STRING,
-        usingProtocol: http.HttpProtocol.HTTP2
+        expectDataType: asBytes ? http.HttpDataType.ARRAY_BUFFER : http.HttpDataType.STRING
       };
       if (body.length > 0) {
         options.extraData = body;
@@ -175,6 +214,9 @@ export class Net {
     body: Object | null, token: string): Promise<Object | null> {
     const url = base + '/api/edge/request';
     const referer = base + '/';
+    const opPath = path.split('?')[0];
+    hilog.info(0x0000, 'HGNet', 'edge %{public}s %{public}s host=%{public}s',
+      method, opPath, hostOfUrl(base));
     const headers: Record<string, string> = {
       'User-Agent': USER_AGENT,
       'Accept': 'application/json',
@@ -192,6 +234,8 @@ export class Net {
         return await Net.edgeOnce(url, headers, method, path, body);
       } catch (err) {
         const message = Net.errorText(err);
+        hilog.error(0x0000, 'HGNet', 'edge fail %{public}s %{public}s host=%{public}s: %{public}s',
+          method, opPath, hostOfUrl(base), message);
         lastError = message;
         if (!Net.retryable(message) || attempt + 1 >= attempts) {
           throw new Error(message);
@@ -240,23 +284,29 @@ export class Net {
     throw new Error(msg);
   }
 
-  /** 拉取封面字节（带重试）。 */
+  /** 拉取封面字节（短超时 + 最多 2 次；失败带诊断日志）。 */
   static async fetchCover(url: string, referer: string): Promise<Uint8Array> {
+    const host = hostOfUrl(url);
     let lastError = 'network error';
-    for (let attempt = 0; attempt < API_RETRY_TIMES; attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const raw = await Net.getBytes(url, referer, DEFAULT_TIMEOUT);
-        if (raw.code >= 200 && raw.code < 300) {
+        hilog.info(0x0000, 'HGCover', 'fetch start host=%{public}s attempt=%{public}d',
+          host, attempt + 1);
+        const raw = await Net.getBytes(url, referer, 12000);
+        hilog.info(0x0000, 'HGCover', 'fetch resp host=%{public}s code=%{public}d bytes=%{public}d',
+          host, raw.code, raw.bytes.length);
+        if (raw.code >= 200 && raw.code < 300 && raw.bytes.length > 0) {
           return raw.bytes;
         }
         lastError = 'HTTP ' + raw.code;
       } catch (err) {
         lastError = Net.errorText(err);
+        hilog.error(0x0000, 'HGCover', 'fetch fail host=%{public}s: %{public}s', host, lastError);
       }
       if (!Net.retryable(lastError)) {
-        throw new Error(lastError);
+        break;
       }
-      await delay(350 * (attempt + 1));
+      await delay(300);
     }
     throw new Error(lastError);
   }
