@@ -31,6 +31,8 @@ const TOP_SAFE_FALLBACK: number = HgSpace.xxl;
 const LANDSCAPE_CENTER_Y_RATIO: number = 0.42;
 const LONG_PRESS_MS: number = 380;
 const SEEK_FULL_WIDTH_SECONDS: number = 120;
+/** 滑动时视频层 Y 位移的方向系数：SwiperAnimationEvent.currentOffset 与页面位移同号时取 1。 */
+const VIDEO_DRAG_SIGN: number = 1;
 /** 宽屏评论侧栏宽度（vp）与最小宽度。 */
 const COMMENT_PANEL_W: number = 380;
 const COMMENT_PANEL_MIN_W: number = 280;
@@ -125,6 +127,12 @@ export struct PlayerPage {
   /* ── 控制状态 ─────────────────────────────────────── */
   @State chromeVisible: boolean = true;
   @State locked: boolean = false;
+  /** 上下滑切条中视频层的 Y 位移（vp）：让正在播放的画面跟页面一起滑动，而不是固定不动。 */
+  @State videoDragY: number = 0;
+  /** 切集/换剧/换线重载中：底部进度条与时间淡出，避免 0:00 / 新时长瞬间跳变。 */
+  @State progressSwitching: boolean = false;
+  /** 倍速 chip 的轻微缩放脉冲（切换倍速/锁倍速时的过渡反馈）。 */
+  @State ratePulse: number = 1;
   @State muted: boolean = true;
   @State rate: number = 1;
   @State speedBoost: boolean = false;
@@ -177,6 +185,20 @@ export struct PlayerPage {
   private tapTimer: number = -1;
   private longPressTimer: number = -1;
   private bufferingTimer: number = -1;
+  /** 本次上下滑手势首个 currentOffset 基准（兼容 offset 为相对值/绝对值两种实现）。 */
+  private swipeOffsetBase: number = 0;
+  /** 当前是否处于一次上下滑手势/翻页动画中。 */
+  private swipeSessionActive: boolean = false;
+  /** 本次滑动是否切到了新页（切页后视频层保持滑出，等新视频 prepared 再复位，避免旧画面闪回中间）。 */
+  private swipeTargetChanged: boolean = false;
+  /** 是否处于松手后的翻页动画中（期间 prepared 的复位要等动画结束，避免滑到一半视频突然回到中间）。 */
+  private swipeAnimating: boolean = false;
+  /** 翻页动画期间新视频已 prepared：等动画结束后再复位视频层。 */
+  private pendingVideoSettle: boolean = false;
+  /** videoDragY 兜底复位计时（Swiper 回调异常时 500ms 内回正，避免视频永久偏移）。 */
+  private videoDragResetTimer: number = -1;
+  /** 倍速 chip 脉冲回弹计时。 */
+  private ratePulseTimer: number = -1;
   /** 播放页不可见时发生线路切换：回到前台再重载，避免后台起播。 */
   private pendingLineReload: boolean = false;
 
@@ -292,18 +314,32 @@ export struct PlayerPage {
       this.starting = true;
       this.ended = false;
       this.errorText = '';
+      // 切集/换剧/换线：底部进度与时间先淡出（200ms），避免 0:00 与新时长瞬间跳变。
+      this.progressSwitching = true;
       this.positionMs = 0;
       this.durationMs = 0;
       this.bufferedMs = 0;
     };
     this.service.onPrepared = () => {
       this.loading = false;
+      this.progressSwitching = false;
+      // 新视频画面已可上屏：把滑出屏幕的视频层复位到基准位（此时海报层仍盖着，不会看到跳变）。
+      // 若翻页动画还没结束，推迟到 onAnimationEnd 再复位，避免画面在滑动中途回正。
+      if (this.swipeAnimating) {
+        this.pendingVideoSettle = true;
+      } else {
+        this.settleVideoDragAfterSwitch();
+      }
       this.showChrome();
       this.warmNextUp();
     };
     this.service.onFirstFrame = () => {
       this.starting = false;
       this.loading = false;
+      // 兜底：若 onAnimationEnd/onChange 因异常没触发，首帧时把滑出视频层复位，避免画面永久偏移。
+      if (!this.swipeAnimating && this.videoDragY !== 0) {
+        this.settleVideoDragAfterSwitch();
+      }
     };
     this.service.onState = (state: string) => {
       this.playing = state === 'playing';
@@ -336,6 +372,8 @@ export struct PlayerPage {
       this.starting = false;
       this.playing = false;
       this.buffering = false;
+      this.progressSwitching = false;
+      this.settleVideoDragAfterSwitch();
       this.errorText = message;
       this.showChrome();
     };
@@ -367,6 +405,14 @@ export struct PlayerPage {
     if (this.tapTimer >= 0) {
       clearTimeout(this.tapTimer);
       this.tapTimer = -1;
+    }
+    if (this.videoDragResetTimer >= 0) {
+      clearTimeout(this.videoDragResetTimer);
+      this.videoDragResetTimer = -1;
+    }
+    if (this.ratePulseTimer >= 0) {
+      clearTimeout(this.ratePulseTimer);
+      this.ratePulseTimer = -1;
     }
   }
 
@@ -854,6 +900,7 @@ export struct PlayerPage {
     this.errorText = '';
     this.loading = true;
     this.starting = true;
+    this.progressSwitching = true;
     if (this.params.feedKind === 'post') {
       this.metaSerial++;
       const point = new StartPoint(1, 0);
@@ -917,7 +964,8 @@ export struct PlayerPage {
       return;
     }
     if (!UserPrefs.loggedIn()) {
-      UiBus.openLogin();
+      // 未登录不再弹登录面板，避免打断观看，只提示（点赞需要账号）。
+      UiBus.toast('未登录，无法点赞');
       return;
     }
     const next = !this.liked;
@@ -943,11 +991,17 @@ export struct PlayerPage {
     if (id <= 0) {
       return;
     }
+    const next = !this.faved;
     if (!UserPrefs.loggedIn()) {
-      UiBus.openLogin();
+      // 未登录：收藏只落本地（UserPrefs.toggleFav），不弹登录、不调 Api，计数本地 ±1。
+      this.faved = next;
+      this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
+      UserPrefs.toggleFav(id);
+      this.haptic(next ? 18 : 10);
+      this.showChrome();
+      UiBus.toast(next ? '已收藏（本地）' : '已取消收藏');
       return;
     }
-    const next = !this.faved;
     const previousCount = this.collectCount;
     this.faved = next;
     this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
@@ -1075,8 +1129,29 @@ export struct PlayerPage {
     this.speedLocked = false;
     this.speedBoost = false;
     this.service.setSpeed(rate);
+    this.pulseRateChip();
     this.showChrome();
     UiBus.toastInfo(rate === 1 ? '已恢复 1.0x 倍速' : rate + 'x 倍速');
+  }
+
+  /** 倍速 chip 数字变化时做一个 90ms 的轻微缩放脉冲（切倍速/锁倍速都有过渡反馈）。 */
+  private pulseRateChip(): void {
+    if (this.ratePulseTimer >= 0) {
+      clearTimeout(this.ratePulseTimer);
+      this.ratePulseTimer = -1;
+    }
+    animateTo({ duration: HgDuration.press, curve: Curve.FastOutSlowIn }, () => {
+      this.ratePulse = 0.92;
+    });
+    this.ratePulseTimer = setTimeout(() => {
+      this.ratePulseTimer = -1;
+      if (this.destroyed) {
+        return;
+      }
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        this.ratePulse = 1;
+      });
+    }, HgDuration.press);
   }
 
   /* ── 手势 ─────────────────────────────────────────── */
@@ -1144,10 +1219,12 @@ export struct PlayerPage {
           this.speedLocked = true;
           this.speedBoost = false;
           this.service.setSpeed(2);
+          this.pulseRateChip();
           UiBus.toastInfo('已锁定 2.0x 倍速');
         } else {
           this.speedBoost = false;
           this.service.setSpeed(this.rate);
+          this.pulseRateChip();
         }
       } else if (this.gestureMode === 0) {
         if (Date.now() - this.touchStartAt < 320) {
@@ -1156,6 +1233,10 @@ export struct PlayerPage {
             this.handleTap();
           }
         }
+      }
+      // 上下滑手势结束但 Swiper 动画回调没来（取消/异常）时，兜底把视频层回正。
+      if (this.swipeSessionActive && this.videoDragResetTimer < 0) {
+        this.scheduleVideoDragReset();
       }
       this.gestureMode = 0;
     }
@@ -1172,7 +1253,7 @@ export struct PlayerPage {
     // chrome 位于 Swiper 页内：侧栏打开时页面已收窄为左侧视频区，坐标基准同步用可用宽度。
     const w: number = this.videoAreaWidth();
     const h: number = this.frameHeight();
-    const inset: number = this.bottomInset;
+    const inset: number = this.bottomSafePad();
     const hit: number = HgSize.hitTarget;
     // 顶部栏：命中区随横屏左右安全区平移（竖屏 inset=0 时与手机原坐标一致）
     const topLeft: number = this.leftInset + HgSpace.l;
@@ -1310,6 +1391,7 @@ export struct PlayerPage {
       this.gestureMode = 2;
       this.speedBoost = true;
       this.service.setSpeed(2);
+      this.pulseRateChip();
       this.haptic(10);
       this.showChrome();
     }, LONG_PRESS_MS);
@@ -1337,6 +1419,155 @@ export struct PlayerPage {
         this.bufferingLong = true;
       }
     }, 1500);
+  }
+
+  /* ── 暂停浮层 / 滑切封面 ───────────────────────────── */
+  /** 暂停态「继续播放」按钮是否可见（与 OverlayLayer 内的显示条件保持一致）。 */
+  private pausedPlayVisible(): boolean {
+    return !this.playing && !this.loading && !this.buffering && !this.starting &&
+      this.errorText.length === 0 && !this.ended && !this.dragging;
+  }
+
+  /**
+   * OverlayLayer 是否需要接收点击：错误态（重试/切换线路）与结束态（重播/下一集）的按钮要能点，
+   * 暂停态的「继续播放」也要能点；加载/缓冲/拖拽提示保持穿透，不拦手势。
+   */
+  private overlayInteractive(): boolean {
+    return this.errorText.length > 0 || this.ended || this.pausedPlayVisible();
+  }
+
+  /** 点浮层空白处：暂停态整层恢复播放；错误/结束态只让按钮生效，避免误触。 */
+  private onOverlayTap(): void {
+    if (this.destroyed) {
+      return;
+    }
+    if (this.errorText.length > 0 || this.ended) {
+      return;
+    }
+    if (this.pausedPlayVisible()) {
+      this.togglePlay();
+    }
+  }
+
+  /* ── 上下滑切条：正在播放的视频画面跟着页面滑动 ───── */
+  /**
+   * 手指拖动中：视频层 Y 位移 = 本次手势 currentOffset 的增量（vp）。
+   * currentOffset 在不同版本可能是「相对选中页」也可能是「绝对内容偏移」，
+   * 这里用本次手势首个回调做基准取增量，两种语义都正确；方向与页面一致（上滑为负、下滑为正）。
+   * 若真机方向相反，把 VIDEO_DRAG_SIGN 改成 -1 即可。
+   */
+  private onSwipeGesture(extraInfo: SwiperAnimationEvent): void {
+    if (this.destroyed || this.locked) {
+      return;
+    }
+    if (!this.swipeSessionActive) {
+      this.swipeSessionActive = true;
+      this.swipeOffsetBase = extraInfo.currentOffset;
+      this.swipeTargetChanged = false;
+      // 新手势可能打断上一次翻页动画：清掉等待复位的标记，交给本次手势结束后的动画处理。
+      this.swipeAnimating = false;
+      this.pendingVideoSettle = false;
+      this.clearVideoDragReset();
+    }
+    const limit: number = this.frameHeight();
+    let dy: number = (extraInfo.currentOffset - this.swipeOffsetBase) * VIDEO_DRAG_SIGN;
+    if (dy > limit) {
+      dy = limit;
+    }
+    if (dy < -limit) {
+      dy = -limit;
+    }
+    this.videoDragY = dy;
+  }
+
+  /** 松手后的翻页动画：视频层跟随页面继续滑出（下一页往负方向，上一页往正方向）。 */
+  private onSwipeAnimationStart(index: number, targetIndex: number): void {
+    if (this.destroyed) {
+      return;
+    }
+    const h: number = this.frameHeight();
+    let target: number = 0;
+    if (targetIndex > index) {
+      target = -h;
+    } else if (targetIndex < index) {
+      target = h;
+    }
+    this.swipeTargetChanged = targetIndex !== index;
+    this.swipeAnimating = true;
+    this.pendingVideoSettle = false;
+    animateTo({ duration: 260, curve: Curve.FastOutSlowIn }, () => {
+      this.videoDragY = target;
+    });
+    // 兜底：任何 Swiper 回调异常都在 500ms 内把视频层回正，避免永久偏移。
+    this.scheduleVideoDragReset();
+  }
+
+  /** 翻页动画结束：回弹（未切页）立即回正；切页时保持滑出，等新视频 onPrepared 再复位。 */
+  private onSwipeAnimationEnd(): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.swipeSessionActive = false;
+    this.swipeAnimating = false;
+    if (this.pendingVideoSettle) {
+      // 新视频在动画期间就 prepared 了：等滑到位再把视频层复位，避免滑到一半画面回正。
+      this.pendingVideoSettle = false;
+      this.settleVideoDragAfterSwitch();
+      return;
+    }
+    if (!this.swipeTargetChanged) {
+      this.resetVideoDrag(140);
+    }
+  }
+
+  /** 新视频已 prepared（新的画面已可上屏）：视频层从滑出位置瞬时复位到基准位。 */
+  private settleVideoDragAfterSwitch(): void {
+    this.clearVideoDragReset();
+    this.swipeSessionActive = false;
+    this.swipeTargetChanged = false;
+    this.swipeAnimating = false;
+    this.pendingVideoSettle = false;
+    if (this.videoDragY !== 0) {
+      this.videoDragY = 0;
+    }
+  }
+
+  /** 用 140ms 左右动画把视频层回正（滑到一半回弹等场景）。 */
+  private resetVideoDrag(duration: number): void {
+    this.clearVideoDragReset();
+    if (this.destroyed || this.videoDragY === 0) {
+      return;
+    }
+    animateTo({ duration: duration, curve: Curve.FastOutSlowIn }, () => {
+      this.videoDragY = 0;
+    });
+  }
+
+  /** 500ms 兜底复位：onChange/onAnimationEnd 没触发时也不会让视频永久偏移。 */
+  private scheduleVideoDragReset(): void {
+    this.clearVideoDragReset();
+    this.videoDragResetTimer = setTimeout(() => {
+      this.videoDragResetTimer = -1;
+      if (this.destroyed) {
+        return;
+      }
+      this.swipeSessionActive = false;
+      this.swipeTargetChanged = false;
+      this.swipeAnimating = false;
+      this.pendingVideoSettle = false;
+      if (this.videoDragY !== 0) {
+        animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+          this.videoDragY = 0;
+        });
+      }
+    }, 500);
+  }
+
+  private clearVideoDragReset(): void {
+    if (this.videoDragResetTimer >= 0) {
+      clearTimeout(this.videoDragResetTimer);
+      this.videoDragResetTimer = -1;
+    }
   }
 
   /* ── 线路面板 ─────────────────────────────────────── */
@@ -1400,8 +1631,8 @@ export struct PlayerPage {
     this.commentRefreshKey++;
   }
 
-  /** 各面板高度。 */
-  private sheetHeight(): string {
+  /** 各面板高度（选集按集数自适应，避免集数少时底部留一大条空黑带）。 */
+  private sheetHeight(): Length {
     if (this.sheetKind === 'comments') {
       return '76%';
     }
@@ -1411,7 +1642,24 @@ export struct PlayerPage {
     if (this.sheetKind === 'lines') {
       return '90%';
     }
-    return '64%';
+    return this.episodeSheetHeight();
+  }
+
+  /**
+   * 选集面板高度 = 标题栏 + 网格行数 + 底部安全区，限制在 42%~80% 屏幕高度内。
+   * 5 列布局与 EpisodeSheet 一致；集数多时封顶走网格内部滚动。
+   */
+  private episodeSheetHeight(): number {
+    let rows: number = Math.ceil(Math.max(1, this.episodeCount) / 5);
+    if (rows > 40) {
+      rows = 40;
+    }
+    const grid: number = rows * HgSize.episodeCell + Math.max(0, rows - 1) * HgSpace.s;
+    const content: number = HgSize.topBar + grid + HgSpace.l + this.bottomSafePad() + HgSpace.m;
+    const maxHeight: number = this.frameHeight() * 0.8;
+    // 集数少时不再强制 42% 高（否则网格下方留一大条空面板），下限放宽到 32%。
+    const minHeight: number = this.frameHeight() * 0.32;
+    return Math.min(maxHeight, Math.max(minHeight, content));
   }
 
   /* ── 更多面板（画面比例 + 面板入口） ──────────────── */
@@ -1567,6 +1815,14 @@ export struct PlayerPage {
    */
   private topSafePad(): number {
     return this.topInset > 0 ? this.topInset : TOP_SAFE_FALLBACK;
+  }
+
+  /**
+   * 底部安全区（手势条）：bottomInset 上报 0 时兜底 20vp。
+   * 底栏、相邻页底部信息、锁定图标、评论侧栏、面板内容统一用它，保证竖屏/横屏都不贴手势条。
+   */
+  private bottomSafePad(): number {
+    return this.bottomInset > 0 ? this.bottomInset : HgSpace.bottomSafeMin;
   }
 
   /**
@@ -1995,7 +2251,7 @@ export struct PlayerPage {
         .accessibilityText('分享')
       }
       .alignItems(HorizontalAlign.Center)
-      .margin({ right: HgSpace.m + this.rightInset, bottom: this.bottomInset + 150 })
+      .margin({ right: HgSpace.m + this.rightInset, bottom: this.bottomSafePad() + 150 })
     }
     .width('100%')
     .height('100%')
@@ -2052,6 +2308,9 @@ export struct PlayerPage {
           }
         })
         .margin({ top: HgSpace.m })
+        // 切集/换剧/换线时淡出 200ms，准备好后淡入，避免进度条与时间数字瞬间跳变。
+        .opacity(this.progressSwitching ? 0 : 1)
+        .animation({ duration: 200, curve: Curve.FastOutSlowIn })
 
         Row({ space: HgSpace.s }) {
           Stack() {
@@ -2092,6 +2351,7 @@ export struct PlayerPage {
             .padding({ left: 10, right: 10 })
             .backgroundColor(HgColor.videoChip)
             .borderRadius(16)
+            .scale({ x: this.ratePulse, y: this.ratePulse })
             .bindMenu(this.rateItems())
 
           if (this.params.feedKind !== 'post') {
@@ -2136,7 +2396,7 @@ export struct PlayerPage {
         left: this.chromeLeftPad(),
         right: this.chromeRightPad(),
         top: HgSpace.xxl,
-        bottom: this.bottomInset + HgSpace.m
+        bottom: this.bottomSafePad() + HgSpace.m
       })
       .linearGradient({
         angle: 180,
@@ -2152,11 +2412,24 @@ export struct PlayerPage {
   @Builder
   OverlayLayer() {
     Stack({ alignContent: Alignment.Center }) {
+      // 暂停/错误/结束态：整层可点（暂停点哪都恢复播放；错误/结束只让上层按钮生效）。
+      // 单独一个全屏透明层放在最下面，避免给根节点挂 onClick 后与按钮点击互相干扰。
+      if (this.overlayInteractive()) {
+        Column()
+          .width('100%')
+          .height('100%')
+          .backgroundColor(Color.Transparent)
+          .onClick(() => {
+            this.onOverlayTap();
+          })
+      }
       if (this.loading) {
+        // 切线路/重载的轻量 loading：200ms 渐入，避免硬闪。
         LoadingProgress()
           .width(32)
           .height(32)
           .color(HgColor.videoInk)
+          .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.FastOutSlowIn }))
       }
 
       if (this.buffering && !this.loading && this.errorText.length === 0) {
@@ -2171,10 +2444,10 @@ export struct PlayerPage {
               .fontColor(HgColor.videoInk2)
           }
         }
+        .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.FastOutSlowIn }))
       }
 
-      if (!this.playing && !this.loading && !this.buffering && !this.starting &&
-        this.errorText.length === 0 && !this.ended && !this.dragging) {
+      if (this.pausedPlayVisible()) {
         Stack() {
           SymbolGlyph($r('sys.symbol.play_fill'))
             .fontSize(HgIconSize.hero)
@@ -2185,6 +2458,11 @@ export struct PlayerPage {
         .borderRadius(32)
         .backgroundColor('#66000000')
         .border({ width: 1, color: HgColor.videoHairline })
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .onClick(() => {
+          this.togglePlay();
+        })
+        .accessibilityText('继续播放')
       }
 
       if (this.ended) {
@@ -2218,6 +2496,7 @@ export struct PlayerPage {
         .padding(HgSpace.xl)
         .backgroundColor('#CC000000')
         .borderRadius(HgRadius.group)
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       }
 
       if (this.errorText.length > 0) {
@@ -2257,6 +2536,7 @@ export struct PlayerPage {
         .padding(HgSpace.xl)
         .backgroundColor('#CC000000')
         .borderRadius(HgRadius.group)
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       }
 
       if (this.dragging) {
@@ -2281,8 +2561,9 @@ export struct PlayerPage {
     .height('100%')
     // 横屏左右安全区参与浮层水平布局（竖屏 inset=0 不变）。
     .padding({ left: this.leftInset, right: this.rightInset })
-    // 加载/缓冲/拖拽提示不拦手势；错误态有「重试/切换线路」按钮，需要可点击。
-    .hitTestBehavior(this.errorText.length > 0 ? HitTestMode.Default : HitTestMode.None)
+    // 错误/结束/暂停态需要可点（重试、重播、下一集、继续播放）；加载/缓冲/拖拽提示保持穿透。
+    // 暂停态整层拦截可接受：点浮层任意处恢复播放。
+    .hitTestBehavior(this.overlayInteractive() ? HitTestMode.Default : HitTestMode.None)
   }
 
   @Builder
@@ -2297,11 +2578,15 @@ export struct PlayerPage {
           .backgroundColor(this.speedLocked ? HgColor.accent(true) : HgColor.videoChipStrong)
           .borderRadius(HgRadius.chip)
           .margin({ top: this.topSafePad() + 52 })
-          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+          .scale({ x: this.ratePulse, y: this.ratePulse })
+          .transition(TransitionEffect.OPACITY
+            .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
+            .combine(TransitionEffect.scale({ x: 0.92, y: 0.92 })))
           .onClick(() => {
             if (this.speedLocked) {
               this.speedLocked = false;
               this.service.setSpeed(this.rate);
+              this.pulseRateChip();
               UiBus.toastInfo('已解除 2.0x 锁定');
             }
           })
@@ -2340,7 +2625,7 @@ export struct PlayerPage {
     .width(this.commentPanelWidth())
     .height('100%')
     // 顶部/底部/右侧安全区：横屏刘海在右侧时不遮挡关闭按钮与输入栏。
-    .padding({ top: this.topSafePad(), right: this.rightInset, bottom: this.bottomInset })
+    .padding({ top: this.topSafePad(), right: this.rightInset, bottom: this.bottomSafePad() })
     .backgroundColor(HgColor.surface1(true))
     .border({ width: { left: 0.5 }, color: HgColor.hairline(true) })
     .position({ x: this.frameWidth() - this.commentPanelWidth(), y: 0 })
@@ -2368,7 +2653,7 @@ export struct PlayerPage {
         this.toggleLock();
       })
       .accessibilityText('已锁定，点按解锁')
-      .margin({ right: HgSpace.l + this.rightInset, bottom: this.bottomInset + HgSpace.xxl })
+      .margin({ right: HgSpace.l + this.rightInset, bottom: this.bottomSafePad() + HgSpace.xxl })
     }
     .width('100%')
     .height('100%')
@@ -2492,6 +2777,7 @@ export struct PlayerPage {
     .backgroundColor(HgColor.playerBackground)
     .opacity(this.starting || this.loading || this.errorText.length > 0 ? 1 : 0)
     .animation({ duration: 220, curve: Curve.FastOutSlowIn })
+    // 注意：海报占位层不跟随滑动位移（它负责加载/切页时盖住视频区，保持在基准位，避免切页后新封面被带出屏幕）。
     .hitTestBehavior(HitTestMode.None)
   }
 
@@ -2632,7 +2918,7 @@ export struct PlayerPage {
       left: this.chromeLeftPad(),
       right: this.chromeRightPad(),
       top: HgSpace.xxl,
-      bottom: this.bottomInset + HgSpace.m
+      bottom: this.bottomSafePad() + HgSpace.m
     })
     .linearGradient({
       angle: 180,
@@ -2690,18 +2976,27 @@ export struct PlayerPage {
     })
   }
 
-  /** 单一 Sheet 的内容路由。 */
+  /**
+   * 单一 Sheet 的内容路由。
+   * Sheet 面板底边贴窗口底（全屏布局下系统不会自动避让手势条），
+   * 这里统一补底部安全区，避免选集最后一行 / 评论输入栏被手势条遮挡。
+   */
   @Builder
   SheetContent() {
-    if (this.sheetKind === 'comments') {
-      this.CommentsSheetBuilder()
-    } else if (this.sheetKind === 'detail') {
-      this.DetailSheetBuilder()
-    } else if (this.sheetKind === 'lines') {
-      this.LineSheetBuilder()
-    } else {
-      this.EpisodeSheetBuilder()
+    Column() {
+      if (this.sheetKind === 'comments') {
+        this.CommentsSheetBuilder()
+      } else if (this.sheetKind === 'detail') {
+        this.DetailSheetBuilder()
+      } else if (this.sheetKind === 'lines') {
+        this.LineSheetBuilder()
+      } else {
+        this.EpisodeSheetBuilder()
+      }
     }
+    .width('100%')
+    .height('100%')
+    .padding({ bottom: this.bottomSafePad() })
   }
 
   build() {
@@ -2712,25 +3007,31 @@ export struct PlayerPage {
           .height('100%')
           .backgroundColor(HgColor.playerBackground)
 
-        // 画面尺寸 = 按视频宽高比计算出的矩形（适应模式精确 letterbox，横屏垂直位置略偏上）；
-        // 拉伸模式矩形为全屏，由 AVPlayer FIT 变形铺满。
-        XComponent({
-          id: 'hgPlayerSurface',
-          type: XComponentType.SURFACE,
-          controller: this.xController
-        })
-          .width(this.videoRectW)
-          .height(this.videoRectH)
-          .position({ x: this.videoRectX, y: this.videoRectY })
-          .onLoad(() => {
-            try {
-              this.service.attachSurface(this.xController.getXComponentSurfaceId());
-            } catch (err) {
-            }
+        // 视频渲染层：容器负责上下滑时的 Y 位移（正在播放的画面跟着页面一起滑动），
+        // XComponent 自身仍按视频宽高比定位（适应 letterbox / 横屏中心偏上等）。
+        Stack() {
+          XComponent({
+            id: 'hgPlayerSurface',
+            type: XComponentType.SURFACE,
+            controller: this.xController
           })
-          .onDestroy(() => {
-            this.service.detachSurface();
-          })
+            .width(this.videoRectW)
+            .height(this.videoRectH)
+            .position({ x: this.videoRectX, y: this.videoRectY })
+            .onLoad(() => {
+              try {
+                this.service.attachSurface(this.xController.getXComponentSurfaceId());
+              } catch (err) {
+              }
+            })
+            .onDestroy(() => {
+              this.service.detachSurface();
+            })
+        }
+        .width('100%')
+        .height('100%')
+        .hitTestBehavior(HitTestMode.None)
+        .translate({ y: this.videoDragY })
 
         this.PosterOverlay()
 
@@ -2752,6 +3053,17 @@ export struct PlayerPage {
         .cachedCount(1)
         .duration(240)
         .curve(Curve.FastOutSlowIn)
+        // 上下滑切条：视频层跟着页面同位移（手指拖动跟手、松手后继续滑出），
+        // onChange/onAnimationEnd 兜底复位，500ms 定时器防止任何回调异常导致永久偏移。
+        .onGestureSwipe((index: number, extraInfo: SwiperAnimationEvent) => {
+          this.onSwipeGesture(extraInfo);
+        })
+        .onAnimationStart((index: number, targetIndex: number, extraInfo: SwiperAnimationEvent) => {
+          this.onSwipeAnimationStart(index, targetIndex);
+        })
+        .onAnimationEnd((index: number, extraInfo: SwiperAnimationEvent) => {
+          this.onSwipeAnimationEnd();
+        })
         .disableSwipe(this.locked || this.speedBoost)
         .onChange((index: number) => {
           if (this.destroyed || index === this.currentIndex || index < 0 || index >= this.ids.length) {
@@ -2760,6 +3072,10 @@ export struct PlayerPage {
           this.currentIndex = index;
           this.haptic(8);
           this.openVideo(index, false);
+          // 切页成功：视频层保持滑出屏幕，等新视频 prepared 后由 settleVideoDragAfterSwitch 复位。
+          this.swipeTargetChanged = true;
+          this.swipeSessionActive = false;
+          this.scheduleVideoDragReset();
         })
         // 宽屏评论侧栏打开时 Swiper 收窄为左侧视频区：手势/上下滑切条只在视频区生效，
         // chrome 也随之排在视频区内（侧栏外不会被误触）。
@@ -2798,7 +3114,8 @@ export struct PlayerPage {
       .bindSheet($$this.sheetVisible, this.SheetContent(), {
         height: this.sheetHeight(),
         dragBar: true,
-        showClose: true,
+        // 播放页恒为深色：系统默认 X 在深色 Sheet 上是黑色几乎不可见，换成白色自绘图标。
+        showClose: $r('app.media.sheet_close_white'),
         backgroundColor: HgColor.surface1(true),
         onAppear: () => {
           PlaybackLog.info('ui.sheet', 'appear kind=' + this.sheetKind);
