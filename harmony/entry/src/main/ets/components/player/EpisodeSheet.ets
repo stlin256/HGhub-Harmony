@@ -1,4 +1,6 @@
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../../design/HgTokens';
+import { HgResponsive } from '../../design/HgResponsive';
+import { K_WINDOW_W } from '../../state/UserPrefs';
 
 /**
  * 选集面板：5 列网格（大字体由系统自然撑高），当前集高亮，已看集底部 2vp 指示条。
@@ -11,8 +13,14 @@ export struct EpisodeSheet {
   @Prop dark: boolean = true;
   onPick: (ep: number) => void = (ep: number) => {};
 
+  @StorageProp(K_WINDOW_W) windowW: number = 400;
   @State private numbers: number[] = [];
   private scroller: Scroller = new Scroller();
+
+  /** 选集列数：手机 5 列，平板/横屏 6–8 列。 */
+  private columns(): number {
+    return HgResponsive.columns(this.windowW, 5, 8);
+  }
 
   aboutToAppear(): void {
     const list: number[] = [];
@@ -80,6 +88,15 @@ export struct EpisodeSheet {
     .accessibilityText('第' + ep + '集' + (ep === this.current ? '，当前集' : ''))
   }
 
+  private template(): string {
+    let out: string = '1fr';
+    const count: number = this.columns();
+    for (let i = 1; i < count; i++) {
+      out += ' 1fr';
+    }
+    return out;
+  }
+
   build() {
     Column() {
       Row({ space: HgSpace.s }) {
@@ -107,7 +124,7 @@ export struct EpisodeSheet {
           }
         }, (ep: number) => ep.toString())
       }
-      .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
+      .columnsTemplate(this.template())
       .columnsGap(HgSpace.s)
       .rowsGap(HgSpace.s)
       .layoutWeight(1)

@@ -1,7 +1,10 @@
 import { promptAction } from '@kit.ArkUI';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { K_DARK, K_TOP_INSET, K_BOTTOM_INSET } from '../state/UserPrefs';
+import {
+  K_BOTTOM_INSET, K_CONTENT_W, K_DARK, K_NAV_W, K_TOP_INSET, K_WINDOW_W
+} from '../state/UserPrefs';
+import { HgResponsive } from '../design/HgResponsive';
 import { UiBus } from '../services/UiBus';
 import { HgColor, HgFont, HgSize } from '../design/HgTokens';
 import { HomePage } from './HomePage';
@@ -36,6 +39,11 @@ struct Index {
   /** 返回键二次确认：2 秒内再按一次才真正退出，避免误触直接退出 App。 */
   private lastBackAt: number = 0;
   @StorageProp('bottomInsetPx') bottomInsetPx: number = 0;
+  /** 窗口宽度（vp）：驱动平板/横屏的平行视窗（Split）与左右栏宽度。 */
+  @StorageProp(K_WINDOW_W) @Watch('onWindowWidthChanged') windowW: number = 400;
+  @State navSplit: boolean = false;
+  /** 平行视窗右栏是否为空（未打开详情），用于展示引导占位。 */
+  @State navEmpty: boolean = true;
   private tabsController: HdsTabsController = new HdsTabsController();
   private readonly selectedColor: string = '';
 
@@ -68,6 +76,54 @@ struct Index {
     UiBus.toastInfo = (message: string) => {
       promptAction.showToast({ message: message, duration: 2000 });
     };
+    // 平行视窗：拦截路由变化，播放页强制 Stack（全屏），其余宽屏页面 Split。
+    try {
+      this.navStack.setInterception({
+        willShow: (from: NavDestinationContext | NavBar, to: NavDestinationContext | NavBar,
+          operation: NavigationOperation, isAnimated: boolean) => {
+        },
+        didShow: (from: NavDestinationContext | NavBar, to: NavDestinationContext | NavBar,
+          operation: NavigationOperation, isAnimated: boolean) => {
+          this.syncNavMode();
+        },
+        modeChange: (mode: NavigationMode) => {
+        }
+      });
+    } catch (err) {
+    }
+    this.syncNavMode();
+  }
+
+  /** 平行视窗左栏宽度：窗口 40%，限制在 380–520vp（保证悬浮底栏 340+边距放得下）。 */
+  private navBarWidth(): number {
+    return Math.min(520, Math.max(380, Math.round(this.windowW * 0.4)));
+  }
+
+  private onWindowWidthChanged(): void {
+    this.syncNavMode();
+  }
+
+  /**
+   * 同步平行视窗状态：
+   * - 窗口 ≥840vp 且当前页不是全屏播放页 → Split，左右栏宽度写入 K_NAV_W/K_CONTENT_W；
+   * - 否则 Stack（手机 / 窄窗口 / 播放页全屏），两栏宽度都等于窗口宽。
+   */
+  private syncNavMode(): void {
+    let top: string = '';
+    try {
+      const names: string[] = this.navStack.getAllPathName();
+      top = names.length > 0 ? names[names.length - 1] : '';
+      this.navEmpty = names.length === 0;
+    } catch (err) {
+      top = '';
+    }
+    const wide: boolean = this.windowW >= HgResponsive.EXPANDED;
+    const split: boolean = wide && top !== ROUTE_PLAYER;
+    this.navSplit = split;
+    const navW: number = split ? this.navBarWidth() : this.windowW;
+    const contentW: number = split ? Math.max(320, this.windowW - navW) : this.windowW;
+    AppStorage.setOrCreate<number>(K_NAV_W, navW);
+    AppStorage.setOrCreate<number>(K_CONTENT_W, contentW);
   }
 
   onBackPress(): boolean {
@@ -232,11 +288,32 @@ struct Index {
           this.activeIndex = index;
         })
       }
-      .mode(NavigationMode.Stack)
+      .mode(this.navSplit ? NavigationMode.Split : NavigationMode.Stack)
+      .navBarWidth(this.navBarWidth())
+      .navBarWidthRange([380, 520])
+      .minContentWidth(360)
+      .enableModeChangeAnimation(false)
       .hideTitleBar(true)
       .navDestination(this.PageMap)
       .width('100%')
       .height('100%')
+
+      // 平行视窗右栏占位：未打开详情时给一句引导，避免大片空白。
+      if (this.navSplit && this.navEmpty) {
+        Column({ space: 8 }) {
+          SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+            .fontSize(28)
+            .fontColor([HgColor.textTertiary(this.dark)])
+          Text('从左侧选择内容')
+            .fontSize(13)
+            .fontColor(HgColor.textTertiary(this.dark))
+        }
+        .width(this.windowW - this.navBarWidth())
+        .height('100%')
+        .position({ x: this.navBarWidth(), y: 0 })
+        .justifyContent(FlexAlign.Center)
+        .hitTestBehavior(HitTestMode.None)
+      }
     }
     .width('100%')
     .height('100%')
