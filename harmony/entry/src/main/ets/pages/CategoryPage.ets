@@ -1,7 +1,7 @@
 import { Api } from '../services/Api';
 import { Paged, Post, VideoCard } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import {
@@ -45,6 +45,12 @@ export struct CategoryPage {
   @State postsLoading: boolean = true;
   @State postsError: string = '';
   @State refreshing: boolean = false;
+  /** 横向卡片行数据替换时的淡入透明度（按频道 index 维护）。 */
+  @State private rowOpacity: number[] = [1, 1, 1, 1];
+  /** 吃瓜横向行数据替换时的淡入透明度。 */
+  @State private postOpacity: number = 1;
+  private rowFadeTimers: number[] = [0, 0, 0, 0];
+  private postFadeTimer: number = -1;
   private started: boolean = false;
 
   /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
@@ -79,6 +85,19 @@ export struct CategoryPage {
     this.loadEverything(false);
   }
 
+  aboutToDisappear(): void {
+    for (let i = 0; i < this.rowFadeTimers.length; i++) {
+      if (this.rowFadeTimers[i] > 0) {
+        clearTimeout(this.rowFadeTimers[i]);
+        this.rowFadeTimers[i] = 0;
+      }
+    }
+    if (this.postFadeTimer >= 0) {
+      clearTimeout(this.postFadeTimer);
+      this.postFadeTimer = -1;
+    }
+  }
+
   private async loadEverything(refresh: boolean): Promise<void> {
     const tasks: Promise<void>[] = [];
     tasks.push(this.fetchCate(0, !refresh));
@@ -105,7 +124,41 @@ export struct CategoryPage {
   private setRowData(index: number, value: VideoCard[]): void {
     const next: VideoCard[][] = this.rowData.slice(0);
     next[index] = value;
+    // 先归零再落数据：新内容从 0 → 1 淡入（140ms），骨架→内容/刷新都不硬切。
+    this.flashRow(index);
     this.rowData = next;
+  }
+
+  /** 横向卡片行内容替换后淡入。 */
+  private flashRow(index: number): void {
+    const nextOpacity: number[] = this.rowOpacity.slice(0);
+    nextOpacity[index] = 0;
+    this.rowOpacity = nextOpacity;
+    if (this.rowFadeTimers[index] > 0) {
+      clearTimeout(this.rowFadeTimers[index]);
+    }
+    this.rowFadeTimers[index] = setTimeout(() => {
+      this.rowFadeTimers[index] = 0;
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        const op: number[] = this.rowOpacity.slice(0);
+        op[index] = 1;
+        this.rowOpacity = op;
+      });
+    }, 40);
+  }
+
+  /** 吃瓜横向行内容替换后淡入。 */
+  private flashPosts(): void {
+    this.postOpacity = 0;
+    if (this.postFadeTimer >= 0) {
+      clearTimeout(this.postFadeTimer);
+    }
+    this.postFadeTimer = setTimeout(() => {
+      this.postFadeTimer = -1;
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        this.postOpacity = 1;
+      });
+    }, 40);
   }
 
   private async fetchCate(index: number, skeleton: boolean): Promise<void> {
@@ -136,7 +189,9 @@ export struct CategoryPage {
     this.postsError = '';
     try {
       const res: Paged<Post> = await Api.posts(1, PREVIEW_SIZE);
-      this.posts = res.items !== undefined && res.items !== null ? res.items : [];
+      const list: Post[] = res.items !== undefined && res.items !== null ? res.items : [];
+      this.flashPosts();
+      this.posts = list;
     } catch (err) {
       if (this.posts.length === 0) {
         this.postsError = (err as Error).message;
@@ -419,9 +474,17 @@ export struct CategoryPage {
         this.openChannel(index);
       })
       if (this.rowLoading[index]) {
-        this.RowSkeleton()
+        Column() {
+          this.RowSkeleton()
+        }
+        .width('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else if (this.rowError[index].length > 0 && this.rowData[index].length === 0) {
-        this.InlineError(index)
+        Column() {
+          this.InlineError(index)
+        }
+        .width('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else if (this.rowData[index].length === 0) {
         Text('暂无内容')
           .width('100%')
@@ -429,6 +492,7 @@ export struct CategoryPage {
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))
           .textAlign(TextAlign.Center)
+          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else {
         List({ space: HgSpace.m }) {
           ForEach(this.rowData[index], (item: VideoCard, itemIndex: number) => {
@@ -446,6 +510,9 @@ export struct CategoryPage {
         .scrollBar(BarState.Off)
         .cachedCount(3)
         .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+        // 数据替换时轻微淡入（140ms），骨架 → 内容也有透明度过渡。
+        .opacity(this.rowOpacity[index])
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       }
     }
     .width('100%')
@@ -459,7 +526,11 @@ export struct CategoryPage {
         this.navStack.pushPathByName(ROUTE_POSTS, null);
       })
       if (this.postsLoading) {
-        this.RowSkeleton()
+        Column() {
+          this.RowSkeleton()
+        }
+        .width('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else if (this.postsError.length > 0 && this.posts.length === 0) {
         Row() {
           Text(this.postsError)
@@ -480,6 +551,7 @@ export struct CategoryPage {
         .width('100%')
         .height(80)
         .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else if (this.posts.length === 0) {
         Text('暂无内容')
           .width('100%')
@@ -487,6 +559,7 @@ export struct CategoryPage {
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))
           .textAlign(TextAlign.Center)
+          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else {
         List({ space: HgSpace.m }) {
           ForEach(this.posts, (item: Post) => {
@@ -501,6 +574,8 @@ export struct CategoryPage {
         .scrollBar(BarState.Off)
         .cachedCount(3)
         .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+        .opacity(this.postOpacity)
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       }
     }
     .width('100%')

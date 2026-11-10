@@ -4,7 +4,7 @@ import { ImageCache } from '../services/ImageCache';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
 import { hostOf } from '../utils/Format';
@@ -33,6 +33,124 @@ const SCALE_OPTIONS: ScaleOption[] = [
   { key: 'cover', label: '裁切', desc: '裁切：保持画面比例铺满屏幕，裁掉超出画面的边缘' }
 ];
 
+/**
+ * 「关于」自定义弹窗：替代系统 AlertDialog。
+ * AlertDialog 的配色跟随系统主题（夜间模式下与 App 深色/浅色主题不一致），
+ * 这里用 @CustomDialog + customStyle 完全按 App 主题 token 渲染，深浅色都正常。
+ */
+@CustomDialog
+struct AboutDialog {
+  @StorageProp(K_DARK) dark: boolean = true;
+  controller?: CustomDialogController;
+  /** 打开动画状态：0.94→1 轻微放大 + 淡入；关闭先反向再真正 close。 */
+  @State entered: boolean = false;
+  private started: boolean = false;
+  private closing: boolean = false;
+  private closeTimer: number = -1;
+  private enterTimer: number = -1;
+
+  /** 开始入场动画（幂等）：onAppear 与 aboutToAppear 兜底二选一触发，保证弹窗可见。 */
+  private startEnter(): void {
+    if (this.started) {
+      return;
+    }
+    this.started = true;
+    animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      this.entered = true;
+    });
+  }
+
+  aboutToAppear(): void {
+    // 首帧后兜底触发；正常情况下 onAppear 已触发（started 会拦掉重复）。
+    this.enterTimer = setTimeout(() => {
+      this.enterTimer = -1;
+      this.startEnter();
+    }, 16);
+  }
+
+  aboutToDisappear(): void {
+    if (this.enterTimer >= 0) {
+      clearTimeout(this.enterTimer);
+      this.enterTimer = -1;
+    }
+    if (this.closeTimer >= 0) {
+      clearTimeout(this.closeTimer);
+      this.closeTimer = -1;
+    }
+  }
+
+  /** 关闭：先 120ms 淡出 + 缩到 0.96，再真正关闭（点遮罩/返回键仍走系统默认关闭）。 */
+  private dismiss(): void {
+    if (this.closing) {
+      return;
+    }
+    this.closing = true;
+    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
+      this.entered = false;
+    });
+    this.closeTimer = setTimeout(() => {
+      this.closeTimer = -1;
+      try {
+        this.controller?.close();
+      } catch (err) {
+      }
+    }, HgDuration.microExit);
+  }
+
+  build() {
+    Column({ space: HgSpace.m }) {
+      Text('关于 HGhub')
+        .width('100%')
+        .fontSize(HgFont.section)
+        .fontWeight(HgFont.weightBold)
+        .fontColor(HgColor.textPrimary(this.dark))
+        .textAlign(TextAlign.Center)
+      Text('黄果短剧 · 鸿蒙原生客户端 · v' + Api.appVersion())
+        .width('100%')
+        .fontSize(HgFont.micro)
+        .fontColor(HgColor.textTertiary(this.dark))
+        .textAlign(TextAlign.Center)
+
+      Text('本项目仅供学习与交流，所有内容均来自上游站点，客户端不存储、不分发任何视频内容；请支持正版。')
+        .width('100%')
+        .fontSize(HgFont.secondary)
+        .lineHeight(HgFont.lineSecondary)
+        .fontColor(HgColor.textSecondary(this.dark))
+        .margin({ top: HgSpace.xs })
+
+      Text('许可证：PolyForm Noncommercial 1.0.0（仅限非商业使用）')
+        .width('100%')
+        .fontSize(HgFont.micro)
+        .lineHeight(HgFont.lineMicro)
+        .fontColor(HgColor.textTertiary(this.dark))
+
+      Button('知道了')
+        .width('100%')
+        .height(HgSize.secondaryAction)
+        .fontSize(HgFont.body)
+        .fontWeight(HgFont.weightMedium)
+        .fontColor(HgColor.onAccent(this.dark))
+        .backgroundColor(HgColor.accent(this.dark))
+        .borderRadius(HgRadius.chip)
+        .margin({ top: HgSpace.s })
+        .onClick(() => {
+          this.dismiss();
+        })
+    }
+    .width(320)
+    .padding({ left: HgSpace.xl, right: HgSpace.xl, top: HgSpace.xxl, bottom: HgSpace.xl })
+    .backgroundColor(HgColor.surface1(this.dark))
+    .borderRadius(HgRadius.surface)
+    .border({ width: 1, color: HgColor.hairline(this.dark) })
+    .shadow({ radius: 24, color: HgColor.shadowElev3, offsetX: 0, offsetY: 8 })
+    .opacity(this.entered ? 1 : 0)
+    .scale({ x: this.entered ? 1 : 0.94, y: this.entered ? 1 : 0.94 })
+    .onAppear(() => {
+      this.startEnter();
+    })
+  }
+}
+
 /** 设置：外观/播放/网络/本地数据/其他 分组卡片，全部立即生效并持久化。 */
 @Component
 export struct SettingsPage {
@@ -44,8 +162,8 @@ export struct SettingsPage {
   @StorageProp(K_VIDEO_SCALE) videoScale: string = 'contain';
   @State themeMode: string = 'system';
   @State muteOnStartup: boolean = true;
-  @State cacheSize: number = 0;
-  @State cacheDiskCount: number = 0;
+  /** 封面缓存占用（内存+磁盘合计，如 "12.3 MB"）：aboutToAppear/清理后刷新，build 只读状态、不扫盘。 */
+  @State cacheText: string = '0 B';
   @State favCount: number = 0;
   @State historyCount: number = 0;
   @State searchHistCount: number = 0;
@@ -53,16 +171,65 @@ export struct SettingsPage {
   @StorageProp(K_LINE_BASE) @Watch('onLineChanged') lineBase: string = '';
   @State checking: boolean = false;
   @State clearing: boolean = false;
+  /** 首屏分组淡入（140ms）状态与定时器。 */
+  @State entered: boolean = false;
+  private enterTimer: number = -1;
+  /** 清理缓存/清空历史后数值的轻淡入（140ms）状态与定时器。 */
+  @State valueOpacity: number = 1;
+  private valueTimer: number = -1;
+  /**
+   * 「关于」自定义弹窗控制器：customStyle=true 时不使用系统弹窗底色，
+   * 弹窗内容完全按 App 主题色（surface1/textPrimary/accent）绘制，避免夜间模式跟随系统主题。
+   */
+  private aboutController: CustomDialogController = new CustomDialogController({
+    builder: AboutDialog(),
+    autoCancel: true,
+    alignment: DialogAlignment.Center,
+    customStyle: true
+  });
 
   aboutToAppear(): void {
     this.themeMode = UserPrefs.themeMode();
     this.muteOnStartup = UserPrefs.muteOnStartup();
-    this.cacheSize = ImageCache.size();
-    this.cacheDiskCount = ImageCache.diskCount();
+    // 只在进入设置页时统计一次占用空间（内存+磁盘合计），build 期间不再同步扫磁盘。
+    this.cacheText = ImageCache.totalText();
     this.favCount = UserPrefs.favs().length;
     this.historyCount = UserPrefs.history().length;
     this.searchHistCount = UserPrefs.searchHist().length;
     this.lineHost = hostOf(this.lineBase.length > 0 ? this.lineBase : Lines.current());
+    // 分组首屏淡入（140ms）：首帧后触发，避免整页硬切。
+    this.enterTimer = setTimeout(() => {
+      this.enterTimer = -1;
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        this.entered = true;
+      });
+    }, 16);
+  }
+
+  aboutToDisappear(): void {
+    if (this.enterTimer >= 0) {
+      clearTimeout(this.enterTimer);
+      this.enterTimer = -1;
+    }
+    if (this.valueTimer >= 0) {
+      clearTimeout(this.valueTimer);
+      this.valueTimer = -1;
+    }
+  }
+
+  /** 清理后数值变化的轻淡入：只做 140ms 淡入，不缩放/不位移，保持简洁。 */
+  private flashValues(): void {
+    this.valueOpacity = 0.4;
+    if (this.valueTimer >= 0) {
+      clearTimeout(this.valueTimer);
+      this.valueTimer = -1;
+    }
+    this.valueTimer = setTimeout(() => {
+      this.valueTimer = -1;
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        this.valueOpacity = 1;
+      });
+    }, 16);
   }
 
   onLineChanged(): void {
@@ -95,9 +262,9 @@ export struct SettingsPage {
     UiBus.toastInfo('画面比例：' + label);
   }
 
-  private cacheSummary(): string {
-    // 内存（PixelMap）与磁盘持久化封面数量分开展示，与 ImageCache 的双层缓存一致。
-    return '内存 ' + this.cacheSize + ' 张 · 磁盘 ' + this.cacheDiskCount + ' 张封面';
+  /** 「封面缓存」行右侧文案：只展示内存 + 磁盘的合计占用空间（不再显示张数）。 */
+  private cacheUsageText(): string {
+    return '已占用 ' + this.cacheText;
   }
 
   private clearCache(): void {
@@ -113,10 +280,11 @@ export struct SettingsPage {
         value: '清理',
         action: () => {
           this.clearing = true;
-          ImageCache.clear();
-          this.cacheSize = ImageCache.size();
-          this.cacheDiskCount = ImageCache.diskCount();
+          Api.clearCache();
+          // 清理后立即刷新占用显示（counters 已归零，totalText() 返回 "0 B"）。
+          this.cacheText = ImageCache.totalText();
           this.clearing = false;
+          this.flashValues();
           UiBus.toastOk('封面缓存已清理');
         }
       }
@@ -138,6 +306,7 @@ export struct SettingsPage {
         action: () => {
           UserPrefs.clearHistory();
           this.historyCount = 0;
+          this.flashValues();
           UiBus.toastOk('观看历史已清空');
         }
       }
@@ -159,6 +328,7 @@ export struct SettingsPage {
         action: () => {
           UserPrefs.clearSearchHist();
           this.searchHistCount = 0;
+          this.flashValues();
           UiBus.toastOk('搜索历史已清空');
         }
       }
@@ -200,17 +370,9 @@ export struct SettingsPage {
     }
   }
 
+  /** 「关于」入口：打开跟随 App 主题的自定义弹窗（系统 AlertDialog 会跟随系统主题，夜间模式不适配）。 */
   private showAbout(): void {
-    AlertDialog.show({
-      title: '关于 HGhub',
-      message: 'HGhub 黄果短剧 · 鸿蒙原生客户端 v' + Api.appVersion() +
-        '\n\n基于 ArkTS/ArkUI 原生实现，不含 WebView。\n\n本项目仅供学习与交流，所有内容均来自上游站点，客户端不存储、不分发任何视频内容；请支持正版。\n\n许可证：PolyForm Noncommercial 1.0.0（仅限非商业使用）。',
-      primaryButton: {
-        value: '知道了',
-        action: () => {
-        }
-      }
-    });
+    this.aboutController.open();
   }
 
   @Builder
@@ -396,16 +558,17 @@ export struct SettingsPage {
     Column() {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.square_grid_2x2'))
-        Column({ space: 2 }) {
-          Text('封面缓存')
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.cacheSummary())
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
+        Text('封面缓存')
+          .fontSize(HgFont.rowTitle)
+          .fontColor(HgColor.textPrimary(this.dark))
+          .layoutWeight(1)
+        // 只显示占用空间（内存 + 磁盘合计），不再显示张数；aboutToAppear/清理后刷新。
+        Text(this.cacheUsageText())
+          .fontSize(HgFont.caption)
+          .fontColor(HgColor.textTertiary(this.dark))
+          .maxLines(1)
+          // 清理后数值轻淡入（只做透明度，简洁不夸张）。
+          .opacity(this.valueOpacity)
         Text(this.clearing ? '清理中…' : '清理')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
@@ -432,6 +595,7 @@ export struct SettingsPage {
           Text(this.favCount + ' 部收藏 · ' + this.historyCount + ' 条观看记录')
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
+            .opacity(this.valueOpacity)
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
@@ -461,6 +625,7 @@ export struct SettingsPage {
           Text(this.searchHistCount + ' 条搜索记录')
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
+            .opacity(this.valueOpacity)
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
@@ -618,6 +783,8 @@ export struct SettingsPage {
         .layoutWeight(1)
         .width('100%')
         .padding({ left: this.pagePad(), right: this.pagePad() })
+        // 首屏分组淡入（140ms，仅透明度）。
+        .opacity(this.entered ? 1 : 0)
       }
       .width('100%')
       .height('100%')
@@ -625,5 +792,7 @@ export struct SettingsPage {
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    // 兜底铺满整页背景：页面转场/底部安全区内边距区不露出默认背景（深色下会像一条黑带）。
+    .backgroundColor(HgColor.canvas(this.dark))
   }
 }
