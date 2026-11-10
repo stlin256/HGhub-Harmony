@@ -12,6 +12,9 @@ export const K_LINE_BASE = 'hgLineBase';
 
 const PUBLISH_PAGE: string = 'https://example.invalid';
 const MIRROR_MAX: number = 60;
+/** 持久化镜像缓存条数上限（无网/发布页不可达时给 LineAuto 当候选）。 */
+const MIRROR_CACHE_MAX: number = 30;
+const MIRROR_CACHE_KEY: string = 'line_mirror_cache';
 const PROBE_TIMEOUT: number = 8000;
 const PAGE_TIMEOUT: number = 12000;
 
@@ -329,8 +332,78 @@ export class Lines {
     if (items.length === 0) {
       throw new Error('地址发布页里没有可用的镜像地址');
     }
+    // 成功拉取后落盘：下次启动/无网时 LineAuto 仍能用上次缓存的镜像做候选。
+    Lines.saveMirrorCache(items);
     const result: LineMirrors = { source: PUBLISH_PAGE, script: jsUrl, items: items };
     return result;
+  }
+
+  /** 镜像线路缓存持久化（只存 normalize 后合法的 URL，最多 MIRROR_CACHE_MAX 条）。 */
+  private static saveMirrorCache(items: LineItem[]): void {
+    try {
+      const list: LineItem[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item: LineItem = items[i];
+        if (item === undefined || item === null) {
+          continue;
+        }
+        const url: string = Lines.normalize(item.url === undefined || item.url === null ? '' : item.url);
+        if (url.length === 0) {
+          continue;
+        }
+        const entry: LineItem = { url: url };
+        if (item.name !== undefined && item.name !== null && item.name.length > 0) {
+          entry.name = item.name;
+        }
+        if (item.host !== undefined && item.host !== null && item.host.length > 0) {
+          entry.host = item.host;
+        }
+        list.push(entry);
+        if (list.length >= MIRROR_CACHE_MAX) {
+          break;
+        }
+      }
+      if (list.length > 0) {
+        Prefs.putString(MIRROR_CACHE_KEY, JSON.stringify(list));
+      }
+    } catch (err) {
+    }
+  }
+
+  /** 读取上次缓存的镜像线路（只读本地，不发起网络请求；供 LineAuto 选候选 / 面板兜底）。 */
+  static cachedMirrors(): LineItem[] {
+    const out: LineItem[] = [];
+    const raw: string = Prefs.getString(MIRROR_CACHE_KEY, '');
+    if (raw.length === 0) {
+      return out;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed === null) {
+        return out;
+      }
+      const list = parsed as LineItem[];
+      for (let i = 0; i < list.length && out.length < MIRROR_CACHE_MAX; i++) {
+        const item = list[i];
+        if (item === undefined || item === null) {
+          continue;
+        }
+        const url: string = Lines.normalize(item.url === undefined || item.url === null ? '' : item.url);
+        if (url.length === 0) {
+          continue;
+        }
+        const entry: LineItem = { url: url };
+        if (item.name !== undefined && item.name !== null && item.name.length > 0) {
+          entry.name = item.name;
+        }
+        if (item.host !== undefined && item.host !== null && item.host.length > 0) {
+          entry.host = item.host;
+        }
+        out.push(entry);
+      }
+    } catch (err) {
+    }
+    return out;
   }
 
   /** 并发 6 条一组探测，只报结果，不自动切换。 */

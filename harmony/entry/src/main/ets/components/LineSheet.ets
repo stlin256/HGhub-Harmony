@@ -1,4 +1,5 @@
 import { LineItem } from '../models/Types';
+import { LineAuto } from '../services/LineAuto';
 import { Lines } from '../services/Lines';
 import { Api } from '../services/Api';
 import { UiBus } from '../services/UiBus';
@@ -14,10 +15,14 @@ export struct LineSheet {
   @State mirrors: LineItem[] = [];
   @State loading: boolean = false;
   @State error: string = '';
+  /** 自动线路状态文案（正在检测/当前可用/已自动切换）+ 检测中 loading。 */
+  @State autoStatus: string = LineAuto.statusText();
+  @State autoBusy: boolean = false;
   onClose: () => void = () => {};
 
   aboutToAppear(): void {
     this.current = Lines.current();
+    this.autoStatus = LineAuto.statusText();
     this.loadMirrors();
   }
 
@@ -32,8 +37,14 @@ export struct LineSheet {
       this.mirrors = result.items;
     } catch (err) {
       this.error = (err as Error).message;
+      // 发布页不可达时用上次缓存的镜像兜底（缓存可能为空，此时只显示错误）。
+      const cached: LineItem[] = Lines.cachedMirrors();
+      if (cached.length > 0) {
+        this.mirrors = cached;
+      }
     } finally {
       this.loading = false;
+      this.autoStatus = LineAuto.statusText();
     }
   }
 
@@ -48,11 +59,41 @@ export struct LineSheet {
         this.onClose();
         return;
       }
+      // 手动选线的线路也记为偏好：下次启动优先探测它，不可用再自动选最快。
+      LineAuto.remember(next);
       UserPrefs.setUser(null);
       UiBus.toastOk('已切换线路，需要重新登录');
       this.onClose();
     } catch (err) {
       UiBus.toast((err as Error).message);
+    }
+  }
+
+  /** 用户点「自动选择」：强制检测并切换（记忆优先），成功后复用全局换线监听做无感重载。 */
+  private async autoSelect(): Promise<void> {
+    if (this.autoBusy) {
+      return;
+    }
+    this.autoBusy = true;
+    this.autoStatus = '正在检测线路…';
+    const before: string = Lines.current();
+    try {
+      const changed: boolean = await LineAuto.ensureBest(true);
+      this.current = Lines.current();
+      this.autoStatus = LineAuto.statusText();
+      if (changed && Lines.current() !== before) {
+        UserPrefs.setUser(null);
+        UiBus.toastOk('已自动切换到 ' + hostOf(Lines.current()));
+      } else if (this.autoStatus.indexOf('可用') >= 0) {
+        UiBus.toastInfo('当前线路可用');
+      } else {
+        UiBus.toast(this.autoStatus);
+      }
+    } catch (err) {
+      this.autoStatus = '自动选择失败，可手动切换';
+      UiBus.toast('自动选择失败，可手动切换');
+    } finally {
+      this.autoBusy = false;
     }
   }
 
@@ -173,7 +214,37 @@ export struct LineSheet {
         .width('100%')
         .fontSize(HgFont.caption)
         .fontColor(HgColor.textTertiary(this.dark))
-        .margin({ bottom: HgSpace.s })
+        .margin({ bottom: HgSpace.xs })
+
+      // 自动线路状态 + 手动触发检测（Loading 时禁用重复点击）。
+      Row({ space: HgSpace.s }) {
+        Text(this.autoStatus)
+          .layoutWeight(1)
+          .fontSize(HgFont.caption)
+          .fontColor(this.autoBusy ? HgColor.textSecondary(this.dark) : HgColor.textTertiary(this.dark))
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (this.autoBusy) {
+          LoadingProgress()
+            .width(16)
+            .height(16)
+            .color(HgColor.accent(this.dark))
+        } else {
+          Text('自动选择')
+            .fontSize(HgFont.secondary)
+            .fontColor(HgColor.accent(this.dark))
+            .height(HgSize.hitTarget)
+            .padding({ left: HgSpace.s, right: HgSpace.s })
+            .onClick(() => {
+              this.autoSelect();
+            })
+            .accessibilityText('自动检测并选择可用线路')
+        }
+      }
+      .width('100%')
+      .height(HgSize.hitTarget)
+      .alignItems(VerticalAlign.Center)
+      .margin({ bottom: HgSpace.xs })
 
       List() {
         ListItem() {
