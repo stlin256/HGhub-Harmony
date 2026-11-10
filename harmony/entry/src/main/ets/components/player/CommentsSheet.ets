@@ -381,13 +381,22 @@ export struct CommentsSheet {
           }, (comment: Comment) => String(comment.id))
 
           ListItem() {
-            Column() {
-              if (this.page < this.pages) {
-                Button(this.loadingMore ? '加载中…' : '查看更多评论')
-                  .height(HgSize.secondaryAction)
-                  .fontSize(HgFont.secondary)
-                  .fontColor(HgColor.accent(this.dark))
-                  .backgroundColor(Color.Transparent)
+            Column({ space: HgSpace.s }) {
+              if (this.loadingMore) {
+                Row({ space: HgSpace.s }) {
+                  LoadingProgress()
+                    .width(16)
+                    .height(16)
+                    .color(HgColor.accent(this.dark))
+                  Text('加载中…')
+                    .fontSize(HgFont.micro)
+                    .fontColor(HgColor.textTertiary(this.dark))
+                }
+              } else if (this.page < this.pages) {
+                // 无限滚动：滚动临近底部会自动请求下一页，这里只做轻提示（点击仍可作为兜底）。
+                Text('上滑自动加载更多')
+                  .fontSize(HgFont.micro)
+                  .fontColor(HgColor.textTertiary(this.dark))
                   .onClick(() => {
                     this.loadMore();
                   })
@@ -395,10 +404,10 @@ export struct CommentsSheet {
                 Text('— 到底啦 —')
                   .fontSize(HgFont.micro)
                   .fontColor(HgColor.textTertiary(this.dark))
-                  .padding({ top: HgSpace.m, bottom: HgSpace.m })
               }
             }
             .width('100%')
+            .height(HgSize.secondaryAction)
             .justifyContent(FlexAlign.Center)
           }
         }
@@ -406,11 +415,14 @@ export struct CommentsSheet {
         .width('100%')
         .divider({ strokeWidth: 0.5, color: HgColor.hairline(this.dark), startMargin: 44 })
         .scrollBar(BarState.Off)
-        // 侧栏（全高面板）滚到底自动翻页；手机底部 Sheet 保持原有「查看更多评论」按钮行为不变。
-        .onReachEnd(() => {
-          if (this.sidebar) {
+        // 无限滚动：手机 Sheet 与宽屏侧栏都自动翻页，不再需要手动点「查看更多评论」。
+        .onScrollIndex((first: number, last: number) => {
+          if (this.page < this.pages && this.items.length > 0 && last >= this.items.length - 3) {
             this.loadMore();
           }
+        })
+        .onReachEnd(() => {
+          this.loadMore();
         })
       }
 
