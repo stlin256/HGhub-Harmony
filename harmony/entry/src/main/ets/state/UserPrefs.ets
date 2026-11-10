@@ -13,6 +13,8 @@ export const K_MUTE_ON_STARTUP = 'hgMuteOnStartup';
 export const K_VOLUME = 'hgVolume';
 export const K_LIKES = 'hgLikesJson';
 export const K_FAVS = 'hgFavsJson';
+/** 帖子（图文）收藏：与视频收藏分开存储，避免帖子 id 混进「我的收藏」被当成视频拉详情。 */
+export const K_POST_FAVS = 'hgPostFavsJson';
 export const K_FOLLOWS = 'hgFollowsJson';
 export const K_HISTORY = 'hgHistoryJson';
 export const K_SEARCH_HIST = 'hgSearchHistJson';
@@ -99,6 +101,7 @@ export class UserPrefs {
     AppStorage.setOrCreate<string>(K_VIDEO_SCALE, UserPrefs.normalizeVideoScale(Prefs.getString('video_scale', 'contain')));
     AppStorage.setOrCreate<string>(K_LIKES, Prefs.getString('likes', '[]'));
     AppStorage.setOrCreate<string>(K_FAVS, Prefs.getString('favs', '[]'));
+    AppStorage.setOrCreate<string>(K_POST_FAVS, Prefs.getString('post_favs', '[]'));
     AppStorage.setOrCreate<string>(K_FOLLOWS, Prefs.getString('follows', '[]'));
     AppStorage.setOrCreate<string>(K_HISTORY, Prefs.getString('history', '[]'));
     AppStorage.setOrCreate<string>(K_SEARCH_HIST, Prefs.getString('search_hist', '[]'));
@@ -243,6 +246,31 @@ export class UserPrefs {
 
   static isFav(id: number): boolean {
     return UserPrefs.favs().indexOf(id) >= 0;
+  }
+
+  /* ── 帖子收藏（独立存储，不参与视频收藏列表） ── */
+  static postFavs(): number[] {
+    return parseNumberArray(AppStorage.get<string>(K_POST_FAVS) ?? '[]');
+  }
+
+  static isPostFav(id: number): boolean {
+    return UserPrefs.postFavs().indexOf(id) >= 0;
+  }
+
+  static togglePostFav(id: number): boolean {
+    const list = UserPrefs.postFavs();
+    const at = list.indexOf(id);
+    let on = false;
+    if (at >= 0) {
+      list.splice(at, 1);
+    } else {
+      list.unshift(id);
+      on = true;
+    }
+    const raw = JSON.stringify(list);
+    Prefs.putString('post_favs', raw);
+    AppStorage.setOrCreate<string>(K_POST_FAVS, raw);
+    return on;
   }
 
   static toggleFav(id: number): boolean {

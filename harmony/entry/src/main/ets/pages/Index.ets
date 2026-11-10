@@ -51,7 +51,8 @@ struct Index {
     hilog.info(0x0000, 'HGBoot', 'app init build=cover-debug-2');
     hilog.info(0x0000, 'HGBoot', 'HdsTabs floating bar ready');
     UiBus.openLogin = () => {
-      this.loginVisible = true;
+      // 本 App 不再支持账号登录：任何登录入口统一提示，避免弹空表单。
+      promptAction.showToast({ message: '本APP暂不支持登录', duration: 2000 });
     };
     UiBus.openLines = () => {
       this.lineVisible = true;
@@ -270,6 +271,8 @@ struct Index {
         .animationDuration(240)
         .barMode(BarMode.Fixed)
         .barOverlap(true)
+        // 移除系统默认的底部渐变遮罩（否则列表下方会出现一条不透明黑带，搜索/瀑布流尤其明显）。
+        .barBackgroundStyle({ maskColor: Color.Transparent, maskHeight: 0 })
         .barFloatingStyle({
           barWidth: { smallWidth: 340, mediumWidth: 420, largeWidth: 500 },
           barSideMargin: 12,

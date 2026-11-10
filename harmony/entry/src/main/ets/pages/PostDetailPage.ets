@@ -3,7 +3,7 @@ import { Comment, CommentPage, Post } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgTopBar } from '../components/HgCommon';
 import { PostContent } from '../components/browse/PostContent';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { UserPrefs } from '../state/UserPrefs';
@@ -38,6 +38,9 @@ export struct PostDetailPage {
   @State commentsLoading: boolean = false;
   @State commentsError: string = '';
   @State commentTotal: number = 0;
+  /** 详情内容淡入透明度：首屏头图/正文轻微 fade，骨架→内容不硬切。 */
+  @State private contentFade: number = 1;
+  private contentFadeTimer: number = -1;
   private commentPage: number = 0;
   private commentPages: number = 1;
 
@@ -48,7 +51,33 @@ export struct PostDetailPage {
 
   aboutToAppear(): void {
     this.postId = this.params.id;
+    // 未登录时收藏只记在本机（UserPrefs.favs），重新进入详情页先还原本地状态；
+    // 登录态仍以服务端 interaction 为准（下方 loadPost 里不会用本地覆盖）。
+    if (!UserPrefs.loggedIn() && this.postId > 0) {
+      this.collected = UserPrefs.isPostFav(this.postId);
+    }
     this.loadPost();
+  }
+
+  aboutToDisappear(): void {
+    if (this.contentFadeTimer >= 0) {
+      clearTimeout(this.contentFadeTimer);
+      this.contentFadeTimer = -1;
+    }
+  }
+
+  /** 详情内容出现时从 62% 透明度 190ms 淡入，首屏头图/正文不硬切。 */
+  private fadeInContent(): void {
+    this.contentFade = 0.62;
+    if (this.contentFadeTimer >= 0) {
+      clearTimeout(this.contentFadeTimer);
+    }
+    this.contentFadeTimer = setTimeout(() => {
+      this.contentFadeTimer = -1;
+      animateTo({ duration: HgDuration.overlay, curve: Curve.FastOutSlowIn }, () => {
+        this.contentFade = 1;
+      });
+    }, 40);
   }
 
   private async loadPost(): Promise<void> {
@@ -76,6 +105,7 @@ export struct PostDetailPage {
       const count = post.counts !== undefined ? post.counts.like : 0;
       this.likeCount = count;
       this.hasPost = true;
+      this.fadeInContent();
       this.loadComments();
     } catch (err) {
       this.errorText = (err as Error).message;
@@ -121,8 +151,9 @@ export struct PostDetailPage {
   }
 
   private toggleLike(): void {
+    // 未登录：点赞需要服务端账号，直接提示而不弹登录面板（当前版本无法登录）。
     if (!UserPrefs.loggedIn()) {
-      UiBus.openLogin();
+      UiBus.toast('未登录，无法点赞');
       return;
     }
     const next = !this.liked;
@@ -135,11 +166,14 @@ export struct PostDetailPage {
   }
 
   private toggleCollect(): void {
+    const next = !this.collected;
+    // 未登录：收藏只落在本机帖收藏（UserPrefs post_favs），立即切换本地状态并 toast，不调用服务端接口。
     if (!UserPrefs.loggedIn()) {
-      UiBus.openLogin();
+      this.collected = next;
+      UserPrefs.togglePostFav(this.postId);
+      UiBus.toastOk(next ? '已收藏（本地）' : '已取消收藏');
       return;
     }
-    const next = !this.collected;
     Api.postCollect(this.postId, next).then(() => {
       this.collected = next;
       UiBus.toastOk(next ? '已收藏' : '已取消收藏');
@@ -538,6 +572,8 @@ export struct PostDetailPage {
           .align(Alignment.Top)
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
+          // 首屏头图/正文淡入（见 fadeInContent）。
+          .opacity(this.contentFade)
         }
       }
       .width('100%')
