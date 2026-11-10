@@ -3,7 +3,7 @@ import { Paged, VideoCard } from '../models/Types';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
 import { HgTopBar } from '../components/HgCommon';
-import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgDuration, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { ChannelParam, PlayerParam, ROUTE_PLAYER } from '../state/Routes';
@@ -38,6 +38,10 @@ export struct ChannelPage {
   @State errorText: string = '';
   @State refreshing: boolean = false;
   @State sortKey: string = 'latest';
+  /** 首屏内容淡入透明度（有缓存秒开时也保留一次很轻的 fade，避免硬切）。 */
+  @State private contentFade: number = 1;
+  private contentFadeTimer: number = -1;
+  private contentFadeShown: boolean = false;
   private items: VideoCard[] = [];
   private source: HgListSource<VideoCard> = new HgListSource<VideoCard>();
   private page: number = 0;
@@ -58,6 +62,34 @@ export struct ChannelPage {
     this.loadFirst();
   }
 
+  aboutToDisappear(): void {
+    if (this.contentFadeTimer >= 0) {
+      clearTimeout(this.contentFadeTimer);
+      this.contentFadeTimer = -1;
+    }
+  }
+
+  /**
+   * 首屏数据到达：列表从 62% 透明度 190ms 淡入。
+   * 频道页有缓存时可能无骨架直接出内容，这里保留一次很轻的 fade，避免内容硬切。
+   */
+  private fadeInFirstContent(): void {
+    if (this.contentFadeShown) {
+      return;
+    }
+    this.contentFadeShown = true;
+    this.contentFade = 0.62;
+    if (this.contentFadeTimer >= 0) {
+      clearTimeout(this.contentFadeTimer);
+    }
+    this.contentFadeTimer = setTimeout(() => {
+      this.contentFadeTimer = -1;
+      animateTo({ duration: HgDuration.overlay, curve: Curve.FastOutSlowIn }, () => {
+        this.contentFade = 1;
+      });
+    }, 40);
+  }
+
   private async loadFirst(): Promise<void> {
     const seq = ++this.loadSeq;
     this.loading = this.items.length === 0;
@@ -73,6 +105,9 @@ export struct ChannelPage {
       this.pages = res.pagination !== undefined && res.pagination.pages > 0 ? res.pagination.pages : 1;
       this.finished = list.length === 0 || this.page >= this.pages;
       this.applySort();
+      if (list.length > 0) {
+        this.fadeInFirstContent();
+      }
     } catch (err) {
       if (seq === this.loadSeq) {
         this.errorText = (err as Error).message;
@@ -248,6 +283,8 @@ export struct ChannelPage {
         }
         .layoutWeight(1)
         .width('100%')
+        // 首屏封面/信息轻微淡入（见 fadeInFirstContent）。
+        .opacity(this.contentFade)
       }
       .width('100%')
       .height('100%')

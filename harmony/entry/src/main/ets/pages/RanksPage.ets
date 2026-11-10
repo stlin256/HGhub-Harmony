@@ -504,15 +504,42 @@ export struct RanksPage {
     this.fetchKind(key);
   }
 
-  /** 数据替换：切榜走「旧内容淡出 → 换数据 → 新内容淡入」；首屏/下拉刷新直接替换。 */
+  /** 数据替换：切榜走「旧内容淡出 → 换数据 → 新内容淡入」；首屏/下拉刷新改为 140ms 轻淡入。 */
   private applyKindData(cached: RankCache): void {
     if (this.topRows.length > 0 && !this.refreshing) {
       this.transitionTo(cached);
       return;
     }
+    const hadRows: boolean = this.topRows.length > 0 || this.restRows.length > 0;
     this.transitionSeq++;
+    if (!hadRows) {
+      // 首屏骨架 → 榜单：先以 0 透明度占位，数据落地后 140ms 淡入；骨架分支同帧移除，
+      // 不叠加两个布局节点，避免列表与骨架在过渡期互相挤压。
+      this.listOpacity = 0;
+      this.applyCache(cached);
+      this.scheduleListFadeIn();
+      return;
+    }
     this.applyCache(cached);
+    if (this.refreshing) {
+      // 下拉刷新完成：整表替换后 140ms 轻淡入（从 0.7 回升，避免整块硬切闪动）。
+      this.listOpacity = 0.7;
+      this.scheduleListFadeIn();
+      return;
+    }
     this.listOpacity = 1;
+  }
+
+  /** 下一帧起把列表透明度 140ms 过渡到 1（首屏 0→1、下拉刷新 0.7→1）。 */
+  private scheduleListFadeIn(): void {
+    setTimeout(() => {
+      if (this.pageGone) {
+        return;
+      }
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        this.listOpacity = 1;
+      });
+    }, 16);
   }
 
   private transitionTo(cached: RankCache): void {
@@ -894,5 +921,7 @@ export struct RanksPage {
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    // 兜底铺满整页背景：页面转场/底部安全区内边距区不露出默认背景（深色下会像一条黑带）。
+    .backgroundColor(HgColor.canvas(this.dark))
   }
 }
