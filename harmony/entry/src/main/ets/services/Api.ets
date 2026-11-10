@@ -1,9 +1,12 @@
 import { JSON } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Net } from './Net';
 import { Lines } from './Lines';
 import { Session } from './Session';
 import { ImageCache } from './ImageCache';
 import { AppContext } from './AppContext';
+import { LineAuto } from './LineAuto';
+import { UserPrefs } from '../state/UserPrefs';
 import {
   BootInfo, CommentPage, Detail, LineMirrors, LineProbe, LoginResult, Paged, PlaybackInfo, PlayInfo, Post,
   RankResult, SearchResult, UpdateInfo, User, VideoCard
@@ -34,6 +37,30 @@ interface CommentBody {
   reply_id?: number;
 }
 
+/** 详情缓存条目（LRU + TTL）。 */
+class DetailEntry {
+  id: number;
+  detail: Detail;
+  at: number;
+
+  constructor(id: number, detail: Detail, at: number) {
+    this.id = id;
+    this.detail = detail;
+    this.at = at;
+  }
+}
+
+/** 详情缓存有效期。 */
+const DETAIL_TTL_MS: number = 10 * 60 * 1000;
+/** 详情缓存条数上限（LRU 淘汰）。 */
+const DETAIL_MAX_ENTRIES: number = 120;
+/** 启动预热历史详情的并发上限。 */
+const WARM_HISTORY_CONCURRENCY: number = 3;
+/** 换线冷却：避免每个并发失败请求都触发一次线路探测。 */
+const LINE_RETRY_COOLDOWN_MS: number = 15000;
+const API_LOG_DOMAIN: number = 0x0000;
+const API_LOG_TAG: string = 'HGApi';
+
 function requireObject(data: Object | null): Object {
   if (data === null) {
     throw new Error('接口返回为空');
@@ -54,6 +81,16 @@ function bool(on: boolean): string {
  * 所有请求都走边缘信封；错误信息统一成可直接展示的中文/HTTP 文本。
  */
 export class Api {
+  /* ── 详情缓存（进程内，10 分钟 TTL / 120 条 LRU） ───── */
+  private static detailCache: DetailEntry[] = [];
+  private static detailInflight: Map<number, Promise<Detail>> = new Map<number, Promise<Detail>>();
+  /** clearCache 代际：清空后，旧的在途详情响应不再写回缓存。 */
+  private static detailGeneration: number = 0;
+  /** 上次换线重试时间（冷却用）。 */
+  private static lineRetryAt: number = 0;
+  /** 正在进行的换线（并发失败共享同一次探测）。 */
+  private static lineSwitchInflight: Promise<boolean> | null = null;
+
   static appVersion(): string {
     return '2.0.0';
   }
@@ -62,8 +99,126 @@ export class Api {
     return Session.tokenFor(Lines.current());
   }
 
+  /**
+   * 业务接口统一入口：网络类失败时自动换线路并重试一次（LineAuto.retryAfterFailure）。
+   * 业务错误（信封 msg）、401/403、明文被系统拦截不重试；并发失败共享同一次换线，15s 冷却。
+   */
   private static async edge(method: string, path: string, body: Object | null): Promise<Object | null> {
+    const originBase: string = Lines.current();
+    try {
+      return await Api.edgeOnce(method, path, body);
+    } catch (err) {
+      const message: string = Api.errMessage(err);
+      if (!Api.retryableNetworkError(message)) {
+        throw Api.toError(err);
+      }
+      // 并发请求：别的请求已经把线路换掉了，直接用新线路重试一次。
+      if (Lines.current() !== originBase) {
+        hilog.info(API_LOG_DOMAIN, API_LOG_TAG, 'line already switched, retry %{public}s',
+          Api.opName(path));
+        return await Api.edgeOnce(method, path, body);
+      }
+      const now: number = Date.now();
+      if (Api.lineRetryAt > 0 && now - Api.lineRetryAt < LINE_RETRY_COOLDOWN_MS) {
+        throw Api.toError(err);
+      }
+      Api.lineRetryAt = now;
+      const switched: boolean = await Api.requestLineSwitch();
+      if (!switched || Lines.current() === originBase) {
+        throw Api.toError(err);
+      }
+      hilog.info(API_LOG_DOMAIN, API_LOG_TAG, 'line switched, retry %{public}s', Api.opName(path));
+      return await Api.edgeOnce(method, path, body);
+    }
+  }
+
+  private static async edgeOnce(method: string, path: string, body: Object | null): Promise<Object | null> {
     return await Net.edge(Lines.current(), method, path, body, Api.token());
+  }
+
+  /** 并发失败只触发一次 LineAuto.retryAfterFailure（结果共享）。 */
+  private static requestLineSwitch(): Promise<boolean> {
+    const pending: Promise<boolean> | null = Api.lineSwitchInflight;
+    if (pending !== null) {
+      return pending;
+    }
+    const task: Promise<boolean> = Api.switchLineOnce();
+    Api.lineSwitchInflight = task;
+    return task;
+  }
+
+  private static async switchLineOnce(): Promise<boolean> {
+    let switched: boolean = false;
+    try {
+      switched = await LineAuto.retryAfterFailure();
+    } catch (err) {
+      switched = false;
+    }
+    Api.lineSwitchInflight = null;
+    return switched;
+  }
+
+  private static opName(path: string): string {
+    const mark: number = path.indexOf('?');
+    return mark >= 0 ? path.substring(0, mark) : path;
+  }
+
+  /**
+   * ArkTS 只允许 throw Error（arkts-limited-throw）：把捕获到的异常收敛成 message 相同的 Error。
+   * Net/Api 抛出的都是 Error，因此调用方按 message 展示的行为不变。
+   */
+  private static toError(err: Object): Error {
+    const error = err as Error;
+    if (error !== undefined && error !== null && error.message !== undefined &&
+      error.message !== null && error.message.length > 0) {
+      return new Error(error.message);
+    }
+    return new Error('网络请求失败');
+  }
+
+  /** 取异常文本（Net 已归一为中文/HTTP 文本）。 */
+  private static errMessage(err: Object): string {
+    const error = err as Error;
+    if (error !== undefined && error !== null && error.message !== undefined &&
+      error.message !== null && error.message.length > 0) {
+      return error.message;
+    }
+    return '';
+  }
+
+  /**
+   * 是否值得换线路重试：只认网络类失败（超时/DNS/连接中断/未达、HTTP 408/425/429/5xx）。
+   * 业务错误、401/403、明文被系统拦截（换线无意义）一律不重试。
+   */
+  private static retryableNetworkError(message: string): boolean {
+    if (message.length === 0) {
+      return false;
+    }
+    if (message === '401' || message === '403') {
+      return false;
+    }
+    if (message.indexOf('明文') >= 0) {
+      return false;
+    }
+    if (message.startsWith('HTTP ')) {
+      const status: number = Number(message.substring(5).split(' ')[0]);
+      if (isNaN(status)) {
+        return false;
+      }
+      return status === 408 || status === 425 || status === 429 || status >= 500;
+    }
+    const hints: string[] = [
+      '网络请求超时', '无法解析服务器地址', '无法连接服务器', '网络连接被中断', '网络不可用',
+      '网络请求失败', '连接超时', '网络异常', '连接失败', '连接被拒绝',
+      'timeout', 'Timeout', 'timed out', 'network', 'Network', 'socket', 'Socket',
+      'unreachable', 'connect', 'Connect', 'refused', 'ETIMEDOUT', 'EHOSTUNREACH', 'no route'
+    ];
+    for (let i = 0; i < hints.length; i++) {
+      if (message.indexOf(hints[i]) >= 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /* ── 启动 / 会话 ───────────────────────────────────── */
@@ -170,9 +325,133 @@ export class Api {
   }
 
   /* ── 详情 / 播放 ───────────────────────────────────── */
-  static async video(id: number): Promise<Detail> {
+
+  /**
+   * 取视频详情：10 分钟内存缓存（LRU 120 条）优先；同一 id 并发请求合并成一次。
+   * @param forceRefresh true=跳过缓存强制回源（详情页后台静默刷新用；日常调用不要传）
+   */
+  static async video(id: number, forceRefresh: boolean = false): Promise<Detail> {
+    if (!forceRefresh) {
+      const cached: Detail | null = Api.peekVideo(id);
+      if (cached !== null) {
+        return cached;
+      }
+    }
+    const pending: Promise<Detail> | undefined = Api.detailInflight.get(id);
+    if (pending !== undefined) {
+      return await pending;
+    }
+    const task: Promise<Detail> = Api.fetchDetail(id);
+    Api.detailInflight.set(id, task);
+    try {
+      return await task;
+    } finally {
+      Api.detailInflight.delete(id);
+    }
+  }
+
+  /** 同步读详情缓存（未过期）；命中会把条目提到 LRU 头部；无缓存返回 null。 */
+  static peekVideo(id: number): Detail | null {
+    if (id <= 0) {
+      return null;
+    }
+    const now: number = Date.now();
+    for (let i = 0; i < Api.detailCache.length; i++) {
+      const entry: DetailEntry = Api.detailCache[i];
+      if (entry.id !== id) {
+        continue;
+      }
+      if (now - entry.at >= DETAIL_TTL_MS) {
+        Api.detailCache.splice(i, 1);
+        return null;
+      }
+      if (i > 0) {
+        Api.detailCache.splice(i, 1);
+        Api.detailCache.unshift(entry);
+      }
+      return entry.detail;
+    }
+    return null;
+  }
+
+  /**
+   * 预取详情（历史/收藏卡片、启动预热用）：命中缓存直接返回，失败静默返回 null，绝不抛异常。
+   */
+  static async warmVideo(id: number): Promise<Detail | null> {
+    if (id <= 0) {
+      return null;
+    }
+    const cached: Detail | null = Api.peekVideo(id);
+    if (cached !== null) {
+      return cached;
+    }
+    try {
+      return await Api.video(id);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  /**
+   * 启动预热最近观看历史详情（前 limit 条，并发 ≤3，失败静默）。
+   * 建议 EntryAbility.initServices() 里 UserPrefs.init(...) 之后调用：Api.warmHistory(3).catch(() => {});
+   */
+  static async warmHistory(limit: number): Promise<void> {
+    let count: number = Math.floor(limit);
+    if (count <= 0) {
+      return;
+    }
+    const history = UserPrefs.history();
+    if (count > history.length) {
+      count = history.length;
+    }
+    const ids: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const id: number = history[i].id;
+      if (id > 0 && Api.peekVideo(id) === null && !Api.detailInflight.has(id)) {
+        ids.push(id);
+      }
+    }
+    if (ids.length > 0) {
+      hilog.info(API_LOG_DOMAIN, API_LOG_TAG, 'warm history n=%{public}d', ids.length);
+    }
+    let index: number = 0;
+    while (index < ids.length) {
+      const tasks: Promise<Detail | null>[] = [];
+      for (let i = index; i < index + WARM_HISTORY_CONCURRENCY && i < ids.length; i++) {
+        tasks.push(Api.warmVideo(ids[i]));
+      }
+      await Promise.all(tasks);
+      index += WARM_HISTORY_CONCURRENCY;
+    }
+  }
+
+  /** 真正回源取详情并写缓存（clearCache 后旧响应不写回）。 */
+  private static async fetchDetail(id: number): Promise<Detail> {
+    const generation: number = Api.detailGeneration;
+    hilog.info(API_LOG_DOMAIN, API_LOG_TAG, 'video fetch id=%{public}d', id);
     const data = await Api.edge('GET', '/api/videos/' + id, null);
-    return requireObject(data) as Detail;
+    const detail: Detail = requireObject(data) as Detail;
+    if (generation === Api.detailGeneration) {
+      Api.storeDetail(id, detail);
+    }
+    return detail;
+  }
+
+  private static storeDetail(id: number, detail: Detail): void {
+    if (id <= 0) {
+      return;
+    }
+    for (let i = 0; i < Api.detailCache.length; i++) {
+      if (Api.detailCache[i].id === id) {
+        Api.detailCache.splice(i, 1);
+        break;
+      }
+    }
+    Api.detailCache.unshift(new DetailEntry(id, detail, Date.now()));
+    while (Api.detailCache.length > DETAIL_MAX_ENTRIES) {
+      Api.detailCache.pop();
+    }
   }
 
   /** 旧版播放接口（上游已不再返回 video_url；仅作兼容保留）。 */
@@ -297,7 +576,12 @@ export class Api {
     });
   }
 
+  /** 清空图片缓存 + 详情缓存（设置页「清理缓存」可改调本方法）。 */
   static clearCache(): void {
+    Api.detailGeneration++;
+    Api.detailCache = [];
+    Api.detailInflight.clear();
+    Api.lineRetryAt = 0;
     ImageCache.clear();
   }
 }

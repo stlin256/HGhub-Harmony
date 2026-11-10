@@ -4,7 +4,7 @@ import { UiBus } from '../services/UiBus';
 import { K_BOTTOM_INSET, K_TOP_INSET, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
 import { ROUTE_PLAYER, PlayerParam, VideoParam } from '../state/Routes';
 import { Detail, WatchProgress } from '../models/Types';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState } from '../components/HgCommon';
@@ -49,6 +49,9 @@ export struct VideoDetailPage {
   @State showEpisodes: boolean = false;
   @State progressEp: number = 1;
   @State progressSec: number = 0;
+  /** 详情内容淡入透明度：首屏（含缓存秒开）轻微 fade，骨架→内容不硬切。 */
+  @State private contentFade: number = 1;
+  private contentFadeTimer: number = -1;
 
   private destroyed: boolean = false;
 
@@ -85,9 +88,44 @@ export struct VideoDetailPage {
 
   aboutToDisappear(): void {
     this.destroyed = true;
+    if (this.contentFadeTimer >= 0) {
+      clearTimeout(this.contentFadeTimer);
+      this.contentFadeTimer = -1;
+    }
   }
 
+  /** 详情内容出现时从 62% 透明度 190ms 淡入（有缓存秒开时也保留一次很轻的 fade）。 */
+  private fadeInContent(): void {
+    this.contentFade = 0.62;
+    if (this.contentFadeTimer >= 0) {
+      clearTimeout(this.contentFadeTimer);
+    }
+    this.contentFadeTimer = setTimeout(() => {
+      this.contentFadeTimer = -1;
+      if (this.destroyed) {
+        return;
+      }
+      animateTo({ duration: HgDuration.overlay, curve: Curve.FastOutSlowIn }, () => {
+        this.contentFade = 1;
+      });
+    }, 40);
+  }
+
+  /**
+   * 首帧：先用 Api.peekVideo 同步渲染（从历史/收藏进入通常已有缓存），再后台静默刷新；
+   * 无缓存时保持现有骨架屏，等网络返回。
+   */
   private async load(): Promise<void> {
+    const cached: Detail | null = Api.peekVideo(this.params.id);
+    if (cached !== null) {
+      // 缓存命中：点赞/收藏以本地状态为准（缓存里的 interaction 可能已过期）。
+      this.applyDetail(cached, false);
+      this.loading = false;
+      this.errorText = '';
+      this.fadeInContent();
+      this.refreshSilently();
+      return;
+    }
     this.loading = true;
     this.errorText = '';
     try {
@@ -95,8 +133,9 @@ export struct VideoDetailPage {
       if (this.destroyed) {
         return;
       }
-      this.applyDetail(detail);
+      this.applyDetail(detail, true);
       this.loading = false;
+      this.fadeInContent();
     } catch (err) {
       if (this.destroyed) {
         return;
@@ -106,7 +145,22 @@ export struct VideoDetailPage {
     }
   }
 
-  private applyDetail(detail: Detail): void {
+  /** 有缓存时后台强制刷新一次详情（失败静默，不打断已渲染内容）。 */
+  private refreshSilently(): void {
+    Api.video(this.params.id, true).then((detail: Detail) => {
+      if (this.destroyed) {
+        return;
+      }
+      this.applyDetail(detail, true);
+    }).catch((err: Object) => {
+    });
+  }
+
+  /**
+   * @param useServerInteraction 网络首载=true：服务端 interaction 可把本地点赞/收藏补成已选；
+   *        缓存渲染=false：旧 interaction 不可信，只用本地 UserPrefs 状态。
+   */
+  private applyDetail(detail: Detail, useServerInteraction: boolean): void {
     this.title = detail.title === undefined || detail.title === null ? '' : detail.title;
     this.coverUrl = detail.cover === undefined || detail.cover === null ? '' : detail.cover;
     this.description = detail.description === undefined || detail.description === null
@@ -147,13 +201,15 @@ export struct VideoDetailPage {
     }
     this.liked = UserPrefs.isLiked(this.params.id);
     this.faved = UserPrefs.isFav(this.params.id);
-    const interaction = detail.interaction;
-    if (interaction !== undefined && interaction !== null && UserPrefs.loggedIn()) {
-      if (interaction.liked) {
-        this.liked = true;
-      }
-      if (interaction.collected) {
-        this.faved = true;
+    if (useServerInteraction) {
+      const interaction = detail.interaction;
+      if (interaction !== undefined && interaction !== null && UserPrefs.loggedIn()) {
+        if (interaction.liked) {
+          this.liked = true;
+        }
+        if (interaction.collected) {
+          this.faved = true;
+        }
       }
     }
     this.refreshProgress();
@@ -258,8 +314,9 @@ export struct VideoDetailPage {
   }
 
   private toggleLike(): void {
+    // 未登录：点赞需要服务端账号，直接提示而不弹登录面板（当前版本无法登录）。
     if (!UserPrefs.loggedIn()) {
-      UiBus.openLogin();
+      UiBus.toast('未登录，无法点赞');
       return;
     }
     const next = !this.liked;
@@ -276,11 +333,16 @@ export struct VideoDetailPage {
   }
 
   private toggleFav(): void {
+    const next = !this.faved;
+    // 未登录：收藏只落在本机（UserPrefs.favs），立即切换本地状态并 toast，不调用服务端接口。
+    // 登录后仍走下方同步分支，本地收藏可继续作为登录前的“记忆”。
     if (!UserPrefs.loggedIn()) {
-      UiBus.openLogin();
+      this.faved = next;
+      this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
+      UserPrefs.toggleFav(this.params.id);
+      UiBus.toastOk(next ? '已收藏（本地）' : '已取消收藏');
       return;
     }
-    const next = !this.faved;
     const previousCount = this.collectCount;
     this.faved = next;
     this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
@@ -398,6 +460,7 @@ export struct VideoDetailPage {
         .fontColor(this.episodeCellTextColor(ep))
         .width('100%')
         .textAlign(TextAlign.Center)
+        .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
       if (ep < this.progressEp) {
         Row()
           .width('100%')
@@ -409,6 +472,8 @@ export struct VideoDetailPage {
     .height(HgSize.episodeCell)
     .backgroundColor(this.episodeCellColor(ep))
     .borderRadius(HgRadius.control)
+    // 当前集切换（进度写回/选中态变化）时底色与文字色的 140ms 过渡。
+    .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
     .onClick(() => {
       this.playEpisode(ep);
     })
@@ -728,6 +793,8 @@ export struct VideoDetailPage {
           .align(Alignment.Top)
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
+          // 首屏封面/信息淡入（见 fadeInContent）。
+          .opacity(this.contentFade)
 
           this.BottomBar()
         }
