@@ -2,7 +2,7 @@ import { Api } from '../services/Api';
 import { Detail, User, WatchProgress } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState } from '../components/HgCommon';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import {
   K_BOTTOM_INSET, K_DARK, K_FAVS, K_HISTORY, K_TOP_INSET, K_USER, K_NAV_W, UserPrefs
@@ -40,8 +40,10 @@ export struct ProfilePage {
   @State collectCount: number = 0;
   @State followingCount: number = 0;
   @State loggedIn: boolean = false;
+  /** 收藏/历史列表整体淡入淡出透明度（切 Tab、数量变化、清空历史时使用）。 */
+  @State private cardsFade: number = 1;
+  private cardsFadeTimer: number = -1;
   private historyList: WatchProgress[] = [];
-  private cache: Map<number, Detail> = new Map<number, Detail>();
   private loadSeq: number = 0;
 
   /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
@@ -89,12 +91,23 @@ export struct ProfilePage {
     this.loadCards();
   }
 
+  aboutToDisappear(): void {
+    if (this.cardsFadeTimer >= 0) {
+      clearTimeout(this.cardsFadeTimer);
+      this.cardsFadeTimer = -1;
+    }
+  }
+
   onUserChanged(): void {
     this.readUser();
   }
 
   onStoreChanged(): void {
     this.refreshLocalLists();
+    // 收藏/历史（可能在详情页本地新增）变化时，列表先淡出再重载淡入。
+    if (this.cards.length > 0) {
+      this.cardsFade = 0;
+    }
     this.loadCards();
   }
 
@@ -139,14 +152,9 @@ export struct ProfilePage {
     return ids;
   }
 
+  /** 卡片详情统一走 Api 的共享详情缓存（避免与详情页重复请求）。 */
   private async fetchOne(id: number): Promise<Detail | null> {
-    try {
-      const detail = await Api.video(id);
-      this.cache.set(id, detail);
-      return detail;
-    } catch (err) {
-      return null;
-    }
+    return await Api.warmVideo(id);
   }
 
   private async loadCards(): Promise<void> {
@@ -157,6 +165,7 @@ export struct ProfilePage {
       this.cards = [];
       this.cardsLoading = false;
       this.cardError = '';
+      this.scheduleCardsFadeIn();
       return;
     }
     this.cardsLoading = true;
@@ -166,8 +175,8 @@ export struct ProfilePage {
       while (index < target.length) {
         const tasks: Promise<Detail | null>[] = [];
         for (let i = index; i < index + FETCH_CONCURRENCY && i < target.length; i++) {
-          const cached: Detail | undefined = this.cache.get(target[i]);
-          if (cached !== undefined) {
+          const cached: Detail | null = Api.peekVideo(target[i]);
+          if (cached !== null) {
             tasks.push(Promise.resolve<Detail | null>(cached));
           } else {
             tasks.push(this.fetchOne(target[i]));
@@ -181,8 +190,8 @@ export struct ProfilePage {
       }
       const out: Detail[] = [];
       for (let i = 0; i < target.length; i++) {
-        const hit: Detail | undefined = this.cache.get(target[i]);
-        if (hit !== undefined) {
+        const hit: Detail | null = Api.peekVideo(target[i]);
+        if (hit !== null) {
           out.push(hit);
         }
       }
@@ -198,14 +207,30 @@ export struct ProfilePage {
     } finally {
       if (seq === this.loadSeq) {
         this.cardsLoading = false;
+        this.scheduleCardsFadeIn();
       }
     }
+  }
+
+  /** 数据落定后把列表透明度从 0 淡回 1（140ms），与切 Tab/清空历史的淡出配对。 */
+  private scheduleCardsFadeIn(): void {
+    if (this.cardsFadeTimer >= 0) {
+      clearTimeout(this.cardsFadeTimer);
+    }
+    this.cardsFadeTimer = setTimeout(() => {
+      this.cardsFadeTimer = -1;
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        this.cardsFade = 1;
+      });
+    }, 40);
   }
 
   private switchTab(tab: string): void {
     if (this.tab === tab) {
       return;
     }
+    // 分段切换：旧列表 140ms 淡出 → 换数据 → 新列表淡入（交叉淡入观感）。
+    this.cardsFade = 0;
     this.tab = tab;
     this.cards = [];
     this.loadCards();
@@ -267,11 +292,19 @@ export struct ProfilePage {
         value: '清空',
         fontColor: HgColor.danger(this.dark),
         action: () => {
-          UserPrefs.clearHistory();
-          this.refreshLocalLists();
-          this.cards = [];
-          this.loadCards();
-          UiBus.toastOk('观看历史已清空');
+          // 列表先 140ms 淡出，再清数据/重载（空态随后淡入），避免列表"砰"地消失。
+          this.cardsFade = 0;
+          if (this.cardsFadeTimer >= 0) {
+            clearTimeout(this.cardsFadeTimer);
+          }
+          this.cardsFadeTimer = setTimeout(() => {
+            this.cardsFadeTimer = -1;
+            UserPrefs.clearHistory();
+            this.refreshLocalLists();
+            this.cards = [];
+            this.loadCards();
+            UiBus.toastOk('观看历史已清空');
+          }, HgDuration.micro);
         }
       }
     });
@@ -429,6 +462,7 @@ export struct ProfilePage {
         .height(30)
         .backgroundColor(this.tab === 'fav' ? HgColor.surface1(this.dark) : Color.Transparent)
         .borderRadius(HgRadius.chip)
+        .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
         .onClick(() => {
           this.switchTab('fav');
         })
@@ -441,6 +475,7 @@ export struct ProfilePage {
         .height(30)
         .backgroundColor(this.tab === 'history' ? HgColor.surface1(this.dark) : Color.Transparent)
         .borderRadius(HgRadius.chip)
+        .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
         .onClick(() => {
           this.switchTab('history');
         })
@@ -624,7 +659,12 @@ export struct ProfilePage {
         Column({ space: HgSpace.l }) {
           this.ProfileCard()
           this.Segmented()
-          this.CardsArea()
+          // 收藏/历史切换、数量变化、清空历史：列表整体淡入淡出（140ms），不做位移。
+          Column() {
+            this.CardsArea()
+          }
+          .width('100%')
+          .opacity(this.cardsFade)
           Text('HGhub ' + Api.appVersion() + ' · HarmonyOS NEXT 客户端')
             .width('100%')
             .fontSize(HgFont.micro)
