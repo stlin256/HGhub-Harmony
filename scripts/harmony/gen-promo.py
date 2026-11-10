@@ -149,16 +149,18 @@ def save(img, name, out_dir):
 TEXT_X = 880
 
 
-def brand_hg(img, x, y, size=32, logo=None):
+def brand_hg(img, x, y, size=42, logo=None):
+    """品牌行：大图标 + 垂直居中的 HGhub 字标 + 下方 HarmonyOS Native。"""
     d = ImageDraw.Draw(img)
-    lx = x
-    ls = int(size * 1.5)
+    icon = int(size * 1.5)
+    cy = y + icon / 2
     if logo is not None:
-        img.alpha_composite(logo.resize((ls, ls), Image.LANCZOS), (lx, y - int(ls * .18)))
-        lx += ls + 14
-    d.text((lx, y), "HGhub", font=font(size, bold=True, latin=True), fill=WHITE)
-    d.text((lx, y + int(size * 1.32)), "HarmonyOS Native", font=font(int(size * .5), latin=True),
-           fill=(255, 255, 255, 120))
+        img.alpha_composite(logo.resize((icon, icon), Image.LANCZOS), (x, y))
+    tx = x + icon + 20
+    d.text((tx, cy - size * 0.14), "HGhub", font=font(size, bold=True, latin=True),
+           fill=WHITE, anchor="lm")
+    d.text((tx + 2, cy + size * 0.62), "HarmonyOS Native",
+           font=font(int(size * 0.44), latin=True), fill=(255, 255, 255, 135), anchor="lm")
 
 
 def v1(src, logo):
@@ -167,10 +169,10 @@ def v1(src, logo):
     shadow(img, ph, (96, 50))
     img.alpha_composite(ph, (104, 46))
     d = ImageDraw.Draw(img)
-    brand_hg(img, 842, 206, 28, logo)
-    d.text((838, 288), "完全鸿蒙原生", font=font(66, bold=True), fill=WHITE)
-    d.text((838, 372), "HGhub 短剧客户端", font=font(58, bold=True), fill=rgba(ACCENT))
-    d.text((840, 466), "ArkTS / ArkUI 原生实现 · 无 WebView", font=font(21), fill=(255, 255, 255, 148))
+    brand_hg(img, 840, 186, 44, logo)
+    d.text((840, 292), "完全鸿蒙原生", font=font(66, bold=True), fill=WHITE)
+    d.text((840, 378), "HGhub 短剧客户端", font=font(58, bold=True), fill=rgba(ACCENT))
+    d.text((840, 474), "ArkTS / ArkUI 原生实现 · 无 WebView", font=font(22), fill=(255, 255, 255, 148))
     x = 840
     for t in ("平板平行视窗", "线路智能切换"):
         x += pill(img, x, 526, t, 18) + 10
