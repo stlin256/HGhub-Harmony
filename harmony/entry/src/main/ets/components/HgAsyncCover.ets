@@ -14,6 +14,8 @@ export struct HgAsyncCover {
   /** 解码目标宽高（px）：按显示尺寸解码，避免整屏大图占满内存拖慢滚动；0 表示用默认值。 */
   @Prop decodeWidth: number = 0;
   @Prop decodeHeight: number = 0;
+  /** 图片填充方式：默认 Cover（裁切铺满）；Hero 横幅等需要完整展示时传 Contain。 */
+  @Prop fit: ImageFit = ImageFit.Cover;
   coverWidth: Length = '100%';
   coverHeight: Length = '100%';
   @State pixmap: image.PixelMap | undefined = undefined;
@@ -62,7 +64,7 @@ export struct HgAsyncCover {
         Image(this.pixmap)
           .width('100%')
           .height('100%')
-          .objectFit(ImageFit.Cover)
+          .objectFit(this.fit)
           .opacity(this.ready ? 1 : 0)
           .animation({ duration: HgDuration.skeletonFade, curve: Curve.FastOutSlowIn })
       } else if (this.failed) {
@@ -79,7 +81,8 @@ export struct HgAsyncCover {
         Column()
           .width('100%')
           .height('100%')
-          .backgroundColor(HgColor.skeletonBase(this.dark))
+          // 深色下骨架用高亮档而不是接近 canvas 的底色：卡片未出图时也清晰可见，避免"那块消失/突然出现"的观感。
+          .backgroundColor(this.dark ? HgColor.skeletonHighlight(this.dark) : HgColor.skeletonBase(this.dark))
         Column() {
           LoadingProgress()
             .width(22)

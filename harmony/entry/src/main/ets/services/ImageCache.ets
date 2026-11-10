@@ -10,10 +10,18 @@ import { decodeCoverInWorker } from './CoverCryptoWorker';
 class CacheEntry {
   key: string;
   pixelMap: image.PixelMap;
+  bytes: number;
 
   constructor(key: string, pixelMap: image.PixelMap) {
     this.key = key;
     this.pixelMap = pixelMap;
+    let size: number = 0;
+    try {
+      size = pixelMap.getPixelBytesNumber();
+    } catch (err) {
+      size = 0;
+    }
+    this.bytes = size;
   }
 }
 
@@ -41,6 +49,10 @@ export class ImageCache {
   private static dirPath: string = '';
   private static dirReady: boolean = false;
   private static diskFiles: number = 0;
+  /** 磁盘封面缓存占用字节数。 */
+  private static diskBytes: number = 0;
+  /** 内存 PixelMap 占用字节数（近似值，随 put/淘汰维护）。 */
+  private static memoryBytes: number = 0;
   private static pruneScheduled: boolean = false;
 
   /* ── 磁盘缓存 ─────────────────────────────────────── */
@@ -59,9 +71,19 @@ export class ImageCache {
       }
       ImageCache.dirPath = path;
       try {
-        ImageCache.diskFiles = fileIo.listFileSync(path).length;
+        const names: string[] = fileIo.listFileSync(path);
+        ImageCache.diskFiles = names.length;
+        let bytes: number = 0;
+        for (let i = 0; i < names.length; i++) {
+          try {
+            bytes += fileIo.statSync(path + '/' + names[i]).size;
+          } catch (err) {
+          }
+        }
+        ImageCache.diskBytes = bytes;
       } catch (err) {
         ImageCache.diskFiles = 0;
+        ImageCache.diskBytes = 0;
       }
       ImageCache.schedulePrune();
     } catch (err) {
@@ -145,6 +167,14 @@ export class ImageCache {
       return;
     }
     const existed: boolean = fileIo.accessSync(path);
+    let previousSize: number = 0;
+    if (existed) {
+      try {
+        previousSize = fileIo.statSync(path).size;
+      } catch (err) {
+        previousSize = 0;
+      }
+    }
     let file: fileIo.File | null = null;
     try {
       const buffer = new ArrayBuffer(plain.length);
@@ -154,6 +184,7 @@ export class ImageCache {
       if (!existed) {
         ImageCache.diskFiles++;
       }
+      ImageCache.diskBytes += plain.length - previousSize;
     } catch (err) {
     } finally {
       if (file !== null) {
@@ -192,6 +223,18 @@ export class ImageCache {
         }
         if (removed > 0) {
           ImageCache.diskFiles = names.length - removed;
+          let bytes: number = 0;
+          try {
+            const left: string[] = fileIo.listFileSync(dir);
+            for (let i = 0; i < left.length; i++) {
+              try {
+                bytes += fileIo.statSync(dir + '/' + left[i]).size;
+              } catch (err) {
+              }
+            }
+          } catch (err) {
+          }
+          ImageCache.diskBytes = bytes;
           hilog.info(0x0000, 'HGCover', 'disk prune removed=%{public}d', removed);
         }
       } catch (err) {
@@ -264,9 +307,14 @@ export class ImageCache {
         const path = ImageCache.pathOf(cacheKey);
         if (path.length > 0) {
           try {
+            const badSize: number = fileIo.statSync(path).size;
             fileIo.unlinkSync(path);
             if (ImageCache.diskFiles > 0) {
               ImageCache.diskFiles--;
+            }
+            ImageCache.diskBytes -= badSize;
+            if (ImageCache.diskBytes < 0) {
+              ImageCache.diskBytes = 0;
             }
           } catch (err) {
           }
@@ -385,15 +433,24 @@ export class ImageCache {
   }
 
   private static put(url: string, pixelMap: image.PixelMap): void {
-    ImageCache.entries.unshift(new CacheEntry(url, pixelMap));
+    const entry = new CacheEntry(url, pixelMap);
+    ImageCache.memoryBytes += entry.bytes;
+    ImageCache.entries.unshift(entry);
     while (ImageCache.entries.length > ImageCache.MAX) {
-      ImageCache.entries.pop();
+      const dropped = ImageCache.entries.pop();
+      if (dropped !== undefined) {
+        ImageCache.memoryBytes -= dropped.bytes;
+        if (ImageCache.memoryBytes < 0) {
+          ImageCache.memoryBytes = 0;
+        }
+      }
     }
   }
 
   /** 清空内存 + 磁盘封面缓存（设置页「清理」按钮）。 */
   static clear(): void {
     ImageCache.entries = [];
+    ImageCache.memoryBytes = 0;
     ImageCache.inflight.clear();
     const dir = ImageCache.dir();
     if (dir.length === 0) {
@@ -408,6 +465,7 @@ export class ImageCache {
         }
       }
       ImageCache.diskFiles = 0;
+      ImageCache.diskBytes = 0;
     } catch (err) {
     }
   }
@@ -421,5 +479,23 @@ export class ImageCache {
   static diskCount(): number {
     ImageCache.dir();
     return ImageCache.diskFiles;
+  }
+
+  /** 封面缓存总占用字节数（内存 + 磁盘），设置页展示用。 */
+  static totalBytes(): number {
+    ImageCache.dir();
+    return ImageCache.diskBytes + ImageCache.memoryBytes;
+  }
+
+  /** 人类可读占用空间，如 "12.3 MB"。 */
+  static totalText(): string {
+    const bytes: number = ImageCache.totalBytes();
+    if (bytes < 1024) {
+      return bytes + ' B';
+    }
+    if (bytes < 1024 * 1024) {
+      return (bytes / 1024).toFixed(1) + ' KB';
+    }
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
   }
 }
