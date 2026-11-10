@@ -4,7 +4,7 @@ import { UserPrefs } from '../state/UserPrefs';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
 import { HgEmptyState, HgSkeletonGrid } from '../components/HgCommon';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
@@ -35,6 +35,11 @@ export struct SearchPage {
   @State finished: boolean = false;
   @State errorText: string = '';
   @State refreshing: boolean = false;
+  /** 结果列表透明度：已有结果时刷新/重试走"淡出→替换→淡入"。 */
+  @State private listOpacity: number = 1;
+  /** 当前按下的历史/热门题材 chip（轻微缩放反馈）。 */
+  @State private pressedChip: string = '';
+  private fadeTimer: number = -1;
   private source: HgListSource<VideoCard> = new HgListSource<VideoCard>();
   private page: number = 0;
   private pages: number = 1;
@@ -70,6 +75,11 @@ export struct SearchPage {
     if (kw.length === 0) {
       return;
     }
+    if (this.fadeTimer >= 0) {
+      clearTimeout(this.fadeTimer);
+      this.fadeTimer = -1;
+    }
+    this.listOpacity = 1;
     this.keyword = kw;
     this.submitted = kw;
     UserPrefs.addSearch(kw);
@@ -96,13 +106,23 @@ export struct SearchPage {
         return;
       }
       const list: VideoCard[] = res.items !== undefined && res.items !== null ? res.items : [];
-      this.items = list;
-      this.source.resetAll(list);
-      this.hasData = list.length > 0;
-      this.page = 1;
-      this.pages = res.pagination !== undefined && res.pagination.pages > 0 ? res.pagination.pages : 1;
-      this.total = res.pagination !== undefined ? res.pagination.total : list.length;
-      this.finished = list.length === 0 || this.page >= this.pages;
+      const hadData: boolean = this.hasData;
+      const apply = () => {
+        this.items = list;
+        this.source.resetAll(list);
+        this.hasData = list.length > 0;
+        this.page = 1;
+        this.pages = res.pagination !== undefined && res.pagination.pages > 0 ? res.pagination.pages : 1;
+        this.total = res.pagination !== undefined ? res.pagination.total : list.length;
+        this.finished = list.length === 0 || this.page >= this.pages;
+      };
+      if (hadData) {
+        // 已有结果（下拉刷新/重试）：先淡出旧列表，替换数据后再淡入，避免整屏闪变。
+        this.fadeSwap(seq, apply);
+      } else {
+        // 首次结果由 idle/骨架 → 结果的 branch 交叉淡入承担。
+        apply();
+      }
     } catch (err) {
       if (seq === this.loadSeq) {
         this.errorText = (err as Error).message;
@@ -171,6 +191,38 @@ export struct SearchPage {
     }
     this.loading = this.items.length === 0;
     this.searchFirst();
+  }
+
+  /**
+   * 结果替换的"淡出→换数据→淡入"：
+   * 先 120ms 淡出旧列表，换词/刷新请求期间旧的列表不会硬切，落数据后 140ms 淡入新列表。
+   * seq 守护：淡出期间用户又发起新搜索时，这次回调直接丢弃，避免旧响应覆盖新结果。
+   */
+  private fadeSwap(seq: number, apply: () => void): void {
+    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
+      this.listOpacity = 0;
+    });
+    if (this.fadeTimer >= 0) {
+      clearTimeout(this.fadeTimer);
+    }
+    this.fadeTimer = setTimeout(() => {
+      this.fadeTimer = -1;
+      if (seq !== this.loadSeq) {
+        this.listOpacity = 1;
+        return;
+      }
+      apply();
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        this.listOpacity = 1;
+      });
+    }, HgDuration.microExit);
+  }
+
+  aboutToDisappear(): void {
+    if (this.fadeTimer >= 0) {
+      clearTimeout(this.fadeTimer);
+      this.fadeTimer = -1;
+    }
   }
 
   private clearInput(): void {
@@ -275,6 +327,19 @@ export struct SearchPage {
       .backgroundColor(HgColor.surface3(this.dark))
       .borderRadius(HgRadius.chip)
       .margin({ right: HgSpace.s, bottom: HgSpace.s })
+      // 点击/按下的轻微缩放反馈（90ms），只作用于视觉容器，不改热区与布局。
+      .scale({
+        x: this.pressedChip === label ? 0.94 : 1,
+        y: this.pressedChip === label ? 0.94 : 1
+      })
+      .animation({ duration: HgDuration.press, curve: Curve.FastOutSlowIn })
+      .onTouch((event: TouchEvent) => {
+        if (event.type === TouchType.Down) {
+          this.pressedChip = label;
+        } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+          this.pressedChip = '';
+        }
+      })
       .onClick(action)
   }
 
@@ -400,6 +465,9 @@ export struct SearchPage {
 
   @Builder
   SkeletonView() {
+    // 结果骨架与结果瀑布流同一沉浸契约：视口铺满到窗口底部，
+    // 悬浮底栏的预留只加在滚动内容底部（与 HgPosterFlow 的 bottomPadding 语义一致），
+    // 避免骨架阶段底部先出现一条 canvas 黑带。
     Scroll() {
       Column() {
         HgSkeletonGrid({ dark: this.dark, count: this.skeletonCount(), columns: this.flowColumns() })
@@ -408,7 +476,8 @@ export struct SearchPage {
       .padding({
         left: HgSpace.pageInset + this.flowGutter(),
         right: HgSpace.pageInset + this.flowGutter(),
-        top: HgSpace.m
+        top: HgSpace.m,
+        bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.l
       })
     }
     .width('100%')
@@ -426,9 +495,20 @@ export struct SearchPage {
       .padding({ top: this.topInset + HgSpace.m, bottom: HgSpace.s })
 
       if (this.submitted.length === 0) {
-        this.IdleView()
+        // idle → 骨架 → 结果：各分支加 140ms 透明度过渡（交叉淡入，不做整屏位移）。
+        Column() {
+          this.IdleView()
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else if (this.loading && !this.hasData) {
-        this.SkeletonView()
+        Column() {
+          this.SkeletonView()
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else if (!this.hasData && this.errorText.length > 0) {
         Column() {
           HgEmptyState({
@@ -446,6 +526,7 @@ export struct SearchPage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
         .padding(HgSpace.xxl)
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else if (!this.hasData) {
         Column() {
           HgEmptyState({
@@ -463,8 +544,14 @@ export struct SearchPage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
         .padding(HgSpace.xxl)
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       } else {
-        this.ResultHeader()
+        // idle→骨架→结果的交叉淡入由 branch transition 统一承担（140ms，无位移）。
+        Column() {
+          this.ResultHeader()
+        // 结果区占满搜索框/结果头之外的剩余高度：外层不再有 padding/背景，
+        // 底部沉浸交给 HgPosterFlow（WaterFlow 内部 bottomPadding = tabBarFloating + bottomInset），
+        // 结构对齐首页已验证的 "固定头 + layoutWeight(1) 滚动区"。
         Column() {
           HgPosterFlow({
           source: this.source,
@@ -492,9 +579,15 @@ export struct SearchPage {
               this.retry();
             }
           })
+          }
+          .layoutWeight(1)
+          .width('100%')
+          // 刷新/重试替换数据：listOpacity 做淡出→替换→淡入。
+          .opacity(this.listOpacity)
         }
         .layoutWeight(1)
         .width('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
       }
     }
     .width('100%')
