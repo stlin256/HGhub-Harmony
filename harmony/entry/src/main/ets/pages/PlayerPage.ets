@@ -5,7 +5,7 @@ import { K_LINE_BASE, Lines } from '../services/Lines';
 import { UiBus } from '../services/UiBus';
 import { WindowChrome } from '../services/WindowChrome';
 import {
-  K_APP_ACTIVE, K_BOTTOM_INSET, K_LEFT_INSET, K_RIGHT_INSET, K_TOP_INSET, K_VIDEO_SCALE,
+  K_APP_ACTIVE, K_BOTTOM_INSET, K_CONTENT_W, K_LEFT_INSET, K_RIGHT_INSET, K_TOP_INSET, K_VIDEO_SCALE,
   K_WINDOW_H, K_WINDOW_W, UserPrefs
 } from '../state/UserPrefs';
 import { PlayerParam } from '../state/Routes';
@@ -82,6 +82,12 @@ export struct PlayerPage {
   /** 窗口宽高（vp；全屏播放页时两者等于窗口尺寸）：宽屏评论区侧栏的展开判定与面板宽度。 */
   @StorageProp(K_WINDOW_W) windowW: number = 400;
   @StorageProp(K_WINDOW_H) windowH: number = 780;
+  /** 平行视窗右栏宽度（vp）：小于窗口宽度即表示当前播放页嵌在右栏中，而非全屏。 */
+  @StorageProp(K_CONTENT_W) contentW: number = 400;
+  /** 平行视窗进入/退出播放页的轻量转场（淡入 + 右滑入/滑出）。 */
+  @State paneOpacity: number = 1;
+  @State paneOffsetX: number = 0;
+  private paneExiting: boolean = false;
   @StorageProp(K_APP_ACTIVE) @Watch('onAppActiveChanged') appActive: boolean = true;
   /** 设置页持久化的画面比例（contain/fill/cover）：切换后立即重设 AVPlayer 缩放模式。 */
   @StorageProp(K_VIDEO_SCALE) @Watch('onVideoScaleChanged') videoScale: string = 'contain';
@@ -210,6 +216,11 @@ export struct PlayerPage {
   private boostLock: boolean = false;
   private seekWasPlaying: boolean = false;
 
+  /** 当前播放页是否在平行视窗右栏内（非全屏）：左栏列表仍可见时，播放页不应隐藏状态栏/按全屏安全区布局。 */
+  private inSplitPane(): boolean {
+    return this.windowW > 0 && this.contentW > 0 && this.contentW + 2 < this.windowW;
+  }
+
   /* ── 生命周期 ─────────────────────────────────────── */
   /** 应用退到后台时立即暂停（页面仍在前台也要停），回前台不自动续播。 */
   onAppActiveChanged(): void {
@@ -225,7 +236,9 @@ export struct PlayerPage {
       this.service.setActive(true);
       MediaPrefetch.resume();
       // 回到前台时兜底再隐藏一次（EntryAbility 可能在后台/前台恢复过系统栏）。
-      WindowChrome.hideStatusBar();
+      if (!this.inSplitPane()) {
+        WindowChrome.hideStatusBar();
+      }
     }
   }
 
@@ -259,8 +272,14 @@ export struct PlayerPage {
     this.service.setMuted(this.muted);
     this.bindService();
     this.loadedBase = Lines.current();
-    // 播放页全屏：进入即隐藏状态栏（通知栏），离开时恢复（EntryAbility 另有兜底）。
-    WindowChrome.hideStatusBar();
+    // 全屏播放页进入即隐藏状态栏；平行视窗右栏播放时保留系统状态栏（左栏列表可见，不应全屏）。
+    if (!this.inSplitPane()) {
+      WindowChrome.hideStatusBar();
+    } else {
+      // 平行视窗：进入右栏时从右侧淡入滑入。
+      this.paneOpacity = 0;
+      this.paneOffsetX = 36;
+    }
     this.openVideo(index, false);
   }
 
@@ -1814,6 +1833,10 @@ export struct PlayerPage {
    * 用最小内边距兜底，保证标题/返回键不被状态栏或挖孔压住（隐藏状态栏后也留有呼吸空间）。
    */
   private topSafePad(): number {
+    // 平行视窗右栏：NavDestination 已在状态栏下方，无需再叠加系统顶部安全区。
+    if (this.inSplitPane()) {
+      return HgSpace.m;
+    }
     return this.topInset > 0 ? this.topInset : TOP_SAFE_FALLBACK;
   }
 
@@ -3099,6 +3122,9 @@ export struct PlayerPage {
       .width('100%')
       .height('100%')
       .backgroundColor(HgColor.playerBackground)
+      // 平行视窗右栏的进入/退出转场（全屏播放时 paneOpacity=1、paneOffsetX=0，无影响）。
+      .opacity(this.paneOpacity)
+      .translate({ x: this.paneOffsetX })
       .onAreaChange((oldValue: Area, newValue: Area) => {
         const width = parseFloat(String(newValue.width));
         const height = parseFloat(String(newValue.height));
@@ -3133,7 +3159,15 @@ export struct PlayerPage {
         return;
       }
       this.pageShown = true;
-      WindowChrome.hideStatusBar();
+      if (!this.inSplitPane()) {
+        WindowChrome.hideStatusBar();
+      } else {
+        // 平行视窗进入播放页：180ms 淡入 + 归位（退出动画在返回时做）。
+        animateTo({ duration: 180, curve: Curve.FastOutSlowIn }, () => {
+          this.paneOpacity = 1;
+          this.paneOffsetX = 0;
+        });
+      }
       this.service.setActive(this.appActive);
       MediaPrefetch.resume();
       if (this.pendingLineReload || (this.loadedBase.length > 0 && Lines.current() !== this.loadedBase)) {
@@ -3163,6 +3197,20 @@ export struct PlayerPage {
       }
       if (this.locked) {
         this.toggleLock();
+        return true;
+      }
+      if (this.inSplitPane() && !this.paneExiting) {
+        // 平行视窗退出播放页：先 140ms 淡出 + 右移，再真正 pop，避免"瞬间跳走"。
+        this.paneExiting = true;
+        animateTo({ duration: 140, curve: Curve.FastOutSlowIn }, () => {
+          this.paneOpacity = 0;
+          this.paneOffsetX = 36;
+        });
+        setTimeout(() => {
+          if (!this.destroyed) {
+            this.navStack.pop();
+          }
+        }, 150);
         return true;
       }
       return false;

@@ -106,20 +106,20 @@ struct Index {
 
   /**
    * 同步平行视窗状态：
-   * - 窗口 ≥840vp 且当前页不是全屏播放页 → Split，左右栏宽度写入 K_NAV_W/K_CONTENT_W；
-   * - 否则 Stack（手机 / 窄窗口 / 播放页全屏），两栏宽度都等于窗口宽。
+   * - 窗口 ≥840vp → Split（内容页含播放页都在右栏，左侧列表保留），左右栏宽度写入 K_NAV_W/K_CONTENT_W；
+   * - 窄窗口 → Stack（手机全屏导航），两栏宽度都等于窗口宽。
    */
   private syncNavMode(): void {
-    let top: string = '';
     try {
       const names: string[] = this.navStack.getAllPathName();
-      top = names.length > 0 ? names[names.length - 1] : '';
       this.navEmpty = names.length === 0;
     } catch (err) {
-      top = '';
+      this.navEmpty = true;
     }
     const wide: boolean = this.windowW >= HgResponsive.EXPANDED;
-    const split: boolean = wide && top !== ROUTE_PLAYER;
+    // 平行视窗：宽屏下所有内容页（含播放页）都进右栏播放/展示，左栏列表保留；
+    // 播放页不再强制 Stack 全屏，避免"点一下就直接跳进去、视窗没起作用"。
+    const split: boolean = wide;
     this.navSplit = split;
     const navW: number = split ? this.navBarWidth() : this.windowW;
     const contentW: number = split ? Math.max(320, this.windowW - navW) : this.windowW;
