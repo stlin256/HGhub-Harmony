@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "io.github.stlin256.hghub",
     "vendor": "stlin256",
-    "versionCode": 1000000,
-    "versionName": "2.0.0",
+    "versionCode": 1000100,
+    "versionName": "2.0.1",
     "icon": "$media:app_layered_image",
     "label": "$string:app_name"
   }
