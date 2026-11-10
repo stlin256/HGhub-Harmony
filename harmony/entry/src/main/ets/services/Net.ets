@@ -192,6 +192,35 @@ export class Net {
     return raw as RawText;
   }
 
+  /**
+   * 线路探测专用短超时 GET：连接与读取都用同一个短上限（不可达线路不会拖到默认 10s 连接超时）。
+   * 只用于 {base}/ 可用性探测，不参与业务接口。
+   */
+  static async getTextQuick(url: string, timeoutMs: number): Promise<RawText> {
+    const headers: Record<string, string> = {
+      'User-Agent': USER_AGENT,
+      'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8'
+    };
+    const request = http.createHttp();
+    try {
+      const options: http.HttpRequestOptions = {
+        method: http.RequestMethod.GET,
+        header: headers,
+        connectTimeout: timeoutMs,
+        readTimeout: timeoutMs,
+        expectDataType: http.HttpDataType.STRING
+      };
+      const response: http.HttpResponse = await request.request(url, options);
+      let text = '';
+      if (typeof response.result === 'string') {
+        text = response.result as string;
+      }
+      return new RawText(response.responseCode, text, headerValue(response.header, 'content-type'));
+    } finally {
+      request.destroy();
+    }
+  }
+
   /** 原始字节（封面 / 截图）。 */
   static async getBytes(url: string, referer: string, timeoutMs: number): Promise<RawBytes> {
     const headers: Record<string, string> = {

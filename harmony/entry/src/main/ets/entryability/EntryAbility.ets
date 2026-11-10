@@ -3,6 +3,8 @@ import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { display, window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from '../services/AppContext';
+import { Api } from '../services/Api';
+import { LineAuto } from '../services/LineAuto';
 import { Prefs } from '../services/Prefs';
 import { Session } from '../services/Session';
 import { Lines } from '../services/Lines';
@@ -69,6 +71,13 @@ export default class EntryAbility extends UIAbility {
       Session.load();
       UserPrefs.init(systemDark);
       hilog.info(DOMAIN, TAG, 'services ready, base=%{public}s', Lines.current());
+      // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
+      LineAuto.init();
+      // 观看历史预取：不阻塞首屏，稍后后台拉取最近 2 条详情，点历史不卡顿。
+      setTimeout(() => {
+        Api.warmHistory(2).catch(() => {
+        });
+      }, 800);
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'service init failed: %{public}s', JSON.stringify(err));
     }
@@ -161,6 +170,9 @@ export default class EntryAbility extends UIAbility {
         String(Math.round(topInset)), String(Math.round(bottomInset)));
       const dark: boolean = UserPrefs.dark();
       const properties: window.SystemBarProperties = {
+        // 系统栏背景透明：露出页面 canvas（深/浅主题都跟随页面），避免底部出现系统默认近黑色带。
+        statusBarColor: '#00000000',
+        navigationBarColor: '#00000000',
         statusBarContentColor: dark ? '#FFFFFFFF' : '#FF000000',
         navigationBarContentColor: dark ? '#FFFFFFFF' : '#FF000000'
       };
