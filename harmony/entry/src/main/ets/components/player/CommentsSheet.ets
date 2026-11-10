@@ -2,7 +2,7 @@ import { Api } from '../../services/Api';
 import { Comment, CommentPage } from '../../models/Types';
 import { UserPrefs } from '../../state/UserPrefs';
 import { UiBus } from '../../services/UiBus';
-import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../../design/HgTokens';
 
 const PAGE_SIZE: number = 20;
 
@@ -32,6 +32,15 @@ export struct CommentsSheet {
   @Prop ep: number = 1;
   @Prop kind: string = 'video';
   @Prop dark: boolean = true;
+  /** 侧栏模式（平板宽屏播放页右侧评论区）：头部追加关闭按钮；手机底部 Sheet 保持默认 false。 */
+  @Prop sidebar: boolean = false;
+  /**
+   * 外部刷新代次（切换视频/切集时父组件 +1）：重置分页并重新拉第 1 页。
+   * 只刷新数据、不重建组件，因此宽屏旋转/布局变化时已有分页状态不会丢。
+   */
+  @Prop @Watch('onRefreshKeyChanged') refreshKey: number = 0;
+  /** 侧栏关闭回调（sidebar=true 时头部关闭按钮触发；底部 Sheet 不传，默认空实现）。 */
+  onClose: () => void = () => {};
 
   @State private items: Comment[] = [];
   @State private page: number = 1;
@@ -43,18 +52,41 @@ export struct CommentsSheet {
   @State private sending: boolean = false;
   @State private draft: string = '';
 
+  private scroller: Scroller = new Scroller();
+  /** reload 代次：切视频/切集时自增，丢弃在途的旧响应，避免旧视频评论覆盖新视频。 */
+  private reloadSeq: number = 0;
+
   aboutToAppear(): void {
     this.reload();
   }
 
+  /** 外部代次变化（切视频/切集）：回到列表顶部并重拉第 1 页（保留组件实例与分页状态结构）。 */
+  onRefreshKeyChanged(): void {
+    this.scrollToTop();
+    this.reload();
+  }
+
+  private scrollToTop(): void {
+    try {
+      this.scroller.scrollToIndex(0);
+    } catch (err) {
+      // 列表尚未挂载（首屏）时忽略。
+    }
+  }
+
   private async reload(): Promise<void> {
+    const seq: number = ++this.reloadSeq;
     this.loading = true;
     this.failed = false;
+    this.loadingMore = false;
     this.page = 1;
     try {
       const result: CommentPage = this.kind === 'post'
         ? await Api.postComments(this.videoId, 1, PAGE_SIZE)
         : await Api.comments(this.videoId, this.ep, 1, PAGE_SIZE);
+      if (seq !== this.reloadSeq) {
+        return;
+      }
       this.items = result.items === undefined || result.items === null ? [] : result.items;
       this.total = result.pagination === undefined || result.pagination === null ? this.items.length
         : result.pagination.total;
@@ -62,6 +94,9 @@ export struct CommentsSheet {
         : result.pagination.pages;
       this.loading = false;
     } catch (err) {
+      if (seq !== this.reloadSeq) {
+        return;
+      }
       this.loading = false;
       this.failed = true;
     }
@@ -71,12 +106,18 @@ export struct CommentsSheet {
     if (this.loadingMore || this.page >= this.pages) {
       return;
     }
+    const seq: number = this.reloadSeq;
     this.loadingMore = true;
     try {
       const next = this.page + 1;
       const result: CommentPage = this.kind === 'post'
         ? await Api.postComments(this.videoId, next, PAGE_SIZE)
         : await Api.comments(this.videoId, this.ep, next, PAGE_SIZE);
+      if (seq !== this.reloadSeq) {
+        // 期间切了视频/切集（已重新拉第 1 页）：丢弃这一页旧响应。
+        this.loadingMore = false;
+        return;
+      }
       const list: Comment[] = result.items === undefined || result.items === null ? [] : result.items;
       const merged: Comment[] = this.items.slice();
       for (let i = 0; i < list.length; i++) {
@@ -89,7 +130,9 @@ export struct CommentsSheet {
         this.pages = result.pagination.pages;
       }
     } catch (err) {
-      UiBus.toast('评论加载失败，请稍后重试');
+      if (seq === this.reloadSeq) {
+        UiBus.toast('评论加载失败，请稍后重试');
+      }
     }
     this.loadingMore = false;
   }
@@ -246,6 +289,24 @@ export struct CommentsSheet {
         Text(this.headerSubText())
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (this.sidebar) {
+          Blank()
+          Stack() {
+            SymbolGlyph($r('sys.symbol.xmark'))
+              .fontSize(HgIconSize.control)
+              .fontColor([HgColor.textSecondary(this.dark)])
+          }
+          .width(HgSize.hitTarget)
+          .height(HgSize.hitTarget)
+          .borderRadius(HgSize.hitTarget / 2)
+          .backgroundColor(HgColor.surface3(this.dark))
+          .onClick(() => {
+            this.onClose();
+          })
+          .accessibilityText('关闭评论')
+        }
       }
       .width('100%')
       .height(HgSize.topBar)
@@ -312,7 +373,7 @@ export struct CommentsSheet {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
       } else {
-        List() {
+        List({ scroller: this.scroller }) {
           ForEach(this.items, (comment: Comment) => {
             ListItem() {
               this.CommentRow(comment)
@@ -345,6 +406,12 @@ export struct CommentsSheet {
         .width('100%')
         .divider({ strokeWidth: 0.5, color: HgColor.hairline(this.dark), startMargin: 44 })
         .scrollBar(BarState.Off)
+        // 侧栏（全高面板）滚到底自动翻页；手机底部 Sheet 保持原有「查看更多评论」按钮行为不变。
+        .onReachEnd(() => {
+          if (this.sidebar) {
+            this.loadMore();
+          }
+        })
       }
 
       this.InputBar()

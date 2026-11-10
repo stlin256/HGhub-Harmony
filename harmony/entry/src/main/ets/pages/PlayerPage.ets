@@ -4,10 +4,14 @@ import { Api } from '../services/Api';
 import { K_LINE_BASE, Lines } from '../services/Lines';
 import { UiBus } from '../services/UiBus';
 import { WindowChrome } from '../services/WindowChrome';
-import { K_APP_ACTIVE, K_BOTTOM_INSET, K_TOP_INSET, K_VIDEO_SCALE, UserPrefs } from '../state/UserPrefs';
+import {
+  K_APP_ACTIVE, K_BOTTOM_INSET, K_LEFT_INSET, K_RIGHT_INSET, K_TOP_INSET, K_VIDEO_SCALE,
+  K_WINDOW_H, K_WINDOW_W, UserPrefs
+} from '../state/UserPrefs';
 import { PlayerParam } from '../state/Routes';
 import { Detail, Post, WatchProgress } from '../models/Types';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgResponsive } from '../design/HgResponsive';
 import { PlayerService } from '../player/PlayerService';
 import { MediaPrefetch } from '../player/MediaPrefetch';
 import { PlaybackLog } from '../player/PlaybackLog';
@@ -27,6 +31,11 @@ const TOP_SAFE_FALLBACK: number = HgSpace.xxl;
 const LANDSCAPE_CENTER_Y_RATIO: number = 0.42;
 const LONG_PRESS_MS: number = 380;
 const SEEK_FULL_WIDTH_SECONDS: number = 120;
+/** 宽屏评论侧栏宽度（vp）与最小宽度。 */
+const COMMENT_PANEL_W: number = 380;
+const COMMENT_PANEL_MIN_W: number = 280;
+/** 评论侧栏打开时左侧视频区最小宽度（vp）。 */
+const COMMENT_VIDEO_MIN_W: number = 320;
 
 class StartPoint {
   ep: number;
@@ -65,6 +74,12 @@ export struct PlayerPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 横屏左右安全区（vp，刘海/挖孔/折叠屏，EntryAbility 上报）：竖屏为 0，chrome 在此之上内缩。 */
+  @StorageProp(K_LEFT_INSET) leftInset: number = 0;
+  @StorageProp(K_RIGHT_INSET) rightInset: number = 0;
+  /** 窗口宽高（vp；全屏播放页时两者等于窗口尺寸）：宽屏评论区侧栏的展开判定与面板宽度。 */
+  @StorageProp(K_WINDOW_W) windowW: number = 400;
+  @StorageProp(K_WINDOW_H) windowH: number = 780;
   @StorageProp(K_APP_ACTIVE) @Watch('onAppActiveChanged') appActive: boolean = true;
   /** 设置页持久化的画面比例（contain/fill/cover）：切换后立即重设 AVPlayer 缩放模式。 */
   @StorageProp(K_VIDEO_SCALE) @Watch('onVideoScaleChanged') videoScale: string = 'contain';
@@ -124,6 +139,10 @@ export struct PlayerPage {
   @State sheetKind: string = '';
   /** 右上角「更多」自定义面板（bindMenu 的勾选态不会随状态刷新，改为页面内弹层）。 */
   @State menuVisible: boolean = false;
+  /** 宽屏评论区侧栏（平板/大屏非帖子：替代底部评论 Sheet；手机仍走 Sheet）。 */
+  @State commentPanelVisible: boolean = false;
+  /** 评论刷新代次：切视频/切集时 +1，侧栏内 CommentsSheet 重置分页并重拉当前评论。 */
+  @State commentRefreshKey: number = 0;
   /** feed 相邻条目的预取元数据（与 ids 下标对齐）。 */
   @State pageMeta: PageMeta[] = [];
   /** 视频展示矩形：XComponent 按视频宽高比缩放定位，避免拉伸/裁切错误（单位 vp）。 */
@@ -261,6 +280,7 @@ export struct PlayerPage {
     this.menuVisible = false;
     this.loadedBase = base;
     this.clearMetaCache();
+    this.resetCommentPanelContext();
     this.service.clearCache();
     this.retryPlayback();
     this.prefetchMeta();
@@ -448,6 +468,7 @@ export struct PlayerPage {
     }
     this.prefetchNeighbors();
     this.prefetchMeta();
+    this.resetCommentPanelContext();
     this.showChrome();
   }
 
@@ -860,6 +881,7 @@ export struct PlayerPage {
     this.bufferedMs = 0;
     this.prefetchDone = false;
     this.haptic(10);
+    this.resetCommentPanelContext();
     this.service.load(this.currentId(), ep, 0, true, false);
     this.showChrome();
   }
@@ -997,12 +1019,13 @@ export struct PlayerPage {
       clearTimeout(this.hideTimer);
       this.hideTimer = -1;
     }
-    if (!this.playing || this.destroyed || this.menuVisible) {
+    if (!this.playing || this.destroyed || this.menuVisible || this.commentPanelVisible) {
       return;
     }
     this.hideTimer = setTimeout(() => {
       this.hideTimer = -1;
-      if (!this.destroyed && this.playing && !this.locked && !this.dragging && !this.menuVisible) {
+      if (!this.destroyed && this.playing && !this.locked && !this.dragging && !this.menuVisible &&
+        !this.commentPanelVisible) {
         this.setChromeVisible(false);
       }
     }, CHROME_HIDE_MS);
@@ -1010,6 +1033,9 @@ export struct PlayerPage {
 
   private toggleLock(): void {
     const next: boolean = !this.locked;
+    if (next && this.commentPanelVisible) {
+      this.closeCommentPanel();
+    }
     this.haptic(10);
     animateTo({
       duration: next ? HgDuration.microExit : HgDuration.micro,
@@ -1086,7 +1112,8 @@ export struct PlayerPage {
           this.gestureMode = 3;
         }
       } else if (this.gestureMode === 1) {
-        const width = this.screenW > 0 ? this.screenW : 360;
+        // 横滑灵敏度按当前视频区宽度归一（宽屏评论侧栏打开时手势区已收窄为左侧视频区）。
+        const width = this.videoAreaWidth();
         const delta = dx / width * SEEK_FULL_WIDTH_SECONDS * 1000;
         let target = this.seekBaseMs + delta;
         if (target < 0) {
@@ -1142,21 +1169,24 @@ export struct PlayerPage {
     if (!this.chromeVisible || this.locked) {
       return false;
     }
-    const w: number = this.screenW > 0 ? this.screenW : 360;
-    const h: number = this.screenH > 0 ? this.screenH : 780;
+    // chrome 位于 Swiper 页内：侧栏打开时页面已收窄为左侧视频区，坐标基准同步用可用宽度。
+    const w: number = this.videoAreaWidth();
+    const h: number = this.frameHeight();
     const inset: number = this.bottomInset;
     const hit: number = HgSize.hitTarget;
-    // 顶部栏
+    // 顶部栏：命中区随横屏左右安全区平移（竖屏 inset=0 时与手机原坐标一致）
+    const topLeft: number = this.leftInset + HgSpace.l;
+    const topRight: number = this.rightInset + HgSpace.l;
     if (py <= this.topSafePad() + hit + HgSpace.s) {
-      if (px <= HgSpace.l + hit) {
+      if (px <= topLeft + hit) {
         this.navStack.pop();
         return true;
       }
-      if (px >= w - HgSpace.l - hit) {
+      if (px >= w - topRight - hit) {
         this.setMenuVisible(true);
         return true;
       }
-      if (px >= w - HgSpace.l - hit - 8 - 76 && px < w - HgSpace.l - hit - 6) {
+      if (px >= w - topRight - hit - 8 - 76 && px < w - topRight - hit - 6) {
         this.openLines();
         return true;
       }
@@ -1165,26 +1195,27 @@ export struct PlayerPage {
     // 底部控制条（播放/静音/倍速/选集/锁）
     const rowBottom: number = h - inset - HgSpace.m;
     const rowTop: number = rowBottom - hit;
+    const barLeft: number = this.chromeLeftPad();
+    const barRight: number = this.chromeRightPad();
     if (py >= rowTop - HgSpace.m && py <= rowBottom + HgSpace.l) {
-      if (px >= w - HgSpace.pageInset - hit) {
+      if (px >= w - barRight - hit) {
         this.toggleLock();
         return true;
       }
-      if (px >= w - HgSpace.pageInset - hit - HgSpace.s - 84 &&
-        px < w - HgSpace.pageInset - hit - HgSpace.s) {
+      if (px >= w - barRight - hit - HgSpace.s - 84 && px < w - barRight - hit - HgSpace.s) {
         this.openSheet('episode');
         return true;
       }
-      if (px <= HgSpace.pageInset + hit) {
+      if (px <= barLeft + hit) {
         this.togglePlay();
         return true;
       }
-      if (px <= HgSpace.pageInset + hit * 2 + HgSpace.s) {
+      if (px <= barLeft + hit * 2 + HgSpace.s) {
         this.toggleMute();
         return true;
       }
       // 倍速 chip：点按循环切换倍速（手动路由无法弹 bindMenu）。
-      if (px >= w - 200 && px < w - 134) {
+      if (px >= w - this.rightInset - 200 && px < w - this.rightInset - 134) {
         const rates: number[] = [1, 1.25, 1.5, 2];
         const at: number = rates.indexOf(this.rate);
         this.changeRate(rates[(at + 1) % rates.length]);
@@ -1192,15 +1223,15 @@ export struct PlayerPage {
       }
       return false;
     }
-    // 右侧互动栏（点赞/收藏/评论/分享）
-    if (px >= w - 88 && py > h * 0.28 && py < h * 0.60) {
+    // 右侧互动栏（点赞/收藏/评论/分享）：宽屏评论侧栏打开时互动栏已隐藏，不再拦截点击。
+    if (!this.commentPanelVisible && px >= w - this.rightInset - 88 && py > h * 0.28 && py < h * 0.60) {
       const ratio: number = py / h;
       if (ratio < 0.36) {
         this.toggleLike();
       } else if (ratio < 0.435) {
         this.toggleFav();
       } else if (ratio < 0.50) {
-        this.openSheet('comments');
+        this.openComments();
         this.showChrome();
       } else {
         this.share();
@@ -1229,6 +1260,12 @@ export struct PlayerPage {
     this.tapTimer = setTimeout(() => {
       this.tapTimer = -1;
       if (this.destroyed) {
+        return;
+      }
+      // 宽屏评论侧栏打开时，单击视频区 = 收起侧栏（可选交互）；双击仍为播放/暂停。
+      if (this.commentPanelVisible) {
+        this.closeCommentPanel();
+        this.showChrome();
         return;
       }
       this.toggleChrome();
@@ -1319,6 +1356,50 @@ export struct PlayerPage {
     this.sheetVisible = true;
   }
 
+  /**
+   * 打开评论区：宽屏非帖子 → 屏幕右侧评论侧栏（视频区让出面板宽度）；
+   * 手机/帖子 → 沿用底部评论 Sheet（现有行为不变）。
+   */
+  private openComments(): void {
+    if (this.commentPanelVisible) {
+      return;
+    }
+    if (this.canUseCommentPanel()) {
+      this.setMenuVisible(false);
+      if (this.sheetVisible) {
+        this.sheetVisible = false;
+      }
+      this.commentRefreshKey++;
+      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        this.commentPanelVisible = true;
+      });
+      this.recomputeVideoRect(true);
+      return;
+    }
+    this.openSheet('comments');
+  }
+
+  /** 关闭宽屏评论侧栏：恢复视频区宽度（手机端无侧栏，调用是空操作）。 */
+  private closeCommentPanel(): void {
+    if (!this.commentPanelVisible) {
+      return;
+    }
+    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
+      this.commentPanelVisible = false;
+    });
+    this.recomputeVideoRect(true);
+    // 侧栏收起后恢复 chrome 的自动隐藏计时（播放中 3s 隐藏）。
+    this.scheduleHideChrome();
+  }
+
+  /** 切视频/切集/换线后侧栏评论需刷新为当前条目：只重置分页（不重建组件，旋转不会丢分页状态）。 */
+  private resetCommentPanelContext(): void {
+    if (!this.commentPanelVisible) {
+      return;
+    }
+    this.commentRefreshKey++;
+  }
+
   /** 各面板高度。 */
   private sheetHeight(): string {
     if (this.sheetKind === 'comments') {
@@ -1365,7 +1446,7 @@ export struct PlayerPage {
   /** 点选画面比例：写偏好 → AVPlayer 立即换模式 → 重算展示矩形；面板保持打开以便看到 ✓ 与画面变化。 */
   private pickScale(mode: string): void {
     if (this.scaleRowDisabled(mode)) {
-      UiBus.toastInfo('横屏视频自动适应，不裁切');
+      UiBus.toastInfo('横屏自动适应，不裁切');
       return;
     }
     const normalized: string = UserPrefs.normalizeVideoScale(mode);
@@ -1376,8 +1457,8 @@ export struct PlayerPage {
     this.service.refreshVideoScale();
     this.recomputeVideoRect(true);
     this.haptic(8);
-    if (normalized === 'cover' && this.isLandscapeVideo()) {
-      UiBus.toastInfo('横屏视频自动适应（不裁切）');
+    if (normalized === 'cover' && this.isContainForced()) {
+      UiBus.toastInfo('横屏自动适应（不裁切）');
     } else {
       UiBus.toastInfo(normalized === 'cover' ? '画面比例：全屏沉浸'
         : normalized === 'fill' ? '画面比例：拉伸铺满' : '画面比例：适应');
@@ -1399,9 +1480,9 @@ export struct PlayerPage {
     return this.effectiveVideoScale() === mode;
   }
 
-  /** 横屏视频禁用「全屏沉浸」项：避免出现「勾了裁切但画面是适应」的错觉。 */
+  /** 横屏视频/横屏窗口禁用「全屏沉浸」项：避免出现「勾了裁切但画面是适应」的错觉。 */
   private scaleRowDisabled(mode: string): boolean {
-    return mode === 'cover' && this.isLandscapeVideo();
+    return mode === 'cover' && this.isContainForced();
   }
 
   private scaleRowColor(mode: string): string {
@@ -1416,7 +1497,7 @@ export struct PlayerPage {
     } else if (action === 'episodes') {
       this.openSheet('episode');
     } else if (action === 'comments') {
-      this.openSheet('comments');
+      this.openComments();
     } else if (action === 'share') {
       this.share();
     }
@@ -1488,15 +1569,92 @@ export struct PlayerPage {
     return this.topInset > 0 ? this.topInset : TOP_SAFE_FALLBACK;
   }
 
+  /**
+   * 底部控制条 / 相邻页底部信息行的左右内边距：页面 16vp + 横屏左右安全区。
+   * 竖屏时 leftInset/rightInset 为 0，与手机现有布局完全一致。
+   */
+  private chromeLeftPad(): number {
+    return HgSpace.pageInset + this.leftInset;
+  }
+
+  private chromeRightPad(): number {
+    return HgSpace.pageInset + this.rightInset;
+  }
+
+  /** 播放页实测宽度（vp，onAreaChange 维护）；未测量时退回窗口宽度。 */
+  private frameWidth(): number {
+    if (this.screenW > 0) {
+      return this.screenW;
+    }
+    return this.windowW > 0 ? this.windowW : 400;
+  }
+
+  /** 播放页实测高度（vp）；未测量时退回窗口高度。 */
+  private frameHeight(): number {
+    if (this.screenH > 0) {
+      return this.screenH;
+    }
+    return this.windowH > 0 ? this.windowH : 780;
+  }
+
+  /**
+   * 评论侧栏宽度（vp，关闭时为 0）：约 380；窗口被压窄（折叠/分屏/旋转）时随之收窄，
+   * 保证左侧视频区至少 320vp，不会出现「面板比窗口还宽」的重叠。
+   */
+  private commentPanelWidth(): number {
+    if (!this.commentPanelVisible) {
+      return 0;
+    }
+    const width: number = this.frameWidth();
+    const maxPanel: number = width - COMMENT_VIDEO_MIN_W;
+    if (maxPanel >= COMMENT_PANEL_MIN_W) {
+      return Math.min(COMMENT_PANEL_W, maxPanel);
+    }
+    return Math.max(160, width * 0.5);
+  }
+
+  /** 视频区可用宽度（vp）：侧栏打开时让出右侧面板宽度，视频在左侧区域居中。 */
+  private videoAreaWidth(): number {
+    const avail: number = this.frameWidth() - this.commentPanelWidth();
+    return avail > 0 ? avail : this.frameWidth();
+  }
+
+  /** Swiper 宽度：侧栏打开时收窄为左侧视频区，关闭时保持满宽（默认 '100%'，与改造前一致）。 */
+  private swiperWidth(): Length {
+    return this.commentPanelVisible ? this.videoAreaWidth() : '100%';
+  }
+
+  /** 是否启用宽屏评论侧栏：窗口 ≥840vp（平板/大屏，横竖屏均可）且非帖子（帖子留言仍在底部 Sheet）。 */
+  private canUseCommentPanel(): boolean {
+    if (this.params.feedKind === 'post') {
+      return false;
+    }
+    const width: number = Math.max(this.windowW, this.frameWidth());
+    return width >= HgResponsive.EXPANDED;
+  }
+
   /** 当前视频是否横屏（宽 > 高）；尺寸未知时返回 false。 */
   private isLandscapeVideo(): boolean {
     return this.videoW > 0 && this.videoH > 0 && this.videoW > this.videoH;
   }
 
-  /** 实际生效的画面模式：横屏视频即使选「全屏沉浸」也回退为「适应」（不裁切）。 */
+  /** 当前窗口是否横屏（旋转/分屏后由 onAreaChange 更新；尺寸未测量时按竖屏处理）。 */
+  private isLandscapeWindow(): boolean {
+    return this.screenW > 0 && this.screenH > 0 && this.screenW > this.screenH;
+  }
+
+  /**
+   * 是否强制「适应」画面：横屏视频，或横屏窗口里的竖屏视频。
+   * 横屏窗口里竖屏视频若按 cover 等比放大，会被裁掉大半画面（平板/旋转场景），因此统一 contain。
+   */
+  private isContainForced(): boolean {
+    return this.isLandscapeVideo() || this.isLandscapeWindow();
+  }
+
+  /** 实际生效的画面模式：横屏视频 / 横屏窗口即使选「全屏沉浸」也回退为「适应」（不裁切、不变形）。 */
   private effectiveVideoScale(): string {
     const mode: string = UserPrefs.normalizeVideoScale(this.videoScale);
-    if (mode === 'cover' && this.isLandscapeVideo()) {
+    if (mode === 'cover' && this.isContainForced()) {
       return 'contain';
     }
     return mode;
@@ -1505,13 +1663,15 @@ export struct PlayerPage {
   /**
    * 按视频宽高比计算 XComponent 的展示矩形（vp，由 AVPlayer FIT 渲染，surface 宽高比始终等于视频比例）：
    * - 拉伸：全屏，交给 AVPlayer FIT 变形；
-   * - 适应（含横屏回退）：min 比例缩放完整显示，横屏视频中心放在屏幕高度 42% 处（略偏上），竖屏居中；
+   * - 适应（含横屏回退）：min 比例缩放完整显示，横屏视频中心放在屏幕高度 42% 处（略偏上）；
+   *   竖屏视频（含「横屏窗口里放竖屏视频」的平板/旋转场景）一律居中，两侧黑边，不裁切不拉伸；
    * - 全屏沉浸（仅竖屏）：max 比例等比放大，超出窗口部分由窗口裁切（cover）。
    * 尺寸/位置变化走 140ms 动画，切比例或切视频时不跳变。
    */
   private recomputeVideoRect(animated: boolean): void {
-    const sw: number = this.screenW > 0 ? this.screenW : 360;
-    const sh: number = this.screenH > 0 ? this.screenH : 780;
+    // 可用宽度：宽屏评论侧栏打开时让出右侧面板宽度（视频在左侧区域 contain 居中，安全区不参与视频几何）。
+    const sw: number = this.videoAreaWidth();
+    const sh: number = this.frameHeight();
     const mode: string = this.effectiveVideoScale();
     const vw: number = this.videoW;
     const vh: number = this.videoH;
@@ -1736,7 +1896,12 @@ export struct PlayerPage {
       .padding({ left: HgSpace.s, right: HgSpace.s })
     }
     .width('100%')
-    .padding({ top: this.topSafePad(), bottom: HgSpace.xxl })
+    .padding({
+      left: this.leftInset,
+      right: this.rightInset,
+      top: this.topSafePad(),
+      bottom: HgSpace.xxl
+    })
     .linearGradient({
       angle: 180,
       colors: [['#B3000000', 0.0], ['#00000000', 1.0]]
@@ -1804,7 +1969,7 @@ export struct PlayerPage {
         }
         .width(48)
         .onClick(() => {
-          this.openSheet('comments');
+          this.openComments();
           this.showChrome();
         })
         .accessibilityText('评论')
@@ -1830,7 +1995,7 @@ export struct PlayerPage {
         .accessibilityText('分享')
       }
       .alignItems(HorizontalAlign.Center)
-      .margin({ right: HgSpace.m, bottom: this.bottomInset + 150 })
+      .margin({ right: HgSpace.m + this.rightInset, bottom: this.bottomInset + 150 })
     }
     .width('100%')
     .height('100%')
@@ -1968,8 +2133,8 @@ export struct PlayerPage {
       }
       .width('100%')
       .padding({
-        left: HgSpace.pageInset,
-        right: HgSpace.pageInset,
+        left: this.chromeLeftPad(),
+        right: this.chromeRightPad(),
         top: HgSpace.xxl,
         bottom: this.bottomInset + HgSpace.m
       })
@@ -2114,6 +2279,8 @@ export struct PlayerPage {
     }
     .width('100%')
     .height('100%')
+    // 横屏左右安全区参与浮层水平布局（竖屏 inset=0 不变）。
+    .padding({ left: this.leftInset, right: this.rightInset })
     // 加载/缓冲/拖拽提示不拦手势；错误态有「重试/切换线路」按钮，需要可点击。
     .hitTestBehavior(this.errorText.length > 0 ? HitTestMode.Default : HitTestMode.None)
   }
@@ -2142,7 +2309,44 @@ export struct PlayerPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ left: this.leftInset, right: this.rightInset + this.commentPanelWidth() })
     .hitTestBehavior(HitTestMode.None)
+  }
+
+  /**
+   * 宽屏评论侧栏：屏幕右侧固定约 380vp 全高面板（surface1 背景，左缘 0.5vp 分隔线）。
+   * 头部「评论 + 总数 + 关闭」由 CommentsSheet(sidebar=true) 复用其既有头部渲染；
+   * 列表/分页/加载更多/发表全部复用组件内部逻辑。侧栏不在 Swiper 内，滚动评论不会误切视频。
+   */
+  @Builder
+  CommentSidebar() {
+    Column() {
+      Column() {
+        CommentsSheet({
+          videoId: this.currentId(),
+          ep: this.ep,
+          kind: this.params.feedKind,
+          dark: true,
+          sidebar: true,
+          refreshKey: this.commentRefreshKey,
+          onClose: () => {
+            this.closeCommentPanel();
+          }
+        })
+      }
+      .width('100%')
+      .layoutWeight(1)
+    }
+    .width(this.commentPanelWidth())
+    .height('100%')
+    // 顶部/底部/右侧安全区：横屏刘海在右侧时不遮挡关闭按钮与输入栏。
+    .padding({ top: this.topSafePad(), right: this.rightInset, bottom: this.bottomInset })
+    .backgroundColor(HgColor.surface1(true))
+    .border({ width: { left: 0.5 }, color: HgColor.hairline(true) })
+    .position({ x: this.frameWidth() - this.commentPanelWidth(), y: 0 })
+    .transition(TransitionEffect.OPACITY
+      .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
+      .combine(TransitionEffect.translate({ x: this.commentPanelWidth() })))
   }
 
   /**
@@ -2164,7 +2368,7 @@ export struct PlayerPage {
         this.toggleLock();
       })
       .accessibilityText('已锁定，点按解锁')
-      .margin({ right: HgSpace.l, bottom: this.bottomInset + HgSpace.xxl })
+      .margin({ right: HgSpace.l + this.rightInset, bottom: this.bottomInset + HgSpace.xxl })
     }
     .width('100%')
     .height('100%')
@@ -2232,7 +2436,7 @@ export struct PlayerPage {
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(true))
           .layoutWeight(1)
-        if (this.isLandscapeVideo()) {
+        if (this.isContainForced()) {
           Text('横屏自动适应')
             .fontSize(HgFont.micro)
             .fontColor(HgColor.videoInk3)
@@ -2262,7 +2466,7 @@ export struct PlayerPage {
     .borderRadius(HgRadius.group)
     .border({ width: 1, color: HgColor.hairline(true) })
     .shadow({ radius: 24, color: HgColor.shadowElev3, offsetX: 0, offsetY: 8 })
-    .position({ x: this.screenW - 232 - HgSpace.m, y: this.topSafePad() + 52 })
+    .position({ x: this.videoAreaWidth() - this.rightInset - 232 - HgSpace.m, y: this.topSafePad() + 52 })
     .onClick(() => {
     })
     .transition(TransitionEffect.OPACITY
@@ -2307,7 +2511,10 @@ export struct PlayerPage {
         })
       if (this.chromeVisible && !this.locked) {
         this.TopChrome()
-        this.RailChrome()
+        // 宽屏评论侧栏占用右侧：互动栏让位（隐藏且不参与命中），避免与侧栏重叠。
+        if (!this.commentPanelVisible) {
+          this.RailChrome()
+        }
         this.BottomChrome()
       }
       // 加载/缓冲/播放/错误浮层也放进页内，滑动时跟着一起走，不会悬停在固定位置。
@@ -2375,7 +2582,12 @@ export struct PlayerPage {
       .padding({ left: HgSpace.s, right: HgSpace.s })
     }
     .width('100%')
-    .padding({ top: this.topSafePad(), bottom: HgSpace.xxl })
+    .padding({
+      left: this.leftInset,
+      right: this.rightInset,
+      top: this.topSafePad(),
+      bottom: HgSpace.xxl
+    })
     .linearGradient({
       angle: 180,
       colors: [['#B3000000', 0.0], ['#00000000', 1.0]]
@@ -2417,8 +2629,8 @@ export struct PlayerPage {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding({
-      left: HgSpace.pageInset,
-      right: HgSpace.pageInset,
+      left: this.chromeLeftPad(),
+      right: this.chromeRightPad(),
       top: HgSpace.xxl,
       bottom: this.bottomInset + HgSpace.m
     })
@@ -2549,8 +2761,15 @@ export struct PlayerPage {
           this.haptic(8);
           this.openVideo(index, false);
         })
-        .width('100%')
+        // 宽屏评论侧栏打开时 Swiper 收窄为左侧视频区：手势/上下滑切条只在视频区生效，
+        // chrome 也随之排在视频区内（侧栏外不会被误触）。
+        .width(this.swiperWidth())
         .height('100%')
+
+        // 宽屏评论区侧栏：固定右侧、全高，内容复用 CommentsSheet（分页/加载更多/发表逻辑不变）。
+        if (this.commentPanelVisible) {
+          this.CommentSidebar()
+        }
 
         this.SpeedChip()
         if (this.locked) {
@@ -2617,12 +2836,16 @@ export struct PlayerPage {
         this.setMenuVisible(false);
         return true;
       }
-      if (this.locked) {
-        this.toggleLock();
-        return true;
-      }
       if (this.sheetVisible) {
         this.sheetVisible = false;
+        return true;
+      }
+      if (this.commentPanelVisible) {
+        this.closeCommentPanel();
+        return true;
+      }
+      if (this.locked) {
+        this.toggleLock();
         return true;
       }
       return false;
