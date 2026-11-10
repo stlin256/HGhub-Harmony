@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/HarmonyOS-7-4D6BFE?style=flat-square" alt="HarmonyOS 7">
   <img src="https://img.shields.io/badge/API-26-2EA44F?style=flat-square" alt="HarmonyOS API 26">
   <img src="https://img.shields.io/badge/ArkTS-ArkUI-3178C6?style=flat-square" alt="ArkTS/ArkUI">
-  <a href="https://github.com/stlin256/HGhub-Harmony/releases"><img src="https://img.shields.io/badge/release-v2.0.0-4D6BFE?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/stlin256/HGhub-Harmony/releases"><img src="https://img.shields.io/badge/release-v2.0.1-4D6BFE?style=flat-square" alt="Release"></a>
 </p>
 
 <p align="center">
@@ -44,7 +44,14 @@
 - **画面比例**：支持「适应（完整显示）」/「全屏沉浸（裁切铺满）」/「拉伸」；竖屏才启用裁切铺满，横屏自动适应并略微上移，方便操作。
 - **悬浮沉浸底栏**：HdsTabs + 系统沉浸光感材质（hdsMaterial），悬浮胶囊造型、内容可延伸到底栏后方，选中态跟随主题色。
 - **平板 / 横屏 / 平行视窗**：宽屏（≥840vp）自动分栏（左列表 + 右详情），内容最大 960vp 居中，瀑布流 2→3/4 列、选集 5→6/7 列；播放页横屏评论改为右侧侧栏，评论分页与刷新独立，不打断视频区。
-- **我的与设置**：登录/注册、收藏与观看历史、主题（跟随系统/深色/浅色）、启动静音、画面比例、封面缓存清理、线路切换与更新检查。
+- **我的与设置**：收藏与观看历史（本机收藏，无需登录）、主题（跟随系统/深色/浅色）、启动静音、画面比例、封面缓存清理、线路切换与更新检查。
+
+## 平板 / 横屏 / 平行视窗
+
+- **响应式断点**：手机（<600vp）保持单栏；平板/横屏按窗口宽度实时重排，旋转、分屏、折叠都会立即更新布局与安全区，不重建播放器。
+- **平行视窗**：窗口 ≥840vp 自动分栏（左列表 + 右详情，可拖动分栏线）；右栏未打开时显示「从左侧选择内容」引导；播放页始终全屏，不参与分栏。
+- **布局**：列表/详情内容最大 960vp 居中（设置页 760vp）；瀑布流 2→3/4 列、选集 5→6/7 列、我的收藏 3→4/5 列；横屏刘海/挖孔安全区参与控件避让。
+- **播放页**：横屏视频与竖屏视频都按比例完整显示（不裁切、不拉伸）；≥840vp 时评论区改为右侧约 380vp 侧栏，评论分页与刷新独立，视频区自动让出宽度。
 
 ## 更少等待，更清楚的状态
 
