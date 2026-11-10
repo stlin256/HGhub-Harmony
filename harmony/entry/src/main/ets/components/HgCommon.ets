@@ -118,6 +118,16 @@ export struct HgSkeletonGrid {
   @Prop columns: number = 2;
   @State pulse: number = 0.45;
 
+  /** 依列数生成 columnsTemplate（支持手机 2 列 / 平板 3–4 列）。 */
+  private template(): string {
+    let out: string = '1fr';
+    const count: number = this.columns < 1 ? 1 : this.columns;
+    for (let i = 1; i < count; i++) {
+      out += ' 1fr';
+    }
+    return out;
+  }
+
   aboutToAppear(): void {
     this.pulse = 1;
   }
@@ -158,7 +168,7 @@ export struct HgSkeletonGrid {
         }
       }, (index: number) => index.toString())
     }
-    .columnsTemplate(this.columns === 2 ? '1fr 1fr' : '1fr 1fr 1fr')
+    .columnsTemplate(this.template())
     .columnsGap(HgSpace.s)
     .rowsGap(HgSpace.m)
     .width('100%')

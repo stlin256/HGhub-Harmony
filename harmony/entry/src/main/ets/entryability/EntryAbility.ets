@@ -6,7 +6,10 @@ import { AppContext } from '../services/AppContext';
 import { Prefs } from '../services/Prefs';
 import { Session } from '../services/Session';
 import { Lines } from '../services/Lines';
-import { K_APP_ACTIVE, K_BOTTOM_INSET, K_TOP_INSET, UserPrefs } from '../state/UserPrefs';
+import {
+  K_APP_ACTIVE, K_BOTTOM_INSET, K_CONTENT_W, K_LEFT_INSET, K_NAV_W, K_RIGHT_INSET, K_TOP_INSET,
+  K_WINDOW_H, K_WINDOW_W, UserPrefs
+} from '../state/UserPrefs';
 
 const DOMAIN = 0x0000;
 const TAG = 'HGhub';
@@ -17,6 +20,16 @@ export default class EntryAbility extends UIAbility {
     AppContext.init(this.context);
     const systemDark: boolean = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
+    // 初始窗口尺寸（vp）：后续由 windowSizeChange 调平（旋转 / 分屏 / 折叠）。
+    try {
+      const displayInfo = display.getDefaultDisplaySync();
+      const density: number = displayInfo.densityPixels > 0 ? displayInfo.densityPixels : 3.5;
+      AppStorage.setOrCreate<number>(K_WINDOW_W, displayInfo.width / density);
+      AppStorage.setOrCreate<number>(K_WINDOW_H, displayInfo.height / density);
+      AppStorage.setOrCreate<number>(K_NAV_W, displayInfo.width / density);
+      AppStorage.setOrCreate<number>(K_CONTENT_W, displayInfo.width / density);
+    } catch (err) {
+    }
     this.initServices(systemDark);
     hilog.info(DOMAIN, TAG, 'EntryAbility created');
   }
@@ -99,8 +112,31 @@ export default class EntryAbility extends UIAbility {
       mainWindow.on('avoidAreaChange', (_data: window.AvoidAreaOptions) => {
         this.updateAvoidAreas(mainWindow);
       });
+      // 旋转 / 分屏 / 折叠：重算窗口尺寸与安全区（不重建页面，页面读 AppStorage 自适应）。
+      mainWindow.on('windowSizeChange', (_size: window.Size) => {
+        this.updateWindowSize(mainWindow);
+        this.updateAvoidAreas(mainWindow);
+      });
+      this.updateWindowSize(mainWindow);
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'setup window failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** 记录窗口尺寸（vp），供响应式断点与横竖屏布局使用。 */
+  private updateWindowSize(mainWindow: window.Window): void {
+    try {
+      const rect = mainWindow.getWindowProperties().windowRect;
+      const density: number = this.density > 0 ? this.density : 3.5;
+      if (rect.width > 0 && rect.height > 0) {
+        AppStorage.setOrCreate<number>(K_WINDOW_W, rect.width / density);
+        AppStorage.setOrCreate<number>(K_WINDOW_H, rect.height / density);
+        // 非分栏兜底：左右栏都等于窗口宽（Index 在 Split 模式下会覆盖为实际栏宽）。
+        AppStorage.setOrCreate<number>(K_NAV_W, rect.width / density);
+        AppStorage.setOrCreate<number>(K_CONTENT_W, rect.width / density);
+      }
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'window size failed: %{public}s', JSON.stringify(err));
     }
   }
 
@@ -113,6 +149,11 @@ export default class EntryAbility extends UIAbility {
       const bottomInset: number = Math.max(navArea.bottomRect.height / density, 20);
       AppStorage.setOrCreate<number>(K_TOP_INSET, topInset);
       AppStorage.setOrCreate<number>(K_BOTTOM_INSET, bottomInset);
+      // 横屏左右安全区（刘海/挖孔/分屏边距）。
+      const leftInset: number = Math.max(systemArea.leftRect.width, navArea.leftRect.width) / density;
+      const rightInset: number = Math.max(systemArea.rightRect.width, navArea.rightRect.width) / density;
+      AppStorage.setOrCreate<number>(K_LEFT_INSET, leftInset);
+      AppStorage.setOrCreate<number>(K_RIGHT_INSET, rightInset);
       // HdsTabs 悬浮底栏按 px 计算避让（与系统示例一致）。
       AppStorage.setOrCreate<number>('topInsetPx', systemArea.topRect.height);
       AppStorage.setOrCreate<number>('bottomInsetPx', navArea.bottomRect.height);

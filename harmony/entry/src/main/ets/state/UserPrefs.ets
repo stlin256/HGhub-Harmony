@@ -18,6 +18,20 @@ export const K_HISTORY = 'hgHistoryJson';
 export const K_SEARCH_HIST = 'hgSearchHistJson';
 export const K_USER = 'hgUserJson';
 export const K_VIDEO_SCALE = 'hgVideoScale';
+/** 窗口尺寸（vp）：旋转/分屏/折叠时由 EntryAbility 更新，页面据此做响应式布局。 */
+export const K_WINDOW_W = 'hgWindowW';
+export const K_WINDOW_H = 'hgWindowH';
+/** 横屏左右安全区（vp，刘海/挖孔）。 */
+export const K_LEFT_INSET = 'hgLeftInset';
+export const K_RIGHT_INSET = 'hgRightInset';
+/**
+ * 平行视窗（Navigation Split）场景下的左右栏宽度（vp）：
+ * - K_NAV_W：左栏（Tab 列表）实际可用宽度；
+ * - K_CONTENT_W：右栏（NavDestination 详情）实际可用宽度；
+ * 非分栏时两者都等于窗口宽度。页面据此做列数/居中计算，避免在分栏里按整窗宽排版。
+ */
+export const K_NAV_W = 'hgNavW';
+export const K_CONTENT_W = 'hgContentW';
 export const K_TOP_INSET = 'hgTopInset';
 export const K_BOTTOM_INSET = 'hgBottomInset';
 export const K_APP_ACTIVE = 'hgAppActive';
