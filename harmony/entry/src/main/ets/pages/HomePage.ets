@@ -7,9 +7,10 @@ import { HgPosterCard } from '../components/HgPosterCard';
 import { HgEmptyState, HgSkeletonGrid } from '../components/HgCommon';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgResponsive } from '../design/HgResponsive';
 import { K_LINE_BASE } from '../services/Lines';
 import { ImageCache } from '../services/ImageCache';
-import { K_APP_ACTIVE, K_BOTTOM_INSET, K_DARK, K_TOP_INSET } from '../state/UserPrefs';
+import { K_APP_ACTIVE, K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
 
@@ -265,8 +266,9 @@ struct HomeHeroSwiper {
 }
 
 /**
- * 首页发现页：品牌行 → 大标题 → 分类 Chips → Hero 轮播 → 两列推荐网格。
+ * 首页发现页：品牌行 → 大标题 → 分类 Chips → Hero 轮播 → 响应式推荐网格。
  * 首屏骨架、下拉刷新、触底分页、错误/空态齐全；卡片点击以当前列表为上下文进入播放页。
+ * 响应式：列数 2→3/4（HgResponsive.columns），宽屏内容区最大 960vp 居中，旋转/分屏即时重算。
  */
 @Component
 export struct HomePage {
@@ -274,6 +276,8 @@ export struct HomePage {
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口宽度（vp）：EntryAbility 在启动/旋转/分屏时更新，驱动列数与内容最大宽 960vp 居中。 */
+  @StorageProp(K_NAV_W) windowW: number = 400;
   @State items: VideoCard[] = [];
   @State hero: VideoCard[] = [];
   @State loading: boolean = true;
@@ -306,6 +310,34 @@ export struct HomePage {
   aboutToDisappear(): void {
     this.pageGone = true;
     this.transitionSeq++;
+  }
+
+  /**
+   * 瀑布流列数：手机 2 列；≥600vp 3 列，≥840vp 4 列（上限 4，避免平板上卡片过窄）。
+   * 旋转/分屏改变 windowW 时 @StorageProp 触发重算，不缓存结果。
+   */
+  private columns(): number {
+    return HgResponsive.columns(this.windowW, 2, 4);
+  }
+
+  /** 宽屏下内容区左右额外留白（vp）：与 pageInset 相加后内容区最大 960vp 居中，避免横向拉伸。 */
+  private gutter(): number {
+    return HgResponsive.contentGutter(this.windowW);
+  }
+
+  /** Grid 列模板：按当前列数生成 '1fr ...'（2/3/4 列均可），禁止写死两列。 */
+  private gridTemplate(): string {
+    const cols: number = this.columns();
+    let tpl: string = '1fr';
+    for (let i = 1; i < cols; i++) {
+      tpl = tpl + ' 1fr';
+    }
+    return tpl;
+  }
+
+  /** 首屏骨架卡片数：固定两行，列数与真实网格一致（2/3/4 列 → 4/6/8 张）。 */
+  private skeletonCount(): number {
+    return this.columns() * 2;
   }
 
   /**
@@ -598,7 +630,8 @@ export struct HomePage {
           }
         })
       }
-      .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+      // Chips 与 Hero/网格共用同一内容区：宽屏时一并加 gutter，保证左缘对齐。
+      .padding({ left: HgSpace.pageInset + this.gutter(), right: HgSpace.pageInset + this.gutter() })
     }
     .scrollable(ScrollDirection.Horizontal)
     .scrollBar(BarState.Off)
@@ -738,11 +771,13 @@ export struct HomePage {
           .backgroundColor(HgColor.skeletonBase(this.dark))
           .borderRadius(4)
           .margin({ top: HgSpace.s })
-        HgSkeletonGrid({ dark: this.dark, count: 4, columns: 2 })
+        // 与真实 Grid 同列（共享骨架支持任意列数），宽屏 3/4 列首屏不跳格。
+        HgSkeletonGrid({ dark: this.dark, count: this.skeletonCount(), columns: this.columns() })
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
-      .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m })
+      // 与真实 Grid 同一内容区（pageInset + gutter），首屏骨架到数据回来几何零偏移。
+      .padding({ left: HgSpace.pageInset + this.gutter(), right: HgSpace.pageInset + this.gutter(), top: HgSpace.m })
     }
     .layoutWeight(1)
     .width('100%')
@@ -764,7 +799,8 @@ export struct HomePage {
         })
       }
       .width('100%')
-      .padding({ top: this.topInset })
+      // 品牌行与网格内容区共用同一 gutter，宽屏时一起居中。
+      .padding({ top: this.topInset, left: this.gutter(), right: this.gutter() })
 
       if (this.loading && this.items.length === 0) {
         this.HomeSkeleton()
@@ -803,7 +839,8 @@ export struct HomePage {
               this.HomeHeader()
             }
             .columnStart(0)
-            .columnEnd(1)
+            // Header 横跨整行：列数变化时必须跟随（不能写死 0..1）。
+            .columnEnd(this.columns() - 1)
 
             LazyForEach(this.source, (item: VideoCard, index: number) => {
               GridItem() {
@@ -827,17 +864,18 @@ export struct HomePage {
               this.GridFooter()
             }
             .columnStart(0)
-            .columnEnd(1)
+            .columnEnd(this.columns() - 1)
           }
-          .columnsTemplate('1fr 1fr')
+          .columnsTemplate(this.gridTemplate())
           .columnsGap(HgSpace.s)
           .rowsGap(HgSpace.m)
           .cachedCount(8)
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
           .padding({
-            left: HgSpace.pageInset,
-            right: HgSpace.pageInset,
+            // 宽屏：额外的 gutter 让内容区最大 960vp 居中；Hero 宽度因此随列数自适应且不超 960。
+            left: HgSpace.pageInset + this.gutter(),
+            right: HgSpace.pageInset + this.gutter(),
             // 悬浮胶囊底栏：58 高 + bottomInset+8 边距，再留 8vp 呼吸位，保证最后一行与 footer 完整露出。
             bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.s
           })

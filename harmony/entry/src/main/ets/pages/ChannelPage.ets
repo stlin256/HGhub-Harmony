@@ -4,7 +4,8 @@ import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
 import { HgTopBar } from '../components/HgCommon';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_BOTTOM_INSET, K_DARK } from '../state/UserPrefs';
+import { HgResponsive } from '../design/HgResponsive';
+import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { ChannelParam, PlayerParam, ROUTE_PLAYER } from '../state/Routes';
 
 interface SortOption {
@@ -26,6 +27,8 @@ export struct ChannelPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口宽度（vp）：旋转/分屏/平板时由 EntryAbility 更新，用于响应式列数与内容居中。 */
+  @StorageProp(K_CONTENT_W) windowW: number = 400;
   params: ChannelParam = { cate: '', name: '' };
   @State sorted: VideoCard[] = [];
   @State hasData: boolean = false;
@@ -40,6 +43,16 @@ export struct ChannelPage {
   private page: number = 0;
   private pages: number = 1;
   private loadSeq: number = 0;
+
+  /** 瀑布流列数：手机 2 列，平板/横屏 3–4 列（最多 5）。 */
+  private flowColumns(): number {
+    return HgResponsive.columns(this.windowW, 2, 5);
+  }
+
+  /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
+  private contentGutter(): number {
+    return HgResponsive.contentGutter(this.windowW);
+  }
 
   aboutToAppear(): void {
     this.loadFirst();
@@ -190,7 +203,7 @@ export struct ChannelPage {
       }, (option: SortOption) => option.key)
     }
     .height(HgSize.hitTarget)
-    .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+    .padding({ left: HgSpace.pageInset + this.contentGutter(), right: HgSpace.pageInset + this.contentGutter() })
   }
 
   build() {
@@ -217,6 +230,8 @@ export struct ChannelPage {
             refreshing: this.refreshing,
             emptyTitle: '该频道暂无内容',
             emptyDescription: '下拉刷新或稍后再来',
+            columns: this.flowColumns(),
+            contentGutter: this.contentGutter(),
             onOpen: (index: number) => {
               this.openAt(index);
             },

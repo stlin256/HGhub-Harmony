@@ -2,7 +2,8 @@ import { Api } from '../services/Api';
 import { Paged, Post, VideoCard } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET } from '../state/UserPrefs';
+import { HgResponsive } from '../design/HgResponsive';
+import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import {
   ChannelParam, PlayerParam, PostParam, ROUTE_CHANNEL, ROUTE_PLAYER, ROUTE_POST,
   ROUTE_POSTS, ROUTE_RANKS
@@ -35,6 +36,8 @@ export struct CategoryPage {
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口宽度（vp）：旋转/分屏/平板时由 EntryAbility 更新，用于响应式居中与卡片尺寸。 */
+  @StorageProp(K_NAV_W) windowW: number = 400;
   @State rowData: VideoCard[][] = [[], [], [], []];
   @State rowLoading: boolean[] = [true, true, true, true];
   @State rowError: string[] = ['', '', '', ''];
@@ -43,6 +46,30 @@ export struct CategoryPage {
   @State postsError: string = '';
   @State refreshing: boolean = false;
   private started: boolean = false;
+
+  /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
+  private contentGutter(): number {
+    return HgResponsive.contentGutter(this.windowW);
+  }
+
+  /** 频道横向卡片宽：手机 112，平板/横屏 120（3:4 海报）。 */
+  private rowCardW(): number {
+    return HgResponsive.isWide(this.windowW) ? 120 : 112;
+  }
+
+  private rowCardH(): number {
+    return HgResponsive.isWide(this.windowW) ? 160 : 149;
+  }
+
+  /** 横向卡片行高：随卡片高度补齐标题两行。 */
+  private rowListHeight(): number {
+    return HgResponsive.isWide(this.windowW) ? 208 : 196;
+  }
+
+  /** 吃瓜横向行高（封面 + 热度行）。 */
+  private postListHeight(): number {
+    return HgResponsive.isWide(this.windowW) ? 192 : 180;
+  }
 
   aboutToAppear(): void {
     if (this.started) {
@@ -269,26 +296,26 @@ export struct CategoryPage {
             .margin({ right: HgSpace.xs, bottom: HgSpace.xs })
         }
       }
-      .width(112)
-      .height(149)
+      .width(this.rowCardW())
+      .height(this.rowCardH())
       .borderRadius(HgRadius.row)
       .clip(true)
 
       Text(item.title)
-        .width(112)
+        .width(this.rowCardW())
         .fontSize(HgFont.body)
         .fontWeight(HgFont.weightMedium)
         .fontColor(HgColor.textPrimary(this.dark))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
       Text(item.tags !== undefined && item.tags.length > 0 ? item.tags.join(' · ') : fmt(item.hot) + ' 播放')
-        .width(112)
+        .width(this.rowCardW())
         .fontSize(HgFont.micro)
         .fontColor(HgColor.textTertiary(this.dark))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
-    .width(112)
+    .width(this.rowCardW())
     .alignItems(HorizontalAlign.Start)
   }
 
@@ -318,8 +345,8 @@ export struct CategoryPage {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .padding(HgSpace.s)
       }
-      .width(112)
-      .height(149)
+      .width(this.rowCardW())
+      .height(this.rowCardH())
       .borderRadius(HgRadius.row)
       .clip(true)
       .onClick(() => {
@@ -334,7 +361,7 @@ export struct CategoryPage {
           .fontColor(HgColor.textTertiary(this.dark))
       }
     }
-    .width(112)
+    .width(this.rowCardW())
     .alignItems(HorizontalAlign.Start)
   }
 
@@ -344,17 +371,17 @@ export struct CategoryPage {
       ForEach([0, 1, 2], (index: number) => {
         Column({ space: HgSpace.xs }) {
           Column()
-            .width(112)
-            .height(149)
+            .width(this.rowCardW())
+            .height(this.rowCardH())
             .backgroundColor(HgColor.skeletonBase(this.dark))
             .borderRadius(HgRadius.row)
           Column()
-            .width(84)
+            .width(this.rowCardW() - 28)
             .height(HgFont.body)
             .backgroundColor(HgColor.skeletonBase(this.dark))
             .borderRadius(4)
         }
-        .width(112)
+        .width(this.rowCardW())
         .alignItems(HorizontalAlign.Start)
       }, (index: number) => 'sk-' + index)
     }
@@ -414,7 +441,7 @@ export struct CategoryPage {
           }, (item: VideoCard) => 'cate-' + item.id)
         }
         .listDirection(Axis.Horizontal)
-        .height(196)
+        .height(this.rowListHeight())
         .width('100%')
         .scrollBar(BarState.Off)
         .cachedCount(3)
@@ -469,7 +496,7 @@ export struct CategoryPage {
           }, (item: Post) => 'post-' + item.id)
         }
         .listDirection(Axis.Horizontal)
-        .height(180)
+        .height(this.postListHeight())
         .width('100%')
         .scrollBar(BarState.Off)
         .cachedCount(3)
@@ -495,7 +522,12 @@ export struct CategoryPage {
       }
       .width('100%')
       .alignItems(VerticalAlign.Bottom)
-      .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: this.topInset + HgSpace.m, bottom: HgSpace.s })
+      .padding({
+        left: HgSpace.pageInset + this.contentGutter(),
+        right: HgSpace.pageInset + this.contentGutter(),
+        top: this.topInset + HgSpace.m,
+        bottom: HgSpace.s
+      })
 
       Refresh({ refreshing: this.refreshing }) {
         Scroll() {
@@ -520,7 +552,12 @@ export struct CategoryPage {
               .margin({ bottom: HgSpace.xxl })
           }
           .width('100%')
-          .padding({ top: HgSpace.m, bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.l })
+          .padding({
+            left: this.contentGutter(),
+            right: this.contentGutter(),
+            top: HgSpace.m,
+            bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.l
+          })
         }
         .width('100%')
         .height('100%')

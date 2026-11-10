@@ -4,8 +4,9 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgTopBar } from '../components/HgCommon';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgColor, HgDuration, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgResponsive } from '../design/HgResponsive';
 import { K_LINE_BASE } from '../services/Lines';
-import { K_BOTTOM_INSET, K_DARK } from '../state/UserPrefs';
+import { K_BOTTOM_INSET, K_DARK, K_WINDOW_H, K_CONTENT_W } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER } from '../state/Routes';
 import { fmt } from '../utils/Format';
 
@@ -283,6 +284,9 @@ export struct RanksPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口尺寸（vp，旋转/分屏/折叠时由 EntryAbility 实时更新）：宽屏时榜单内容限宽 960vp 居中。 */
+  @StorageProp(K_CONTENT_W) windowW: number = 400;
+  @StorageProp(K_WINDOW_H) windowH: number = 780;
   @StorageProp(K_LINE_BASE) @Watch('onLineChanged') lineBase: string = '';
   @State kind: string = 'hot';
   @State loading: boolean = true;
@@ -588,6 +592,14 @@ export struct RanksPage {
     return '';
   }
 
+  /**
+   * 内容左右内边距：手机为 16vp；平板/分屏在 960vp 内容区外再居中留白。
+   * 直接加在现有 pageInset 上，榜单行宽随内容区收敛（不横向拉伸），旋转/分屏时随窗口重算。
+   */
+  private pagePad(): number {
+    return HgSpace.pageInset + HgResponsive.contentGutter(this.windowW);
+  }
+
   /** 当前选中的榜在 Segmented 里的下标（用于计算胶囊指示器偏移）。 */
   private kindIndex(): number {
     for (let i = 0; i < RANK_TABS.length; i++) {
@@ -745,7 +757,7 @@ export struct RanksPage {
       }, (index: number) => 'rank-sk-' + index)
     }
     .width('100%')
-    .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+    .padding({ left: this.pagePad(), right: this.pagePad() })
   }
 
   build() {
@@ -774,13 +786,13 @@ export struct RanksPage {
           }
         }
         .width('100%')
-        .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, bottom: HgSpace.xs })
+        .padding({ left: this.pagePad(), right: this.pagePad(), bottom: HgSpace.xs })
 
         Row() {
           this.Segmented()
         }
         .width('100%')
-        .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.s, bottom: HgSpace.s })
+        .padding({ left: this.pagePad(), right: this.pagePad(), top: HgSpace.s, bottom: HgSpace.s })
 
         if (this.errorText.length > 0 && (this.topRows.length > 0 || this.restRows.length > 0)) {
           Row() {
@@ -864,7 +876,7 @@ export struct RanksPage {
             .scrollBar(BarState.Off)
             .edgeEffect(EdgeEffect.Spring)
             .cachedCount(4)
-            .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+            .padding({ left: this.pagePad(), right: this.pagePad() })
             // 切榜过渡：旧内容淡出 → 换数据 → 新内容淡入（120/140ms），避免硬切。
             .opacity(this.listOpacity)
           }

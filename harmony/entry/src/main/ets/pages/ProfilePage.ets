@@ -3,7 +3,10 @@ import { Detail, User, WatchProgress } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState } from '../components/HgCommon';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_BOTTOM_INSET, K_DARK, K_FAVS, K_HISTORY, K_TOP_INSET, K_USER, UserPrefs } from '../state/UserPrefs';
+import { HgResponsive } from '../design/HgResponsive';
+import {
+  K_BOTTOM_INSET, K_DARK, K_FAVS, K_HISTORY, K_TOP_INSET, K_USER, K_NAV_W, UserPrefs
+} from '../state/UserPrefs';
 import { UiBus } from '../services/UiBus';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS, ROUTE_SETTINGS } from '../state/Routes';
 import { fmt, fmtTime } from '../utils/Format';
@@ -18,6 +21,8 @@ export struct ProfilePage {
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口宽度（vp）：旋转/分屏/平板时由 EntryAbility 更新，用于网格列数与内容居中。 */
+  @StorageProp(K_NAV_W) windowW: number = 400;
   @StorageProp(K_USER) @Watch('onUserChanged') userJson: string = '';
   @StorageProp(K_FAVS) @Watch('onStoreChanged') favsJson: string = '[]';
   @StorageProp(K_HISTORY) @Watch('onStoreChanged') historyJson: string = '[]';
@@ -38,6 +43,45 @@ export struct ProfilePage {
   private historyList: WatchProgress[] = [];
   private cache: Map<number, Detail> = new Map<number, Detail>();
   private loadSeq: number = 0;
+
+  /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
+  private contentGutter(): number {
+    return HgResponsive.contentGutter(this.windowW);
+  }
+
+  /** 收藏/历史网格列数：手机 3 列，600+ 4 列，840+ 5 列。 */
+  private gridCols(): number {
+    return HgResponsive.columns(this.windowW, 3, 5);
+  }
+
+  /** 依列数生成 Grid columnsTemplate。 */
+  private gridTemplate(): string {
+    let out: string = '1fr';
+    const count: number = this.gridCols();
+    for (let i = 1; i < count; i++) {
+      out += ' 1fr';
+    }
+    return out;
+  }
+
+  private colIndexes(): number[] {
+    const out: number[] = [];
+    const count: number = this.gridCols();
+    for (let i = 0; i < count; i++) {
+      out.push(i);
+    }
+    return out;
+  }
+
+  /** 骨架网格高度：与真实网格同几何（内容最大宽 960，按列宽推卡片高）。 */
+  private skeletonGridHeight(): number {
+    const cols: number = this.gridCols();
+    const block: number = (this.windowW > HgResponsive.CONTENT_MAX ? HgResponsive.CONTENT_MAX : this.windowW)
+      - HgSpace.pageInset * 2;
+    const tileW: number = (block - HgSpace.s * (cols - 1)) / cols;
+    const rows: number = Math.ceil(6 / cols);
+    return rows * (tileW / 0.75) + (rows - 1) * HgSpace.s;
+  }
 
   aboutToAppear(): void {
     this.readUser();
@@ -463,17 +507,17 @@ export struct ProfilePage {
   @Builder
   CardRow(rowIndex: number) {
     Row({ space: HgSpace.s }) {
-      ForEach([0, 1, 2], (column: number) => {
-        if (rowIndex * 3 + column < this.cards.length) {
+      ForEach(this.colIndexes(), (column: number) => {
+        if (rowIndex * this.gridCols() + column < this.cards.length) {
           Column() {
-            this.GridTile(this.cards[rowIndex * 3 + column], rowIndex * 3 + column)
+            this.GridTile(this.cards[rowIndex * this.gridCols() + column], rowIndex * this.gridCols() + column)
           }
           .layoutWeight(1)
         } else {
           Column()
             .layoutWeight(1)
         }
-      }, (column: number) => 'col-' + rowIndex + '-' + column)
+      }, (column: number) => 'col-' + rowIndex + '-' + column + '-' + this.gridCols())
     }
     .width('100%')
     .alignItems(VerticalAlign.Top)
@@ -491,13 +535,13 @@ export struct ProfilePage {
               .backgroundColor(HgColor.skeletonBase(this.dark))
               .borderRadius(HgRadius.row)
           }
-        }, (index: number) => 'grid-sk-' + index)
+        }, (index: number) => 'grid-sk-' + index + '-' + this.gridCols())
       }
-      .columnsTemplate('1fr 1fr 1fr')
+      .columnsTemplate(this.gridTemplate())
       .columnsGap(HgSpace.s)
       .rowsGap(HgSpace.s)
       .width('100%')
-      .height(300)
+      .height(this.skeletonGridHeight())
     } else if (this.cards.length === 0) {
       Column() {
         HgEmptyState({
@@ -517,7 +561,7 @@ export struct ProfilePage {
       Column({ space: HgSpace.s }) {
         ForEach(this.rowIndexes(), (rowIndex: number) => {
           this.CardRow(rowIndex)
-        }, (rowIndex: number) => 'row-' + rowIndex + '-' + this.tab)
+        }, (rowIndex: number) => 'row-' + rowIndex + '-' + this.tab + '-' + this.gridCols())
         if (this.tab === 'history') {
           Text('清空观看历史')
             .width('100%')
@@ -539,7 +583,7 @@ export struct ProfilePage {
   }
 
   private rowIndexes(): number[] {
-    const count = Math.ceil(this.cards.length / 3);
+    const count = Math.ceil(this.cards.length / this.gridCols());
     const out: number[] = [];
     for (let i = 0; i < count; i++) {
       out.push(i);
@@ -569,7 +613,12 @@ export struct ProfilePage {
         })
       }
       .width('100%')
-      .padding({ left: HgSpace.pageInset, right: HgSpace.xs, top: this.topInset + HgSpace.m, bottom: HgSpace.s })
+      .padding({
+        left: HgSpace.pageInset + this.contentGutter(),
+        right: HgSpace.xs + this.contentGutter(),
+        top: this.topInset + HgSpace.m,
+        bottom: HgSpace.s
+      })
 
       Scroll() {
         Column({ space: HgSpace.l }) {
@@ -584,7 +633,11 @@ export struct ProfilePage {
             .margin({ top: HgSpace.l, bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.xl })
         }
         .width('100%')
-        .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m })
+        .padding({
+          left: HgSpace.pageInset + this.contentGutter(),
+          right: HgSpace.pageInset + this.contentGutter(),
+          top: HgSpace.m
+        })
       }
       .layoutWeight(1)
       .width('100%')

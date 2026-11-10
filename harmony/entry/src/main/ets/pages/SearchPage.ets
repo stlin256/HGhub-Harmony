@@ -5,7 +5,8 @@ import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
 import { HgEmptyState, HgSkeletonGrid } from '../components/HgCommon';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET } from '../state/UserPrefs';
+import { HgResponsive } from '../design/HgResponsive';
+import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 
 /** 12 个热门题材（从原 Web src/pages/Search.tsx 克隆）。 */
@@ -21,6 +22,8 @@ export struct SearchPage {
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口宽度（vp）：旋转/分屏/平板时由 EntryAbility 更新，用于响应式列数与内容居中。 */
+  @StorageProp(K_NAV_W) windowW: number = 400;
   @State keyword: string = '';
   @State submitted: string = '';
   @State hist: string[] = [];
@@ -36,6 +39,27 @@ export struct SearchPage {
   private page: number = 0;
   private pages: number = 1;
   private loadSeq: number = 0;
+
+  /** 结果瀑布流列数：手机 2 列，平板/横屏 3–4 列（最多 5）。 */
+  private flowColumns(): number {
+    return HgResponsive.columns(this.windowW, 2, 5);
+  }
+
+  /** 结果瀑布流左右留白：宽屏时内容最大 960vp 居中。 */
+  private flowGutter(): number {
+    return HgResponsive.contentGutter(this.windowW);
+  }
+
+  /** 发现态（搜索框/历史/热门题材）左右留白：宽屏时最大 760vp 居中。 */
+  private formGutter(): number {
+    return this.windowW > HgResponsive.FORM_MAX ? (this.windowW - HgResponsive.FORM_MAX) / 2 : 0;
+  }
+
+  /** 结果骨架卡片数：手机保持 6 张（3 行），宽屏按两行铺满。 */
+  private skeletonCount(): number {
+    const twoRows: number = this.flowColumns() * 2;
+    return twoRows > 6 ? twoRows : 6;
+  }
 
   aboutToAppear(): void {
     this.hist = UserPrefs.searchHist();
@@ -238,7 +262,7 @@ export struct SearchPage {
       })
     }
     .width('100%')
-    .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+    .padding({ left: HgSpace.pageInset + this.formGutter(), right: HgSpace.pageInset + this.formGutter() })
   }
 
   @Builder
@@ -342,8 +366,8 @@ export struct SearchPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
       .padding({
-        left: HgSpace.pageInset,
-        right: HgSpace.pageInset,
+        left: HgSpace.pageInset + this.formGutter(),
+        right: HgSpace.pageInset + this.formGutter(),
         top: HgSpace.xl,
         bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.l
       })
@@ -371,17 +395,21 @@ export struct SearchPage {
     }
     .width('100%')
     .height(32)
-    .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+    .padding({ left: HgSpace.pageInset + this.flowGutter(), right: HgSpace.pageInset + this.flowGutter() })
   }
 
   @Builder
   SkeletonView() {
     Scroll() {
       Column() {
-        HgSkeletonGrid({ dark: this.dark, count: 6, columns: 2 })
+        HgSkeletonGrid({ dark: this.dark, count: this.skeletonCount(), columns: this.flowColumns() })
       }
       .width('100%')
-      .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m })
+      .padding({
+        left: HgSpace.pageInset + this.flowGutter(),
+        right: HgSpace.pageInset + this.flowGutter(),
+        top: HgSpace.m
+      })
     }
     .width('100%')
     .layoutWeight(1)
@@ -448,6 +476,8 @@ export struct SearchPage {
           errorText: this.errorText,
           refreshing: this.refreshing,
           emptyTitle: '没有找到相关内容',
+          columns: this.flowColumns(),
+          contentGutter: this.flowGutter(),
           bottomPadding: HgSize.tabBarFloating + this.bottomInset,
           onOpen: (index: number) => {
             this.openAt(index);

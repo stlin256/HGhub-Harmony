@@ -4,18 +4,21 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_BOTTOM_INSET, K_DARK } from '../state/UserPrefs';
+import { HgResponsive } from '../design/HgResponsive';
+import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { PostParam, ROUTE_POST } from '../state/Routes';
 import { fmt } from '../utils/Format';
 
 const PAGE_SIZE: number = 20;
 
-/** 黄果吃瓜列表：两列瀑布流 + 下拉刷新 + 触底分页 + 骨架/错误态。 */
+/** 黄果吃瓜列表：响应式瀑布流（手机 2 列 / 平板 3–4 列，内容区最大 960vp 居中）+ 下拉刷新 + 触底分页 + 骨架/错误态。 */
 @Component
 export struct PostsPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口宽度（vp）：EntryAbility 在启动/旋转/分屏时更新，驱动列数与内容最大宽 960vp 居中。 */
+  @StorageProp(K_CONTENT_W) windowW: number = 400;
   @State hasData: boolean = false;
   @State loading: boolean = true;
   @State loadingMore: boolean = false;
@@ -29,6 +32,37 @@ export struct PostsPage {
 
   aboutToAppear(): void {
     this.loadFirst();
+  }
+
+  /** 列数：手机 2 列；≥600vp 3 列，≥840vp 4 列（上限 4）。 */
+  private columns(): number {
+    return HgResponsive.columns(this.windowW, 2, 4);
+  }
+
+  /** 宽屏内容区左右额外留白（vp）：与 pageInset 相加后内容区最大 960vp 居中。 */
+  private gutter(): number {
+    return HgResponsive.contentGutter(this.windowW);
+  }
+
+  /** 内容区左右 inset = pageInset + 宽屏 gutter（叠加）。 */
+  private sideInset(): number {
+    return HgSpace.pageInset + this.gutter();
+  }
+
+  /** WaterFlow 列模板：按当前列数生成 '1fr ...'（2/3/4 列均可）。 */
+  private gridTemplate(): string {
+    const cols: number = this.columns();
+    let tpl: string = '1fr';
+    for (let i = 1; i < cols; i++) {
+      tpl = tpl + ' 1fr';
+    }
+    return tpl;
+  }
+
+  /** 骨架卡片数：至少 3 行（手机保持既有 6 张），宽屏按两行铺满。 */
+  private skeletonCount(): number {
+    const twoRows: number = this.columns() * 2;
+    return twoRows > 6 ? twoRows : 6;
   }
 
   private async loadFirst(): Promise<void> {
@@ -158,10 +192,12 @@ export struct PostsPage {
   SkeletonView() {
     Scroll() {
       Column() {
-        HgSkeletonGrid({ dark: this.dark, count: 6, columns: 2 })
+        // 与真实 WaterFlow 同列（共享骨架支持任意列数），宽屏 3/4 列首屏不跳格。
+        HgSkeletonGrid({ dark: this.dark, count: this.skeletonCount(), columns: this.columns() })
       }
       .width('100%')
-      .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m })
+      // 与真实 WaterFlow 同一内容区（pageInset + gutter），骨架到数据回来不跳格。
+      .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m })
     }
     .layoutWeight(1)
     .width('100%')
@@ -255,13 +291,14 @@ export struct PostsPage {
                   .width('100%')
                 }, (item: Post) => 'post-' + item.id)
               }
-              .columnsTemplate('1fr 1fr')
+              .columnsTemplate(this.gridTemplate())
               .columnsGap(HgSpace.s)
               .rowsGap(HgSpace.s)
               .cachedCount(6)
               .scrollBar(BarState.Off)
               .edgeEffect(EdgeEffect.Spring)
-              .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m })
+              // 宽屏：pageInset 之上再叠加 gutter（每侧），内容区最大 960vp 居中。
+              .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m })
               .width('100%')
               .height('100%')
               .onReachEnd(() => {
