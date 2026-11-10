@@ -5,7 +5,8 @@ import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, UserPrefs } from '../state/UserPrefs';
+import { HgResponsive } from '../design/HgResponsive';
+import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
 import { hostOf } from '../utils/Format';
 
 interface ThemeOption {
@@ -38,6 +39,8 @@ export struct SettingsPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口宽度（vp，旋转/分屏实时更新）：宽屏时设置内容限宽 760vp 居中。 */
+  @StorageProp(K_CONTENT_W) windowW: number = 400;
   @StorageProp(K_VIDEO_SCALE) videoScale: string = 'contain';
   @State themeMode: string = 'system';
   @State muteOnStartup: boolean = true;
@@ -64,6 +67,18 @@ export struct SettingsPage {
 
   onLineChanged(): void {
     this.lineHost = hostOf(this.lineBase.length > 0 ? this.lineBase : Lines.current());
+  }
+
+  /**
+   * 内容左右内边距：手机为 16vp；平板/分屏把设置内容限制在 FORM_MAX(760vp) 内并居中，
+   * 分组卡片与列表随之收敛（不横向拉伸），旋转/分屏时按新窗口宽度重算。
+   */
+  private pagePad(): number {
+    let gutter: number = 0;
+    if (this.windowW > HgResponsive.FORM_MAX) {
+      gutter = (this.windowW - HgResponsive.FORM_MAX) / 2;
+    }
+    return HgSpace.pageInset + gutter;
   }
 
   private setTheme(mode: string): void {
@@ -602,7 +617,7 @@ export struct SettingsPage {
         }
         .layoutWeight(1)
         .width('100%')
-        .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+        .padding({ left: this.pagePad(), right: this.pagePad() })
       }
       .width('100%')
       .height('100%')

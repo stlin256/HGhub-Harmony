@@ -1,10 +1,11 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
 import { UiBus } from '../services/UiBus';
-import { K_BOTTOM_INSET, K_TOP_INSET, UserPrefs } from '../state/UserPrefs';
+import { K_BOTTOM_INSET, K_TOP_INSET, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
 import { ROUTE_PLAYER, PlayerParam, VideoParam } from '../state/Routes';
 import { Detail, WatchProgress } from '../models/Types';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgResponsive } from '../design/HgResponsive';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState } from '../components/HgCommon';
 import { EpisodeSheet } from '../components/player/EpisodeSheet';
@@ -21,6 +22,8 @@ export struct VideoDetailPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口宽度（vp）：旋转/分屏/平板时由 EntryAbility 更新，用于响应式内容居中与选集列数。 */
+  @StorageProp(K_CONTENT_W) windowW: number = 400;
   @StorageProp('hgDark') dark: boolean = true;
   params: VideoParam = { id: 0 };
 
@@ -48,6 +51,33 @@ export struct VideoDetailPage {
   @State progressSec: number = 0;
 
   private destroyed: boolean = false;
+
+  /** 内容最大宽度 960vp 居中：宽屏时左右额外留白（头图/简介/选集共用）。 */
+  private contentGutter(): number {
+    return HgResponsive.contentGutter(this.windowW);
+  }
+
+  /** 选集网格列数：手机 5 列，600+ 6 列，840+ 7 列（最多 8）。 */
+  private episodeColumns(): number {
+    return HgResponsive.columns(this.windowW, 5, 8);
+  }
+
+  /** 依列数生成 Grid columnsTemplate。 */
+  private gridTemplate(count: number): string {
+    let out: string = '1fr';
+    const n: number = count < 1 ? 1 : count;
+    for (let i = 1; i < n; i++) {
+      out += ' 1fr';
+    }
+    return out;
+  }
+
+  /** 按列数/条目数计算选集网格高度：1 行 44，2 行 96（44*2+8）。 */
+  private gridHeight(count: number): number {
+    const cols: number = this.episodeColumns();
+    const rows: number = count <= 0 ? 1 : Math.ceil(count / cols);
+    return rows * HgSize.episodeCell + (rows - 1) * HgSpace.s;
+  }
 
   aboutToAppear(): void {
     this.load();
@@ -422,11 +452,11 @@ export struct VideoDetailPage {
           }
         }, (ep: number) => String(ep))
       }
-      .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
+      .columnsTemplate(this.gridTemplate(this.episodeColumns()))
       .columnsGap(HgSpace.s)
       .rowsGap(HgSpace.s)
       .width('100%')
-      .height(this.previewNumbers.length > 5 ? 96 : 44)
+      .height(this.gridHeight(this.previewNumbers.length))
       .scrollBar(BarState.Off)
     }
     .width('100%')
@@ -536,17 +566,18 @@ export struct VideoDetailPage {
               }
             }, (index: number) => index.toString())
           }
-          .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
+          .columnsTemplate(this.gridTemplate(this.episodeColumns()))
           .columnsGap(HgSpace.s)
           .rowsGap(HgSpace.s)
           .width('100%')
-          .height(96)
+          .height(this.gridHeight(10))
         }
         .width('100%')
         .padding(HgSpace.l)
         .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
+      .padding({ left: this.contentGutter(), right: this.contentGutter() })
     }
     .width('100%')
     .height('100%')
@@ -690,6 +721,7 @@ export struct VideoDetailPage {
                 .height(this.bottomInset + 96)
             }
             .width('100%')
+            .padding({ left: this.contentGutter(), right: this.contentGutter() })
           }
           .width('100%')
           .height('100%')

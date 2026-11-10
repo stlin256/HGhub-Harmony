@@ -4,7 +4,8 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgTopBar } from '../components/HgCommon';
 import { PostContent } from '../components/browse/PostContent';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
-import { K_BOTTOM_INSET, K_DARK } from '../state/UserPrefs';
+import { HgResponsive } from '../design/HgResponsive';
+import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { UserPrefs } from '../state/UserPrefs';
 import { UiBus } from '../services/UiBus';
 import { PlayerParam, PostParam, ROUTE_PLAYER } from '../state/Routes';
@@ -16,6 +17,8 @@ export struct PostDetailPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_DARK) dark: boolean = true;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
+  /** 窗口宽度（vp）：旋转/分屏/平板时由 EntryAbility 更新，用于内容最大宽度居中。 */
+  @StorageProp(K_CONTENT_W) windowW: number = 400;
   params: PostParam = { id: 0 };
   @State hasPost: boolean = false;
   @State loading: boolean = true;
@@ -37,6 +40,11 @@ export struct PostDetailPage {
   @State commentTotal: number = 0;
   private commentPage: number = 0;
   private commentPages: number = 1;
+
+  /** 内容最大宽度 960vp 居中：宽屏时左右额外留白（头图/正文/评论共用）。 */
+  private contentGutter(): number {
+    return HgResponsive.contentGutter(this.windowW);
+  }
 
   aboutToAppear(): void {
     this.postId = this.params.id;
@@ -443,6 +451,7 @@ export struct PostDetailPage {
         .padding(HgSpace.pageInset)
       }
       .width('100%')
+      .padding({ left: this.contentGutter(), right: this.contentGutter() })
     }
     .layoutWeight(1)
     .align(Alignment.Top)
@@ -522,6 +531,7 @@ export struct PostDetailPage {
               .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset, top: HgSpace.m, bottom: HgSpace.xxxl })
             }
             .width('100%')
+            .padding({ left: this.contentGutter(), right: this.contentGutter() })
           }
           .layoutWeight(1)
           .width('100%')
