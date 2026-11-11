@@ -49,7 +49,10 @@ export class RecDict {
       RecDict.entries = entries;
       RecDict.bySurface = bySurface;
       RecDict.synonyms = new Map<string, string>();
-      const synKeys: string[] = Object.keys(raw.synonyms === undefined || raw.synonyms === null ? {} : raw.synonyms);
+      let synKeys: string[] = [];
+      if (raw.synonyms !== undefined && raw.synonyms !== null) {
+        synKeys = Object.keys(raw.synonyms);
+      }
       for (let i = 0; i < synKeys.length; i++) {
         const v: string | undefined = raw.synonyms[synKeys[i]];
         if (v !== undefined && v !== null) {

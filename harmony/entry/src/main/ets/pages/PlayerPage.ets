@@ -12,6 +12,7 @@ import { PlayerParam } from '../state/Routes';
 import { Detail, Post, WatchProgress } from '../models/Types';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
+import { RecService } from '../recommend/RecService';
 import { PlayerService } from '../player/PlayerService';
 import { MediaPrefetch } from '../player/MediaPrefetch';
 import { PlaybackLog } from '../player/PlaybackLog';
@@ -173,6 +174,8 @@ export struct PlayerPage {
 
   private destroyed: boolean = false;
   private pageShown: boolean = true;
+  /** 最近一次已记录"播放开始"的条目 id：切集/换剧只记一次，避免重复计数。 */
+  private lastPlayRecordId: number = -1;
   private initialIndex: number = 0;
   private initialDone: boolean = false;
   private playVideoId: number = 0;
@@ -351,6 +354,12 @@ export struct PlayerPage {
       }
       this.showChrome();
       this.warmNextUp();
+      // 播放开始事件 → 本地画像（离线推荐信号）。
+      const playId: number = this.currentId();
+      if (playId > 0 && playId !== this.lastPlayRecordId) {
+        this.lastPlayRecordId = playId;
+        RecService.recordPlayStart(playId);
+      }
     };
     this.service.onFirstFrame = () => {
       this.starting = false;
@@ -953,6 +962,7 @@ export struct PlayerPage {
   }
 
   private handleCompleted(): void {
+    RecService.recordComplete(this.currentId());
     if (this.params.feedKind !== 'post' && this.ep < this.episodeCount) {
       this.switchEpisode(this.ep + 1);
       return;
@@ -1016,6 +1026,7 @@ export struct PlayerPage {
       this.faved = next;
       this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
       UserPrefs.toggleFav(id);
+      RecService.recordFavorite(id, next);
       this.haptic(next ? 18 : 10);
       this.showChrome();
       UiBus.toast(next ? '已收藏（本地）' : '已取消收藏');
@@ -1025,6 +1036,7 @@ export struct PlayerPage {
     this.faved = next;
     this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
     UserPrefs.toggleFav(id);
+    RecService.recordFavorite(id, next);
     this.haptic(next ? 18 : 10);
     this.showChrome();
     const request: Promise<void> = this.params.feedKind === 'post'

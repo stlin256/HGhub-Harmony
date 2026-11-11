@@ -5,6 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from '../services/AppContext';
 import { Api } from '../services/Api';
 import { LineAuto } from '../services/LineAuto';
+import { RecService } from '../recommend/RecService';
 import { Prefs } from '../services/Prefs';
 import { Session } from '../services/Session';
 import { Lines } from '../services/Lines';
@@ -73,6 +74,8 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, TAG, 'services ready, base=%{public}s', Lines.current());
       // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
       LineAuto.init();
+      // 离线推荐：异步载入随包目录（3,388 条）+ 本地画像，并按冷却时间静默同步增量目录。
+      RecService.init();
       // 观看历史预取：不阻塞首屏，稍后后台拉取最近 2 条详情，点历史不卡顿。
       setTimeout(() => {
         Api.warmHistory(2).catch(() => {

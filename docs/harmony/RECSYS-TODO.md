@@ -15,12 +15,12 @@
 - [x] `recommend/RecProfile.ets`：画像、指数衰减（τ=7d）、种子（收藏/点赞/历史）、防抖持久化
 - [x] `recommend/RecService.ets`：init / pick（加权采样）/ record* / diagnostics / syncNow
 - [x] `recommend/RecSync.ets`：后台串行目录同步（feed 前 3 页 + 4 分类），1.2s 限速、单次 ≤60、6h 冷却、可关
-- [ ] HomePage：`shuffled(pool)` → `RecService.pick(pool, n)`（启动/换一批/刷新/触底/预挑）
-- [ ] HomePage：点击事件
-- [ ] PlayerPage：播放开始/完播/收藏事件
-- [ ] EntryAbility：异步 init + 后台同步 kickoff
-- [ ] SettingsPage：推荐开关 + 诊断（目录数/画像数/Top标签/同步状态）
-- [ ] 编译通过 + 真机冒烟 + 分步提交
+- [x] HomePage：`shuffled(pool)` → `RecService.pick(pool, n)`（启动/换一批/刷新/触底/预挑）+ 随包目录注入
+- [x] HomePage：点击事件 → `RecService.recordClick`
+- [x] PlayerPage：播放开始/完播/收藏事件 → 画像
+- [x] EntryAbility：异步 `RecService.init()` + 后台同步 kickoff
+- [x] SettingsPage：推荐开关 + 诊断（目录数/画像数/Top标签/同步状态/手动同步）
+- [~] 编译通过（BUILD SUCCESSFUL）；真机冒烟待设备恢复连接
 
 ## P1：RDB 与事件（M0 + M2）
 
