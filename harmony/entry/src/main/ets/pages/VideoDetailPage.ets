@@ -241,8 +241,14 @@ export struct VideoDetailPage {
     if (this.score > 0) {
       parts.push(this.score.toFixed(1) + ' 分');
     }
-    parts.push(this.isFinished ? '已完结' : '更新至 ' + this.episodeCount + ' 集');
-    parts.push('共 ' + this.episodeCount + ' 集');
+    // 连载中「更新至 N 集」已经包含总集数信息，不再重复拼「共 N 集」（旧逻辑会显示成
+    // 「更新至 12 集 · 共 12 集」）。
+    if (this.isFinished) {
+      parts.push('已完结');
+      parts.push('共 ' + this.episodeCount + ' 集');
+    } else {
+      parts.push('更新至 ' + this.episodeCount + ' 集');
+    }
     let text = '';
     for (let i = 0; i < parts.length; i++) {
       text = i === 0 ? parts[i] : text + ' · ' + parts[i];
