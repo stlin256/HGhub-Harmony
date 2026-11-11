@@ -32,6 +32,10 @@ export interface RecProfileEntry {
 export interface RecDiagnostics {
   ready: boolean;
   packVersion: string;
+  dictVersion: string;
+  schemaVersion: number;
+  profileSchema: number;
+  extraSchema: number;
   catalogCount: number;
   extraCount: number;
   profileSize: number;
@@ -50,6 +54,8 @@ export interface RecRawFull {
 /** 增量文件结构。 */
 export interface RecExtraFile {
   version: number;
+  schema?: number;
+  basePack?: string;
   updated: number;
   items: CatalogItem[];
 }
