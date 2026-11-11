@@ -3,6 +3,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { util, JSON } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { EdgeRequestBody, Envelope } from '../models/Types';
+import { parseHttpsUrl, redactSensitive } from '../utils/Security';
 
 /** 与原项目一致的桌面 Chrome UA。 */
 export const USER_AGENT: string =
@@ -10,6 +11,10 @@ export const USER_AGENT: string =
 
 const DEFAULT_TIMEOUT: number = 20000;
 const API_RETRY_TIMES: number = 3;
+/** 文本响应上限（GitHub Release / 发布页等 HTML/JSON，正常远小于此值）。 */
+const RESPONSE_MAX_TEXT_BYTES: number = 4 * 1024 * 1024;
+/** 二进制响应上限（封面/截图；超出视为异常响应）。 */
+const RESPONSE_MAX_BINARY_BYTES: number = 8 * 1024 * 1024;
 
 export class RawText {
   code: number;
@@ -84,25 +89,37 @@ function hostOfUrl(raw: string): string {
   return hostEnd < 0 ? raw.substring(schemeEnd + 3) : raw.substring(schemeEnd + 3, hostEnd);
 }
 
-/** 网络层：统一封装 @ohos.net.http、边缘信封、错误归一与重试。 */
+/**
+ * 网络层：统一封装 @ohos.net.http、边缘信封、错误归一与重试。
+ *
+ * 安全基线（不要在这里改）：
+ * - TLS 证书校验使用系统 http 栈默认实现，不设置 caPath / remoteValidation / certificatePinning，
+ *   也不关闭校验（pin 不可行：CDN 证书轮换会直接导致全站不可用）；
+ * - 只允许 https URL（系统 URL 解析器判定 scheme），明文 http 在进入请求栈前就被拒绝；
+ * - 响应体有明确大小上限（HttpRequestOptions.maxLimit + 收到后再校验）；
+ * - 日志/错误只出现 method/opPath/host 与脱敏后的文本，不出现 token/auth_key/完整签名 URL。
+ */
 export class Net {
   static errorText(err: Object): string {
     const be = err as BusinessError;
     const message: string | undefined = be.message;
     const code: number | undefined = be.code;
+    let text: string = '';
     if (code !== undefined && code !== null) {
       const friendly = Net.networkErrorText(code);
       if (friendly.length > 0) {
-        return friendly;
+        text = friendly;
       }
     }
-    if (message !== undefined && message !== null && message.length > 0) {
-      if (code !== undefined && code !== null) {
-        return message + ' (' + code + ')';
+    if (text.length === 0) {
+      if (message !== undefined && message !== null && message.length > 0) {
+        text = code !== undefined && code !== null ? message + ' (' + code + ')' : message;
+      } else {
+        text = '网络请求失败';
       }
-      return message;
     }
-    return '网络请求失败';
+    // 平台错误文本偶尔会带请求 URL；统一打码后再给 UI/日志。
+    return redactSensitive(text);
   }
 
   /** 网络错误码 → 用户可读中文（2300xxx 为 Network Kit 错误码）。 */
@@ -147,6 +164,10 @@ export class Net {
 
   private static async request(url: string, method: http.RequestMethod, headers: Record<string, string>,
     body: string, timeoutMs: number, asBytes: boolean): Promise<RawText | RawBytes> {
+    // 平台机制：scheme 判定交给系统 URL 解析器；只允许 https（TLS 校验由系统 http 栈完成）。
+    if (parseHttpsUrl(url) === null) {
+      throw new Error('仅支持 HTTPS 请求');
+    }
     const request = http.createHttp();
     try {
       const options: http.HttpRequestOptions = {
@@ -154,7 +175,9 @@ export class Net {
         header: headers,
         connectTimeout: 10000,
         readTimeout: timeoutMs,
-        expectDataType: asBytes ? http.HttpDataType.ARRAY_BUFFER : http.HttpDataType.STRING
+        expectDataType: asBytes ? http.HttpDataType.ARRAY_BUFFER : http.HttpDataType.STRING,
+        // 响应体上限：系统栈超限直接失败，避免把超大响应读进内存。
+        maxLimit: asBytes ? RESPONSE_MAX_BINARY_BYTES : RESPONSE_MAX_TEXT_BYTES
       };
       if (body.length > 0) {
         options.extraData = body;
@@ -167,11 +190,18 @@ export class Net {
         if (response.result instanceof ArrayBuffer) {
           bytes = new Uint8Array(response.result as ArrayBuffer);
         }
+        if (bytes.length > RESPONSE_MAX_BINARY_BYTES) {
+          throw new Error('响应内容过大');
+        }
         return new RawBytes(code, bytes, contentType);
       }
       let text = '';
       if (typeof response.result === 'string') {
         text = response.result as string;
+      }
+      // 部分平台实现超过 maxLimit 时可能截断而非报错，这里再做一次明确校验。
+      if (text.length > RESPONSE_MAX_TEXT_BYTES) {
+        throw new Error('响应内容过大');
       }
       return new RawText(code, text, contentType);
     } finally {
@@ -197,6 +227,9 @@ export class Net {
    * 只用于 {base}/ 可用性探测，不参与业务接口。
    */
   static async getTextQuick(url: string, timeoutMs: number): Promise<RawText> {
+    if (parseHttpsUrl(url) === null) {
+      throw new Error('仅支持 HTTPS 请求');
+    }
     const headers: Record<string, string> = {
       'User-Agent': USER_AGENT,
       'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8'
@@ -208,7 +241,8 @@ export class Net {
         header: headers,
         connectTimeout: timeoutMs,
         readTimeout: timeoutMs,
-        expectDataType: http.HttpDataType.STRING
+        expectDataType: http.HttpDataType.STRING,
+        maxLimit: RESPONSE_MAX_TEXT_BYTES
       };
       const response: http.HttpResponse = await request.request(url, options);
       let text = '';
@@ -301,7 +335,13 @@ export class Net {
     if (response.text.trim().length === 0) {
       return null;
     }
-    const parsed = JSON.parse(response.text);
+    // 外部响应：标准 JSON 解析 + 异常兜底，解析失败不把原始内容/内部异常回显给调用方。
+    let parsed: Object | null = null;
+    try {
+      parsed = JSON.parse(response.text) as Object | null;
+    } catch (err) {
+      throw new Error('响应解析失败');
+    }
     if (parsed === null) {
       return null;
     }

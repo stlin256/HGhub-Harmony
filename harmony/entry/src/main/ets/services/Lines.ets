@@ -4,6 +4,7 @@ import { Net, RawText } from './Net';
 import { Prefs } from './Prefs';
 import { Session } from './Session';
 import { LineItem, LineMirrors, LineProbe } from '../models/Types';
+import { parseHttpsUrl } from '../utils/Security';
 
 /** 默认固定线路 1（与原项目 net.rs 的 DEFAULT_BASE 一致）。 */
 export const DEFAULT_BASE: string = 'https://example.invalid';
@@ -29,36 +30,6 @@ function allDigits(text: string): boolean {
     }
   }
   return true;
-}
-
-function validHost(host: string): boolean {
-  if (host.length === 0 || host.length > 253) {
-    return false;
-  }
-  let labelLength = 0;
-  for (let i = 0; i < host.length; i++) {
-    const code = host.charCodeAt(i);
-    const isLower = code >= 97 && code <= 122;
-    const isUpper = code >= 65 && code <= 90;
-    const isDigit = code >= 48 && code <= 57;
-    const isDash = code === 45;
-    const isDot = code === 46;
-    if (isDot) {
-      if (labelLength === 0 || labelLength > 63) {
-        return false;
-      }
-      labelLength = 0;
-      continue;
-    }
-    if (!isLower && !isUpper && !isDigit && !isDash) {
-      return false;
-    }
-    if (labelLength === 0 && isDash) {
-      return false;
-    }
-    labelLength++;
-  }
-  return labelLength > 0 && labelLength <= 63;
 }
 
 function isIpv4Literal(host: string): boolean {
@@ -213,42 +184,42 @@ export class Lines {
     hilog.info(0x0000, 'HGLine', 'line loaded: %{public}s', Lines.base);
   }
 
+  /**
+   * 线路地址归一化：scheme/host/port 的解析交给系统 @ohos.url（不手写协议前缀/正则），
+   * 业务安全策略只做三件事：仅 https、仅纯站点根（无 path/query/hash/账号信息）、拒绝 IP/localhost。
+   */
   static normalize(raw: string): string {
-    let text = raw.trim();
+    const text = raw.trim();
     if (text.length === 0) {
       return '';
     }
-    if (text.substring(0, 8).toLowerCase() !== 'https://') {
+    const parsed = parseHttpsUrl(text);
+    if (parsed === null) {
       return '';
     }
-    let rest = text.substring(8);
-    if (rest.endsWith('/')) {
-      rest = rest.substring(0, rest.length - 1);
-    }
-    if (rest.length === 0 || rest.indexOf('/') >= 0 || rest.indexOf('?') >= 0 ||
-      rest.indexOf('#') >= 0 || rest.indexOf('@') >= 0) {
+    if (parsed.username.length > 0 || parsed.password.length > 0) {
       return '';
     }
-    let host = rest;
-    let port = '';
-    const colon = rest.lastIndexOf(':');
-    if (colon >= 0) {
-      host = rest.substring(0, colon);
-      port = rest.substring(colon + 1);
-      if (!allDigits(port) || port.length > 5) {
-        return '';
-      }
-    }
-    if (!validHost(host)) {
+    const path: string = parsed.pathname;
+    if (path.length > 0 && path !== '/') {
       return '';
     }
-    const lowerHost = host.toLowerCase();
-    // 线路必须是真实域名：拒绝 IP 字面量与 localhost（与原项目私网/内网限制的意图一致）
-    if (lowerHost === 'localhost' || isIpv4Literal(lowerHost)) {
+    if (parsed.search.length > 0 || parsed.hash.length > 0) {
       return '';
     }
-    const normalized = 'https://' + lowerHost + (port.length > 0 ? ':' + port : '');
-    return normalized;
+    const host: string = parsed.hostname.toLowerCase();
+    if (host.length === 0 || host.length > 253) {
+      return '';
+    }
+    // 线路必须是真实域名：拒绝 IP 字面量（含 IPv6 字面量）与 localhost（与原项目私网/内网限制意图一致）
+    if (host === 'localhost' || isIpv4Literal(host) || host.indexOf(':') >= 0 || host.startsWith('[')) {
+      return '';
+    }
+    const port: string = parsed.port;
+    if (port.length > 0 && (!allDigits(port) || port.length > 5)) {
+      return '';
+    }
+    return 'https://' + host + (port.length > 0 ? ':' + port : '');
   }
 
   /** 切换线路：立即生效并落盘；换站后清空会话（token 与 origin 绑定）。 */

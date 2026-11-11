@@ -12,7 +12,7 @@
  */
 
 const PLAYLIST_HEADER: string = '#EXTM3U';
-const SEGMENT_SUFFIX: string = '/seg?u=';
+const SEGMENT_PATH: string = '/seg?';
 const HEX_DIGITS: string = '0123456789ABCDEF';
 
 interface UrlParts {
@@ -493,12 +493,24 @@ function dateRangeLine(line: string): string | undefined {
 }
 
 /**
+ * 生成指向本地代理的改写地址：<localPrefix>/seg?[t=<token>&]u=<百分号编码的绝对 URL>。
+ * token 仅含 0-9a-f，直接拼 query；u 全量百分号编码，m3u8 内容无法借 URI 注入
+ * 代理的 query/路径/响应头。
+ */
+function proxySegmentUrl(localPrefix: string, authToken: string, absoluteUrl: string): string {
+  const tokenPart: string = authToken.length > 0 ? 't=' + authToken + '&' : '';
+  return localPrefix + SEGMENT_PATH + tokenPart + 'u=' + encodeComponent(absoluteUrl);
+}
+
+/**
  * 改写整份 m3u8（等价 Rust rewrite_playlist）。
  * @param baseUrl 该 m3u8 自身的绝对 URL（用于相对路径绝对化；嵌套清单传内层 URL）
  * @param text 原始 m3u8 文本（允许 BOM / CRLF）
  * @param localPrefix 本地代理基址，如 http://127.0.0.1:12345
+ * @param authToken 本地代理会话 token（可选；空串输出与旧版完全一致，便于单测/兼容）
  */
-export function rewritePlaylist(baseUrl: string, text: string, localPrefix: string): string {
+export function rewritePlaylist(baseUrl: string, text: string, localPrefix: string,
+  authToken: string = ''): string {
   const body: string = stripBom(text);
   const lines: string[] = body.split('\n');
   let out: string = '';
@@ -525,13 +537,13 @@ export function rewritePlaylist(baseUrl: string, text: string, localPrefix: stri
       }
       if (line.indexOf('URI="') >= 0) {
         out += mapUriAttributes(line, (uri: string): string => {
-          return localPrefix + SEGMENT_SUFFIX + encodeComponent(absolutizeUrl(baseUrl, uri));
+          return proxySegmentUrl(localPrefix, authToken, absolutizeUrl(baseUrl, uri));
         }) + '\n';
       } else {
         out += line + '\n';
       }
     } else {
-      out += localPrefix + SEGMENT_SUFFIX + encodeComponent(absolutizeUrl(baseUrl, line)) + '\n';
+      out += proxySegmentUrl(localPrefix, authToken, absolutizeUrl(baseUrl, line)) + '\n';
     }
   }
   return out;
@@ -880,6 +892,10 @@ export function selfTestPlaylistRewrite(): string {
     body.indexOf('%2Fkey%2Ebin%3Fauth%5Fkey%3D') >= 0, failures);
   expectTrue('rewrite no relative key', body.indexOf('URI="key.bin') < 0, failures);
   expectTrue('rewrite ends with newline', body.endsWith('\n'), failures);
+  const tokenBody: string = rewritePlaylist(base, text, 'http://127.0.0.1:9', 'ab12cd34');
+  expectTrue('rewrite token in query', tokenBody.indexOf('http://127.0.0.1:9/seg?t=ab12cd34&u=') >= 0,
+    failures);
+  expectTrue('rewrite token not in path', tokenBody.indexOf('http://127.0.0.1:9/seg?ab12') < 0, failures);
 
   const daterange: string = '#EXTM3U\n#EXT-X-DATERANGE:ID="event",START-DATE="2026-11-07T00:00:00Z",' +
     'DURATION=4,SCTE35-OUT=0xFC,X-TEXT="a,b",X-ASSET-URI="https://evil.example/ad",' +

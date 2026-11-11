@@ -31,6 +31,7 @@ import { USER_AGENT } from '../services/Net';
 import { Lines } from '../services/Lines';
 import { MediaCache, MediaFetch, MEDIA_KIND_MEDIA, MEDIA_KIND_PLAYLIST } from './MediaCache';
 import { PlaybackLog } from './PlaybackLog';
+import { parseWebUrl, randomHex, sanitizeRequestHeaders, sanitizeResponseHeaderValue } from '../utils/Security';
 import {
   decodeComponent,
   encodeComponent,
@@ -48,6 +49,13 @@ const MEDIA_ACCEPT: string = '*/*';
 /** 单连接等请求头的上限：HLS 播放器请求头很小，超时说明客户端异常。 */
 const CLIENT_TIMEOUT_MS: number = 15000;
 const MAX_HEADER_BYTES: number = 16 * 1024;
+/** 同时保持的客户端连接上限：本机其它 App 也可能扫到该端口，防止大量连接拖垮播放进程。 */
+const MAX_CONNECTIONS: number = 32;
+/** ?u= 上游 URL 长度上限（m3u8 URI 编码后可能膨胀，但仍远小于请求头上限）。 */
+const MAX_UPSTREAM_URL_LEN: number = 8 * 1024;
+/** 单次响应体上限：m3u8 2MB、分片 8MB（MediaCache 抓取上限，这里再兜一层）。 */
+const MAX_PLAYLIST_BYTES: number = 2 * 1024 * 1024;
+const MAX_MEDIA_BYTES: number = 8 * 1024 * 1024;
 
 /** 请求头（大小写不敏感）。 */
 class HttpHeaders {
@@ -97,6 +105,12 @@ export class LocalProxy {
   private connections: socket.TCPSocketConnection[] = [];
   /** 额外上游请求头（CDN 鉴权等），由 PlayerService 在解析出 PlaybackInfo 后注入；为空则只用 Referer/UA。 */
   private upstreamExtra: Record<string, string> = {};
+  /**
+   * 会话级随机 token（每次 start 重新生成）：127.0.0.1 端口对同设备所有 App 可见，
+   * 用它把代理能力限制在「拿到 AVPlayer URL 的本进程」手里，避免被其它 App 当作
+   * SSRF 跳板或盗取注入的 CDN 鉴权头。token 只出现在 query，不写日志。
+   */
+  private sessionToken: string = '';
 
   /** 实际监听端口；未启动时为 0。 */
   get port(): number {
@@ -114,12 +128,12 @@ export class LocalProxy {
 
   /** 把上游 URL 包装成代理入口（m3u8 会再次被改写，最终仍指向本代理）。 */
   wrapUrl(upstream: string): string {
-    return this.baseUrl + '/hls?u=' + encodeComponent(upstream);
+    return this.baseUrl + '/hls?t=' + this.sessionToken + '&u=' + encodeComponent(upstream);
   }
 
   /** 测试/诊断用：任意资源包成 /seg 地址。 */
   wrapSegmentUrl(upstream: string): string {
-    return this.baseUrl + '/seg?u=' + encodeComponent(upstream);
+    return this.baseUrl + '/seg?t=' + this.sessionToken + '&u=' + encodeComponent(upstream);
   }
 
   /**
@@ -132,13 +146,9 @@ export class LocalProxy {
       this.upstreamExtra = {};
       return;
     }
-    const copy: Record<string, string> = {};
-    const keys: string[] = Object.keys(headers);
-    for (let i = 0; i < keys.length; i++) {
-      copy[keys[i]] = headers[keys[i]];
-    }
-    this.upstreamExtra = copy;
-    PlaybackLog.info('proxy.headers', 'extra=' + keys.length);
+    // 服务端下发的鉴权头属于外部输入：清洗头名/头值（去 CRLF）防请求头注入。
+    this.upstreamExtra = sanitizeRequestHeaders(headers);
+    PlaybackLog.info('proxy.headers', 'extra=' + Object.keys(this.upstreamExtra).length);
   }
 
   /**
@@ -168,6 +178,8 @@ export class LocalProxy {
     this.server = undefined;
     this.running = false;
     this.portNum = 0;
+    // 端口关闭后旧 token 立即作废（下次 start 重新生成）。
+    this.sessionToken = '';
     const connections: socket.TCPSocketConnection[] = this.connections;
     this.connections = [];
     for (let i = 0; i < connections.length; i++) {
@@ -200,6 +212,12 @@ export class LocalProxy {
       if (port <= 0) {
         throw new Error('代理端口分配失败');
       }
+      // 平台 CSPRNG 生成会话 token；生成失败时宁可让调用方回退直连，也不用弱随机。
+      const token: string = randomHex(16);
+      if (token.length === 0) {
+        throw new Error('代理会话密钥生成失败');
+      }
+      this.sessionToken = token;
       server.on('connect', (client: socket.TCPSocketConnection): void => {
         this.onClient(client);
       });
@@ -219,6 +237,7 @@ export class LocalProxy {
       this.server = undefined;
       this.portNum = 0;
       this.running = false;
+      this.sessionToken = '';
       throw new Error('本地代理启动失败：' + LocalProxy.errText(err));
     }
   }
@@ -226,6 +245,12 @@ export class LocalProxy {
   /* ── 连接处理 ─────────────────────────────────────── */
 
   private onClient(client: socket.TCPSocketConnection): void {
+    if (this.connections.length >= MAX_CONNECTIONS) {
+      // 本机其它 App 可能扫到该端口：超过连接上限直接关闭，优先保证播放器连接。
+      client.close().catch((err: Object): void => {
+      });
+      return;
+    }
     this.connections.push(client);
     let pending: Uint8Array = new Uint8Array(0);
     let finished: boolean = false;
@@ -261,6 +286,12 @@ export class LocalProxy {
             clearTimeout(timer);
             this.respond(client, 400, 'text/plain', LocalProxy.textBytes('header too large'), 'no-store', '');
           }
+          return;
+        }
+        if (headerEnd > MAX_HEADER_BYTES) {
+          finished = true;
+          clearTimeout(timer);
+          this.respond(client, 400, 'text/plain', LocalProxy.textBytes('header too large'), 'no-store', '');
           return;
         }
         // 只需请求头即可路由（GET 无 body），立刻停表并分发。
@@ -303,23 +334,39 @@ export class LocalProxy {
     const mark: number = target.indexOf('?');
     const path: string = mark >= 0 ? target.substring(0, mark) : target;
     const query: string = mark >= 0 ? target.substring(mark + 1) : '';
+    // 1) 会话 token 鉴权（常量时间比较）：127.0.0.1 对本机所有 App 可见，
+    //    先挡掉未持有 token 的探测/滥用，避免本地代理变成 SSRF 跳板或 CDN 鉴权头泄露点。
+    const givenToken: string = LocalProxy.queryParam(query, 't');
+    if (!LocalProxy.tokenEquals(givenToken, this.sessionToken)) {
+      this.respond(client, 403, 'text/plain', LocalProxy.textBytes('forbidden'), 'no-store', '');
+      return;
+    }
+    // 2) 上游 URL：长度上限 + 系统 URL 解析器判定 scheme/host（仅 http/https）。
     const upstream: string = LocalProxy.queryParam(query, 'u');
-    if (upstream.length === 0) {
+    if (upstream.length === 0 || upstream.length > MAX_UPSTREAM_URL_LEN) {
       this.respond(client, 400, 'text/plain', LocalProxy.textBytes('missing u'), 'no-store', '');
       return;
     }
-    // 每个请求一行：确认 AVPlayer 是否真的连到了本地代理（排障关键，体量 ≈ 每分片一行）。
+    if (parseWebUrl(upstream) === null) {
+      this.respond(client, 400, 'text/plain', LocalProxy.textBytes('unsupported upstream'), 'no-store', '');
+      return;
+    }
     const rangeHeader: string = request.headers.get('range');
-    PlaybackLog.info('proxy.route', path + ' range=' + (rangeHeader.length > 0 ? '1' : '0') +
-      ' ' + LocalProxy.describe(upstream));
+    // 每个请求一行：确认 AVPlayer 是否真的连到了本地代理（排障关键，体量 ≈ 每分片一行）。
     if (path === '/hls') {
+      PlaybackLog.info('proxy.route', path + ' range=' + (rangeHeader.length > 0 ? '1' : '0') +
+        ' ' + LocalProxy.describe(upstream));
       await this.handlePlaylist(client, upstream);
       return;
     }
     if (path === '/seg') {
+      PlaybackLog.info('proxy.route', path + ' range=' + (rangeHeader.length > 0 ? '1' : '0') +
+        ' ' + LocalProxy.describe(upstream));
       await this.handleSegment(client, upstream, rangeHeader);
       return;
     }
+    // 未知路径只记录过滤后的短路径，避免把外部任意内容（含敏感串）写进日志。
+    PlaybackLog.info('proxy.route', 'unknown path=' + LocalProxy.shortPath(path));
     this.respond(client, 404, 'text/plain', LocalProxy.textBytes('not found'), 'no-store', '');
   }
 
@@ -337,6 +384,12 @@ export class LocalProxy {
       this.respond(client, 502, 'text/plain', LocalProxy.textBytes('upstream playlist failed'), 'no-store', '');
       return;
     }
+    if (fetched.bytes.length > MAX_PLAYLIST_BYTES) {
+      PlaybackLog.warn('proxy.hls.too.large',
+        'bytes=' + fetched.bytes.length + ' ' + LocalProxy.describe(upstream));
+      this.respond(client, 502, 'text/plain', LocalProxy.textBytes('upstream playlist too large'), 'no-store', '');
+      return;
+    }
     const text: string = LocalProxy.decodeText(fetched.bytes);
     if (!isPlaylistText(text)) {
       // 绝不静默 200：返回 502 让播放器/UI 明确失败。
@@ -345,7 +398,8 @@ export class LocalProxy {
       return;
     }
     // 缓存里保存的是上游原始文本，改写必须按当前代理基址实时做（端口/会话可能变化）。
-    const body: Uint8Array = LocalProxy.textBytes(rewritePlaylist(upstream, text, this.baseUrl));
+    const body: Uint8Array = LocalProxy.textBytes(
+      rewritePlaylist(upstream, text, this.baseUrl, this.sessionToken));
     if (fetched.fromCache) {
       PlaybackLog.info('mediacache.hit', 'kind=hls bytes=' + fetched.bytes.length +
         ' ms=' + (Date.now() - started) + ' ' + LocalProxy.describe(upstream));
@@ -371,6 +425,12 @@ export class LocalProxy {
       return;
     }
     const raw: Uint8Array = fetched.bytes;
+    if (raw.length > MAX_MEDIA_BYTES) {
+      PlaybackLog.warn('proxy.seg.too.large',
+        'bytes=' + raw.length + ' ' + LocalProxy.describe(upstream));
+      this.respond(client, 502, 'text/plain', LocalProxy.textBytes('upstream segment too large'), 'no-store', '');
+      return;
+    }
     const contentType: string = fetched.contentType.length > 0 ? fetched.contentType : OCTET_TYPE;
     if (isPlaylistBytes(raw) || contentType.toLowerCase().indexOf('mpegurl') >= 0) {
       // 主清单里的子清单同样经 /seg 返回：必须继续改写，不能把内层 URL 原样交给播放器。
@@ -385,7 +445,8 @@ export class LocalProxy {
         this.respond(client, 502, 'text/plain', LocalProxy.textBytes('invalid nested playlist'), 'no-store', '');
         return;
       }
-      const body: Uint8Array = LocalProxy.textBytes(rewritePlaylist(upstream, text, this.baseUrl));
+      const body: Uint8Array = LocalProxy.textBytes(
+        rewritePlaylist(upstream, text, this.baseUrl, this.sessionToken));
       if (fetched.fromCache) {
         PlaybackLog.info('mediacache.hit', 'kind=pl-seg bytes=' + raw.length + ' ' + LocalProxy.describe(upstream));
       }
@@ -471,8 +532,10 @@ export class LocalProxy {
 
   private static buildResponse(status: number, contentType: string, body: Uint8Array,
     cacheControl: string, contentRange: string): ArrayBuffer {
+    // 上游 Content-Type 是外部输入：清洗后再拼进响应头，防止 CRLF 头注入。
+    const safeType: string = sanitizeResponseHeaderValue(contentType, OCTET_TYPE);
     let head: string = 'HTTP/1.1 ' + status + ' ' + LocalProxy.reason(status) + '\r\n';
-    head += 'Content-Type: ' + contentType + '\r\n';
+    head += 'Content-Type: ' + safeType + '\r\n';
     head += 'Content-Length: ' + body.length + '\r\n';
     head += 'Cache-Control: ' + cacheControl + '\r\n';
     head += 'Accept-Ranges: bytes\r\n';
@@ -498,6 +561,9 @@ export class LocalProxy {
     }
     if (status === 400) {
       return 'Bad Request';
+    }
+    if (status === 403) {
+      return 'Forbidden';
     }
     if (status === 404) {
       return 'Not Found';
@@ -678,6 +744,32 @@ export class LocalProxy {
       return undefined;
     }
     return new ByteRange(start, end >= total ? total - 1 : end);
+  }
+
+  /** 常量时间比较会话 token（长度不同/为空直接失败，避免逐字节时序泄露）。 */
+  private static tokenEquals(given: string, expected: string): boolean {
+    if (expected.length === 0 || given.length !== expected.length) {
+      return false;
+    }
+    let diff: number = 0;
+    for (let i = 0; i < expected.length; i++) {
+      diff |= given.charCodeAt(i) ^ expected.charCodeAt(i);
+    }
+    return diff === 0;
+  }
+
+  /** 日志用短路径：只保留 URL 路径常见字符并截断（外部输入不进日志原文）。 */
+  private static shortPath(path: string): string {
+    let out: string = '';
+    for (let i = 0; i < path.length && out.length < 64; i++) {
+      const code: number = path.charCodeAt(i);
+      const keep: boolean = (code >= 48 && code <= 57) || (code >= 65 && code <= 90) ||
+        (code >= 97 && code <= 122) || code === 47 || code === 95 || code === 45 || code === 46;
+      if (keep) {
+        out += path.charAt(i);
+      }
+    }
+    return out.length > 0 ? out : '/';
   }
 
   private static describe(upstream: string): string {

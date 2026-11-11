@@ -25,6 +25,7 @@ import { Lines } from '../services/Lines';
 import { USER_AGENT } from '../services/Net';
 import { isPlaylistBytes, isPlaylistText, normalizeCacheKey } from './PlaylistRewrite';
 import { PlaybackLog } from './PlaybackLog';
+import { parseWebUrl, sanitizeRequestHeaders, sanitizeResponseHeaderValue } from '../utils/Security';
 
 /** 缓存 kind：播放列表（m3u8 文本，内存 TTL 60s）。 */
 export const MEDIA_KIND_PLAYLIST: string = 'playlist';
@@ -697,19 +698,21 @@ export class MediaCache {
     for (let i = 0; i < keys.length; i++) {
       merged[keys[i]] = headers[keys[i]];
     }
-    return merged;
+    // 外部来源头（CDN 鉴权）统一清洗：非法头名/含 CRLF 的值丢弃，防止请求头注入。
+    return sanitizeRequestHeaders(merged);
   }
 
+  /** 上游 Content-Type 会被回写到本地代理响应头：只保留 ASCII 安全字符，防响应头注入。 */
   private static headerText(headers: Object): string {
     try {
       const map = headers as Record<string, string>;
       const direct: string | undefined = map['content-type'];
-      if (direct !== undefined && direct !== null && direct.length > 0) {
-        return direct;
+      if (direct !== undefined && direct !== null) {
+        return sanitizeResponseHeaderValue(direct, '');
       }
       const capital: string | undefined = map['Content-Type'];
-      if (capital !== undefined && capital !== null && capital.length > 0) {
-        return capital;
+      if (capital !== undefined && capital !== null) {
+        return sanitizeResponseHeaderValue(capital, '');
       }
       return '';
     } catch (err) {
@@ -782,9 +785,9 @@ export class MediaCache {
 
   /* ── 内部：小工具 ─────────────────────────────────── */
 
+  /** 上游 URL 只接受 http/https（系统 URL 解析器判定 scheme，解析失败/超长一律拒绝）。 */
   private static isHttpUrl(url: string): boolean {
-    const lower: string = url.toLowerCase();
-    return lower.startsWith('http://') || lower.startsWith('https://');
+    return parseWebUrl(url) !== null;
   }
 
   private static guessType(url: string, kind: string): string {
