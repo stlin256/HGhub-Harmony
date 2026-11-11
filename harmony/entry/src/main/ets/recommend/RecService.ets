@@ -381,5 +381,7 @@ export class RecService {
 
   static clearProfile(): void {
     RecProfile.clear();
+    // 画像已清空：旧画像算出的模型分不再成立，丢弃缓存（pick 时按空画像/新画像懒重算）。
+    RecService.modelScores.clear();
   }
 }

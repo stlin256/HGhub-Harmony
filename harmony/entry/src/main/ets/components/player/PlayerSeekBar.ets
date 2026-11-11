@@ -15,6 +15,11 @@ export struct PlayerSeekBar {
   onSeekStart: () => void = () => {};
   onSeekPreview: (ms: number) => void = () => {};
   onSeekEnd: (ms: number) => void = () => {};
+  /**
+   * 拖动被系统/手势打断（TouchType.Cancel）：只通知父组件复位「拖动浮层 + 暂停态」，不执行 seek。
+   * 缺少该回调时父组件的 dragging 会永久为 true、播放一直停在暂停，直到下一次拖动。
+   */
+  onSeekCancel: () => void = () => {};
 
   @State private trackWidth: number = 0;
   @State private dragging: boolean = false;
@@ -114,7 +119,11 @@ export struct PlayerSeekBar {
       this.dragging = false;
       this.onSeekEnd(target);
     } else if (event.type === TouchType.Cancel) {
+      if (!this.dragging) {
+        return;
+      }
       this.dragging = false;
+      this.onSeekCancel();
     }
   }
 

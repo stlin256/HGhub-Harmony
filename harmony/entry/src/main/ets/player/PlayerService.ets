@@ -8,6 +8,7 @@ import { UserPrefs } from '../state/UserPrefs';
 import { PlaybackLog } from './PlaybackLog';
 import { LocalProxy } from './LocalProxy';
 import { MediaPrefetch } from './MediaPrefetch';
+import { redactSensitive } from '../utils/Security';
 
 const HISTORY_INTERVAL_MS: number = 5000;
 const UI_INTERVAL_MS: number = 250;
@@ -524,13 +525,14 @@ export class PlayerService {
       // 播放器对「当前状态不支持的操作」（如 initialized 状态下设置倍速/音量/缩放/seek）也会抛 error 事件。
       // 这类瞬时错误不代表媒体不可播：忽略即可，避免误报"视频暂时无法播放"而必须手动重试。
       if (PlayerService.isTransientOperationError(code, raw)) {
-        PlaybackLog.warn('player.opError', 'code=' + code + ' ' + raw);
+        // 原始错误文本可能夹带带 auth_key/token 的媒体地址：先脱敏再落日志。
+        PlaybackLog.warn('player.opError', 'code=' + code + ' ' + redactSensitive(raw));
         return;
       }
       const message: string = PlayerService.friendlyError(code, raw);
       this.state = 'error';
       this.onState('error');
-      PlaybackLog.warn('player.error', 'code=' + code + ' ' + raw);
+      PlaybackLog.warn('player.error', 'code=' + code + ' ' + redactSensitive(raw));
       this.onError(message, code);
     });
   }

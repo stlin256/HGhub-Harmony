@@ -54,6 +54,8 @@ export class ImageCache {
   /** 内存 PixelMap 占用字节数（近似值，随 put/淘汰维护）。 */
   private static memoryBytes: number = 0;
   private static pruneScheduled: boolean = false;
+  /** 清理代次：clear() 时自增；代次变化后，旧代次的在途下载不得再写回内存/磁盘缓存。 */
+  private static generation: number = 0;
 
   /* ── 磁盘缓存 ─────────────────────────────────────── */
   private static dir(): string {
@@ -287,20 +289,23 @@ export class ImageCache {
     }
     const targetW: number = decodeWidth > 0 ? decodeWidth : DEFAULT_DECODE_W;
     const targetH: number = decodeHeight > 0 ? decodeHeight : DEFAULT_DECODE_H;
-    const task = ImageCache.fetchOrRestore(url, cacheKey, targetW, targetH);
+    const generation: number = ImageCache.generation;
+    const task = ImageCache.fetchOrRestore(url, cacheKey, targetW, targetH, generation);
     ImageCache.inflight.set(cacheKey, task);
     return task;
   }
 
   /** 先尝试磁盘明文缓存，未命中再走网络（密文）→ 解密 → 解码 → 写盘。 */
   private static async fetchOrRestore(url: string, cacheKey: string, targetW: number,
-    targetH: number): Promise<image.PixelMap | null> {
+    targetH: number, generation: number): Promise<image.PixelMap | null> {
     try {
       const plain = await ImageCache.readDisk(cacheKey);
       if (plain !== null) {
         const restored = await ImageCache.decode(plain, targetW, targetH);
         if (restored !== null) {
-          ImageCache.put(cacheKey, restored);
+          if (generation === ImageCache.generation) {
+            ImageCache.put(cacheKey, restored);
+          }
           return restored;
         }
         // 磁盘文件损坏：删掉后回退网络。
@@ -322,11 +327,11 @@ export class ImageCache {
       }
     } catch (err) {
     }
-    return ImageCache.fetchAndDecode(url, cacheKey, targetW, targetH);
+    return ImageCache.fetchAndDecode(url, cacheKey, targetW, targetH, generation);
   }
 
   private static async fetchAndDecode(url: string, cacheKey: string, targetW: number,
-    targetH: number): Promise<image.PixelMap | null> {
+    targetH: number, generation: number): Promise<image.PixelMap | null> {
     const host = ImageCache.hostOf(url);
     await ImageCache.acquire();
     try {
@@ -346,10 +351,14 @@ export class ImageCache {
       const plain = new Uint8Array(buffer);
       const pixelMap = await ImageCache.decode(buffer, targetW, targetH);
       if (pixelMap !== null) {
-        ImageCache.put(cacheKey, pixelMap);
-        ImageCache.writeDisk(cacheKey, plain).then(() => {
-        }).catch(() => {
-        });
+        // 清理缓存后旧代次的在途下载仍在跑：只返回本次显示用的 PixelMap，不再写回内存/磁盘，
+        // 否则用户刚点「清理缓存」占用就立刻被填回来。
+        if (generation === ImageCache.generation) {
+          ImageCache.put(cacheKey, pixelMap);
+          ImageCache.writeDisk(cacheKey, plain).then(() => {
+          }).catch(() => {
+          });
+        }
         return pixelMap;
       }
       hilog.warn(0x0000, 'HGCover', 'pixelmap null host=%{public}s', host);
@@ -449,6 +458,8 @@ export class ImageCache {
 
   /** 清空内存 + 磁盘封面缓存（设置页「清理」按钮）。 */
   static clear(): void {
+    // 代次自增：让清理前发出的 downloads 完成时放弃写回缓存。
+    ImageCache.generation++;
     ImageCache.entries = [];
     ImageCache.memoryBytes = 0;
     ImageCache.inflight.clear();

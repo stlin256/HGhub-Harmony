@@ -1029,6 +1029,10 @@ export struct PlayerPage {
       ? Api.postLike(id, next)
       : Api.like(id, this.ep, next);
     request.catch((err: Object) => {
+      // 请求失败回滚：期间可能已滑到另一条视频（或用户又点了一次），此时改当前状态会把别的条目改错。
+      if (this.destroyed || this.currentId() !== id || this.liked !== next) {
+        return;
+      }
       this.liked = !next;
       this.likeCount = previousCount;
       UserPrefs.toggleLike(id);
@@ -1064,6 +1068,10 @@ export struct PlayerPage {
       ? Api.postCollect(id, next)
       : Api.collect(id, next);
     request.catch((err: Object) => {
+      // 同点赞：只在仍是同一条目、且状态没被后续点击改写时才回滚。
+      if (this.destroyed || this.currentId() !== id || this.faved !== next) {
+        return;
+      }
       this.faved = !next;
       this.collectCount = previousCount;
       UserPrefs.toggleFav(id);
@@ -2426,6 +2434,14 @@ export struct PlayerPage {
             this.dragging = false;
             this.service.seekTo(ms);
             this.positionMs = ms;
+            if (this.seekWasPlaying) {
+              this.service.play();
+            }
+            this.showChrome();
+          },
+          onSeekCancel: () => {
+            // 拖动被系统打断：不 seek，只把拖动浮层与「拖动前暂停」的状态恢复，避免卡在暂停/浮层常驻。
+            this.dragging = false;
             if (this.seekWasPlaying) {
               this.service.play();
             }

@@ -4,9 +4,13 @@ import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecDict } from '../recommend/RecDict';
+import { parseBoundedJson } from '../utils/Security';
 import { RecService } from '../recommend/RecService';
 import { RecDiagnostics } from '../recommend/RecTypes';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
+
+/** 剪贴板导入的画像 JSON 大小上限（画像最多 2000 条标签，64KB 足够且防止超大输入拖垮解析）。 */
+const PROFILE_JSON_MAX: number = 64 * 1024;
 
 /**
  * 推荐数据（二级页面）：本地画像呈现 + 导入 / 导出 / 清空（剪贴板 JSON，带格式版本，端侧不上传）。
@@ -75,6 +79,11 @@ export struct RecDataPage {
       const text: string = data.getPrimaryText();
       if (text === undefined || text === null || text.length === 0) {
         this.status = '剪贴板里没有可导入的推荐数据';
+        return;
+      }
+      // 剪贴板是不可信输入：先按大小上限 + 标准解析器校验，再交给画像导入（异常不回显原始内容）。
+      if (parseBoundedJson(text, PROFILE_JSON_MAX) === null) {
+        this.status = '导入失败：数据格式不正确';
         return;
       }
       const ok: boolean = RecService.importProfileJson(text);

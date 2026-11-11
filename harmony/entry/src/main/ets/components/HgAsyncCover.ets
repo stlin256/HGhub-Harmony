@@ -22,9 +22,15 @@ export struct HgAsyncCover {
   @State ready: boolean = false;
   @State failed: boolean = false;
   @State pulse: number = 1;
+  /** 组件已销毁：封面解码回调要在销毁后丢弃，避免对已卸载节点 setState。 */
+  private destroyed: boolean = false;
 
   aboutToAppear(): void {
     this.reload();
+  }
+
+  aboutToDisappear(): void {
+    this.destroyed = true;
   }
 
   onUrlChanged(): void {
@@ -35,7 +41,7 @@ export struct HgAsyncCover {
     this.ready = false;
     this.failed = false;
     this.pixmap = undefined;
-    if (this.url.length === 0) {
+    if (this.destroyed || this.url.length === 0) {
       return;
     }
     const cached = ImageCache.cached(this.url);
@@ -46,7 +52,7 @@ export struct HgAsyncCover {
     }
     const requestUrl = this.url;
     ImageCache.load(this.url, this.decodeWidth, this.decodeHeight).then((pixelMap: image.PixelMap | null) => {
-      if (this.url !== requestUrl) {
+      if (this.destroyed || this.url !== requestUrl) {
         return;
       }
       if (pixelMap !== null) {
@@ -55,6 +61,7 @@ export struct HgAsyncCover {
       } else {
         this.failed = true;
       }
+    }).catch(() => {
     });
   }
 
