@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0E1620"/>
+      <stop offset="1" stop-color="#0A0D12"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101A26"/>
+      <stop offset="1" stop-color="#0C121A"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="1200" rx="48" fill="url(#bg)"/>
+  <circle cx="760" cy="120" r="220" fill="#60CDFF" opacity="0.10"/>
+  <circle cx="120" cy="1080" r="240" fill="#60CDFF" opacity="0.06"/>
+
+  <text x="450" y="120" text-anchor="middle" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif"
+        font-size="52" font-weight="700" fill="#FFFFFF">推荐是怎么来的？</text>
+  <text x="450" y="176" text-anchor="middle" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif"
+        font-size="26" fill="#8FA6B8">一张图看懂，不需要懂技术</text>
+
+  <!-- 1 -->
+  <rect x="90" y="240" width="720" height="170" rx="28" fill="url(#card)" stroke="#60CDFF" stroke-opacity="0.35"/>
+  <circle cx="150" cy="325" r="34" fill="#60CDFF"/>
+  <text x="150" y="338" text-anchor="middle" font-family="HarmonyOS Sans SC, sans-serif" font-size="34" font-weight="700" fill="#003042">1</text>
+  <text x="220" y="312" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif" font-size="34" font-weight="700" fill="#FFFFFF">你看剧，它顺手记住</text>
+  <text x="220" y="360" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif" font-size="24" fill="#9CB2C4">收藏、点赞、播放、跳过 —— 都变成"偏好标签"</text>
+
+  <path d="M450 424 V 470" stroke="#60CDFF" stroke-width="4" stroke-linecap="round" stroke-dasharray="10 10" opacity="0.7"/>
+  <path d="M436 456 L450 474 L464 456" fill="none" stroke="#60CDFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 2 -->
+  <rect x="90" y="488" width="720" height="170" rx="28" fill="url(#card)" stroke="#60CDFF" stroke-opacity="0.35"/>
+  <circle cx="150" cy="573" r="34" fill="#60CDFF"/>
+  <text x="150" y="586" text-anchor="middle" font-family="HarmonyOS Sans SC, sans-serif" font-size="34" font-weight="700" fill="#003042">2</text>
+  <text x="220" y="560" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif" font-size="34" font-weight="700" fill="#FFFFFF">越用越懂你</text>
+  <text x="220" y="608" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif" font-size="24" fill="#9CB2C4">喜欢的权重慢慢积累，久不碰的会慢慢淡忘</text>
+
+  <path d="M450 672 V 718" stroke="#60CDFF" stroke-width="4" stroke-linecap="round" stroke-dasharray="10 10" opacity="0.7"/>
+  <path d="M436 704 L450 722 L464 704" fill="none" stroke="#60CDFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 3 -->
+  <rect x="90" y="736" width="720" height="170" rx="28" fill="url(#card)" stroke="#60CDFF" stroke-opacity="0.35"/>
+  <circle cx="150" cy="821" r="34" fill="#60CDFF"/>
+  <text x="150" y="834" text-anchor="middle" font-family="HarmonyOS Sans SC, sans-serif" font-size="34" font-weight="700" fill="#003042">3</text>
+  <text x="220" y="808" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif" font-size="34" font-weight="700" fill="#FFFFFF">手机上的小模型给每部剧打分</text>
+  <text x="220" y="856" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif" font-size="24" fill="#9CB2C4">端侧模型在本地推理：算你有多可能喜欢 · 不上传数据</text>
+
+  <path d="M450 920 V 966" stroke="#60CDFF" stroke-width="4" stroke-linecap="round" stroke-dasharray="10 10" opacity="0.7"/>
+  <path d="M436 952 L450 970 L464 952" fill="none" stroke="#60CDFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 4 -->
+  <rect x="90" y="984" width="720" height="130" rx="28" fill="url(#card)" stroke="#60CDFF" stroke-opacity="0.35"/>
+  <circle cx="150" cy="1049" r="34" fill="#60CDFF"/>
+  <text x="150" y="1062" text-anchor="middle" font-family="HarmonyOS Sans SC, sans-serif" font-size="34" font-weight="700" fill="#003042">4</text>
+  <text x="220" y="1032" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif" font-size="34" font-weight="700" fill="#FFFFFF">"换一批"按分数挑，也留一点惊喜</text>
+  <text x="220" y="1080" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif" font-size="24" fill="#9CB2C4">不是只推你看过的：保留 10% 随机探索</text>
+
+  <text x="450" y="1164" text-anchor="middle" font-family="HarmonyOS Sans SC, Noto Sans SC, sans-serif"
+        font-size="24" fill="#6C8496">全部在手机本地完成 · 断网也能用 · 不上传任何个人数据</text>
+</svg>
