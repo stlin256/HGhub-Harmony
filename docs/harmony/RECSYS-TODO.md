@@ -42,7 +42,8 @@
 - [x] 模型选型调研：`docs/harmony/RECSYS-MODEL-RESEARCH.md`
 - [x] `train-ranker.py`：两塔 MLP 训练 + 固定 batch 128 ONNX 导出
 - [x] `convert-ranker.ps1`：ONNX→.ms 转换（MinGW 运行时问题已解决）+ benchmark
-- [x] `ranker_v1.ms`（121 KB）随包；`RecModel.ets` 推理 + `RecService` 模型分数主排序
+- [x] `ranker_v2.ms`（174 KB）随包；`RecModel.ets` 推理 + `RecService` 模型分数主排序
+- [x] v2：标题/简介文本 3-gram 特征（128 维）+ 显式交互层，合成验证集 AUC 0.61 → 0.836
 - [x] 模型版本键 `rec_model_version` + 设置页诊断展示
 - [ ] 真实事件积累后做离线回放评估 / 模型迭代（P5）
 
