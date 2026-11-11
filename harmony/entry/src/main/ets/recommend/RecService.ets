@@ -8,6 +8,7 @@ import { RecProfile } from './RecProfile';
 import { RecDiagnostics, RecEvent, RecProfileEntry } from './RecTypes';
 import { RecSync } from './RecSync';
 import { RecMeta } from './RecMeta';
+import { RecStore } from './RecStore';
 
 /**
  * 推荐门面：初始化 / 采样 / 事件 / 诊断 / 同步。
@@ -63,7 +64,7 @@ export class RecService {
         dictOk = false;
       }
       const catalogOk: boolean = await RecCatalog.init();
-      RecProfile.load();
+      await RecProfile.loadAsync();
       RecService.ready = catalogOk;
       RecService.initing = false;
       RecService.inited = true;
@@ -229,6 +230,27 @@ export class RecService {
     RecProfile.record(event, id);
   }
 
+  /** 曝光事件（由列表可见性回调触发，调用方需去重）。 */
+  static recordImpression(id: number): void {
+    if (!RecService.ready || !RecService.enabled() || id <= 0) {
+      return;
+    }
+    RecProfile.record(RecEvent.IMPRESSION, id);
+  }
+
+  /** 搜索信号：搜索词 → 标签 → 画像 + RDB 事件。 */
+  static recordSearch(keyword: string): void {
+    if (!RecService.ready || !RecService.enabled() || keyword.length === 0) {
+      return;
+    }
+    const labels: number[] = RecDict.labelsFromText(keyword, '');
+    if (labels.length > 0) {
+      RecProfile.recordLabels(labels, 1.5, RecEvent.SEARCH);
+    } else {
+      RecStore.insertEvent(0, RecEvent.SEARCH, 0, 0, 0);
+    }
+  }
+
   static recordClick(id: number): void {
     RecService.record(RecEvent.CLICK, id);
   }
@@ -267,7 +289,10 @@ export class RecService {
       profileSize: RecProfile.size(),
       topTags: top,
       syncState: RecSync.status(),
-      lastSyncAt: RecSync.lastSyncAt()
+      lastSyncAt: RecSync.lastSyncAt(),
+      storeReady: RecStore.isReady(),
+      storeVersion: RecStore.schemaVersion(),
+      eventCount: RecStore.eventCountCached()
     };
   }
 

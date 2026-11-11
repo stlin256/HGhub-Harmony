@@ -372,6 +372,8 @@ export struct HomePage {
   private catalogInjectTimer: number = -1;
   /** 注入重试次数上限：RecService 载入失败时不要无限轮询。 */
   private catalogInjectAttempts: number = 0;
+  /** 本次会话已上报曝光的条目（避免滚动抖动重复计数）。 */
+  private impressedIds: Set<number> = new Set<number>();
   /* ── 随机池（仅「全部/为你推荐」feed 模式生效） ──────────────────────
    * pool 是按 id 去重的候选内容池；display（this.items）永远从 pool 里随机抽取。
    * 分类 Chip 模式仍走原来的顺序分页（page/pages），不与随机池混用。
@@ -828,6 +830,18 @@ export struct HomePage {
     this.scrollToTop();
     // 整表替换后立刻预取这一批封面（≤ 2 页）：首两屏直接命中内存/磁盘缓存，不出现「先白后亮」。
     this.prefetchCovers(list, list.length, 0);
+  }
+
+  /** 曝光去重上报（上限 500 条，超出清空重来，避免长会话内存膨胀）。 */
+  private recordImpression(id: number): void {
+    if (id <= 0 || this.impressedIds.has(id)) {
+      return;
+    }
+    if (this.impressedIds.size > 500) {
+      this.impressedIds.clear();
+    }
+    this.impressedIds.add(id);
+    RecService.recordImpression(id);
   }
 
   /** 从池里随机追加最多 n 条未展示项（触底加载），返回追加条数。 */
@@ -1791,6 +1805,12 @@ export struct HomePage {
               // 轻微纵向位移给整表替换一点方向感（动画结束复位为 0）。
               .opacity(this.listOpacity)
               .translate({ y: this.listOffset })
+              // 曝光事件：可见面积 ≥50% 时上报（去重，供画像/RDB 事件层使用）。
+              .onVisibleAreaChange([0.0, 0.5, 1.0], (isExpanding: boolean, ratio: number) => {
+                if (ratio >= 0.5) {
+                  this.recordImpression(item.id);
+                }
+              })
             }, (item: VideoCard) => item.id.toString())
 
             GridItem() {

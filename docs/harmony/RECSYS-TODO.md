@@ -32,10 +32,10 @@
 
 ## P1：RDB 与事件（M0 + M2）
 
-- [ ] `RecStore.ets`：relationalStore（items/events/profile/meta）+ preferences 迁移（幂等）
-- [ ] `EventLog.ets`：曝光/点击/播放/完播/收藏/快划（去抖）
-- [ ] 懒衰减 + 时段桶；最小样本阈值 + Wilson 下界
-- [ ] 设置页：清除推荐数据
+- [x] `RecStore.ets`：relationalStore（items/events/profile/meta）+ preferences 迁移（幂等）+ RdbStore.version/schema 版本
+- [x] 事件采集：曝光（可见≥50%去重）/点击/播放/完播/收藏/搜索（RDB events 表，时段桶）
+- [~] 懒衰减已实现；事件已带时段桶；最小样本阈值 + Wilson 下界待做（模型特征阶段一并处理）
+- [~] `RecProfile.clear()` 已实现（清画像+事件）；设置页入口待加
 
 ## P2：完整打标 + 池增长（M1 / M1.5）
 
