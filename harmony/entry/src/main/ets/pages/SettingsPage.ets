@@ -6,6 +6,9 @@ import { UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
+import { RecService } from '../recommend/RecService';
+import { RecDict } from '../recommend/RecDict';
+import { RecDiagnostics } from '../recommend/RecTypes';
 import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
 import { hostOf } from '../utils/Format';
 
@@ -168,6 +171,12 @@ export struct SettingsPage {
   @State historyCount: number = 0;
   @State searchHistCount: number = 0;
   @State lineHost: string = '';
+  /* ── 离线推荐（端侧，仅本地计算） ── */
+  @State recEnabled: boolean = true;
+  @State recInfo: string = '正在载入随包目录…';
+  @State recTop: string = '';
+  @State recBusy: boolean = false;
+  private recTimer: number = -1;
   @StorageProp(K_LINE_BASE) @Watch('onLineChanged') lineBase: string = '';
   @State checking: boolean = false;
   @State clearing: boolean = false;
@@ -197,6 +206,16 @@ export struct SettingsPage {
     this.historyCount = UserPrefs.history().length;
     this.searchHistCount = UserPrefs.searchHist().length;
     this.lineHost = hostOf(this.lineBase.length > 0 ? this.lineBase : Lines.current());
+    // 推荐诊断：RecService 异步载入，先渲染一次，1.5s 后再刷新（不阻塞页面）。
+    this.recEnabled = RecService.enabled();
+    this.refreshRecDiag();
+    if (this.recTimer >= 0) {
+      clearTimeout(this.recTimer);
+    }
+    this.recTimer = setTimeout(() => {
+      this.recTimer = -1;
+      this.refreshRecDiag();
+    }, 1500);
     // 分组首屏淡入（140ms）：首帧后触发，避免整页硬切。
     this.enterTimer = setTimeout(() => {
       this.enterTimer = -1;
@@ -215,6 +234,48 @@ export struct SettingsPage {
       clearTimeout(this.valueTimer);
       this.valueTimer = -1;
     }
+    if (this.recTimer >= 0) {
+      clearTimeout(this.recTimer);
+      this.recTimer = -1;
+    }
+  }
+
+  /** 刷新推荐诊断信息（目录/画像/同步状态 + Top 标签）。 */
+  private refreshRecDiag(): void {
+    const d: RecDiagnostics = RecService.diagnostics();
+    const syncText: string = d.syncState === 'running' ? '同步中' :
+      (d.syncState === 'done' ? '已同步' : (d.syncState === 'error' ? '同步失败' : '待同步'));
+    if (!d.ready) {
+      this.recInfo = '目录载入中…（' + syncText + '）';
+      this.recTop = '';
+      return;
+    }
+    this.recInfo = '目录 ' + d.catalogCount + ' 条（增量 ' + d.extraCount + '）· 画像 ' +
+      d.profileSize + ' 个标签 · ' + syncText;
+    if (d.topTags.length === 0) {
+      this.recTop = '画像为空：先去收藏/播放几部剧，推荐会逐步个性化';
+    } else {
+      const names: string[] = [];
+      for (let i = 0; i < d.topTags.length; i++) {
+        names.push(RecDict.tagName(d.topTags[i].tag));
+      }
+      this.recTop = '偏好：' + names.join('、');
+    }
+  }
+
+  /** 手动触发一次后台目录同步（忽略冷却）。 */
+  private syncRecCatalog(): void {
+    if (!RecService.enabled()) {
+      UiBus.toast('已关闭个性化推荐');
+      return;
+    }
+    this.recBusy = true;
+    this.recInfo = '正在同步目录…';
+    RecService.syncNow(true);
+    setTimeout(() => {
+      this.recBusy = false;
+      this.refreshRecDiag();
+    }, 2500);
   }
 
   /** 清理后数值变化的轻淡入：只做 140ms 淡入，不缩放/不位移，保持简洁。 */
@@ -648,6 +709,80 @@ export struct SettingsPage {
   }
 
   @Builder
+  RecGroup() {
+    Column() {
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.star'))
+        Column({ space: 2 }) {
+          Text('个性化推荐')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text('基于本地收藏 / 播放行为，端侧计算，不上传数据')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.recEnabled })
+          .selectedColor(HgColor.accent(this.dark))
+          .onChange((isOn: boolean) => {
+            this.recEnabled = isOn;
+            RecService.setEnabled(isOn);
+            if (isOn) {
+              RecService.syncNow(false);
+              UiBus.toastOk('已开启个性化推荐');
+            } else {
+              UiBus.toastOk('已关闭个性化推荐（回退随机/热门）');
+            }
+            this.refreshRecDiag();
+          })
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.arrow_clockwise'))
+        Column({ space: 2 }) {
+          Text('推荐诊断')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text(this.recInfo)
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(2)
+          if (this.recTop.length > 0) {
+            Text(this.recTop)
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.accent(this.dark))
+              .maxLines(2)
+          }
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Text(this.recBusy ? '同步中…' : '同步')
+          .fontSize(HgFont.caption)
+          .fontColor(HgColor.accent(this.dark))
+          .height(HgSize.hitTarget)
+          .padding({ left: HgSpace.s })
+          .onClick(() => {
+            this.syncRecCatalog();
+          })
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+    }
+    .width('100%')
+    .padding({ left: HgSpace.l, right: HgSpace.l })
+    .backgroundColor(HgColor.surface1(this.dark))
+    .borderRadius(HgRadius.group)
+  }
+
+  @Builder
   OtherGroup() {
     Column() {
       Row({ space: HgSpace.m }) {
@@ -738,6 +873,16 @@ export struct SettingsPage {
               Column() {
                 this.GroupTitle('网络')
                 this.NetworkGroup()
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+
+            ListItem() {
+              Column() {
+                this.GroupTitle('推荐')
+                this.RecGroup()
               }
               .width('100%')
               .alignItems(HorizontalAlign.Start)

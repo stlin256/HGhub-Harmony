@@ -8,6 +8,7 @@ import { HgEmptyState, HgSkeletonGrid } from '../components/HgCommon';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
+import { RecService } from '../recommend/RecService';
 import { K_LINE_BASE } from '../services/Lines';
 import { ImageCache } from '../services/ImageCache';
 import { K_APP_ACTIVE, K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
@@ -54,6 +55,9 @@ const PREFETCH_AHEAD_ROWS: number = 6;
 const SCROLL_WORK_DELAY: number = 60;
 /** 停止滚动多久后才允许重建 Hero（ms）：避免后台补池的 Hero 更新把 Grid 中途重排。 */
 const HERO_REFRESH_IDLE: number = 400;
+/** 随包目录注入：延迟多久尝试（等 RecService 异步载入）与一次并入多少条候选。 */
+const CATALOG_INJECT_DELAY: number = 1200;
+const CATALOG_INJECT_COUNT: number = 120;
 
 /** 品牌行图标按钮：自带按压反馈（120ms scale 0.88 + 透明度 0.6），热区保持 44vp。 */
 @Component
@@ -364,6 +368,10 @@ export struct HomePage {
   private batchAnimating: boolean = false;
   /** 当前持有卡片物性（opacity/offset）的替换动画序号：新一轮动画接管后，旧回调不得再改状态。 */
   private batchAnimSeq: number = 0;
+  /** 随包目录候选注入定时器（等 RecService 异步载入完成后再并入池）。 */
+  private catalogInjectTimer: number = -1;
+  /** 注入重试次数上限：RecService 载入失败时不要无限轮询。 */
+  private catalogInjectAttempts: number = 0;
   /* ── 随机池（仅「全部/为你推荐」feed 模式生效） ──────────────────────
    * pool 是按 id 去重的候选内容池；display（this.items）永远从 pool 里随机抽取。
    * 分类 Chip 模式仍走原来的顺序分页（page/pages），不与随机池混用。
@@ -401,6 +409,7 @@ export struct HomePage {
     // 页面重新出现（Tab 切回）时恢复可写状态：否则后台补池/淡入动效会被当成已销毁而永久停摆。
     this.pageGone = false;
     this.reload();
+    this.scheduleCatalogInject();
   }
 
   aboutToDisappear(): void {
@@ -415,6 +424,42 @@ export struct HomePage {
       clearTimeout(this.heroRefreshTimer);
       this.heroRefreshTimer = -1;
     }
+    if (this.catalogInjectTimer >= 0) {
+      clearTimeout(this.catalogInjectTimer);
+      this.catalogInjectTimer = -1;
+    }
+  }
+
+  /**
+   * 随包目录注入：RecService 异步载入 3,388 条目录后，按画像采样一批候选并入 pool。
+   * 这样"为你推荐"不再只受 feed 分页速度限制，安装即有足够候选（且封面可直接下载）。
+   */
+  private scheduleCatalogInject(): void {
+    if (this.catalogInjectTimer >= 0) {
+      clearTimeout(this.catalogInjectTimer);
+    }
+    this.catalogInjectTimer = setTimeout(() => {
+      this.catalogInjectTimer = -1;
+      if (this.pageGone || !this.feedMode()) {
+        return;
+      }
+      if (!RecService.isReady()) {
+        this.catalogInjectAttempts++;
+        if (this.catalogInjectAttempts <= 20) {
+          this.scheduleCatalogInject();
+        }
+        return;
+      }
+      const cards: VideoCard[] = RecService.pick(RecService.catalogCards(), CATALOG_INJECT_COUNT);
+      if (cards.length === 0) {
+        return;
+      }
+      const added: VideoCard[] = this.addToPool(cards);
+      if (added.length > 0) {
+        this.refreshHero();
+      }
+      // 池已不再是"只有 feed 前几页"：把池标记为可持续（finished 由后续 feed 进度决定）。
+    }, CATALOG_INJECT_DELAY);
   }
 
   /**
@@ -602,6 +647,32 @@ export struct HomePage {
     return out;
   }
 
+  /**
+   * 个性化取 n 条：优先用 RecService 的画像加权采样；不足时用随机池补齐。
+   * RecService 未就绪/画像为空时会自动退化为随机，保证首页永远可用。
+   */
+  private personalizedTake(list: VideoCard[], n: number): VideoCard[] {
+    if (n <= 0 || list.length === 0) {
+      return [];
+    }
+    const picked: VideoCard[] = RecService.pick(list, n);
+    if (picked.length >= n || picked.length >= list.length) {
+      return this.takeFirst(picked, n);
+    }
+    const taken: Set<number> = new Set<number>();
+    for (let i = 0; i < picked.length; i++) {
+      taken.add(picked[i].id);
+    }
+    const rest: VideoCard[] = [];
+    for (let i = 0; i < list.length; i++) {
+      if (!taken.has(list[i].id)) {
+        rest.push(list[i]);
+      }
+    }
+    const extra: VideoCard[] = this.takeFirst(this.shuffled(rest), n - picked.length);
+    return picked.concat(extra);
+  }
+
   /** 取前 n 条（Hero / 随机截断用）。 */
   private takeFirst(list: VideoCard[], n: number): VideoCard[] {
     const out: VideoCard[] = [];
@@ -685,7 +756,7 @@ export struct HomePage {
     this.displaySeq++;
     this.listOffset = 0;
     this.listOpacity = 1;
-    const list: VideoCard[] = this.takeFirst(this.shuffled(this.pool), limit);
+    const list: VideoCard[] = this.personalizedTake(this.pool, limit);
     this.applyDisplayList(list);
   }
 
@@ -698,7 +769,7 @@ export struct HomePage {
     if (this.batchAnimating) {
       return;
     }
-    const list: VideoCard[] = this.takeFirst(this.shuffled(this.pool), limit);
+    const list: VideoCard[] = this.personalizedTake(this.pool, limit);
     if (list.length === 0) {
       return;
     }
@@ -788,7 +859,7 @@ export struct HomePage {
           rest.push(this.pool[i]);
         }
       }
-      const extra: VideoCard[] = this.takeFirst(this.shuffled(rest), n - add.length);
+      const extra: VideoCard[] = this.personalizedTake(rest, n - add.length);
       for (let i = 0; i < extra.length; i++) {
         add.push(extra[i]);
       }
@@ -828,7 +899,7 @@ export struct HomePage {
     if (rest.length === 0) {
       return;
     }
-    this.pendingBatch = this.takeFirst(this.shuffled(rest), PAGE_SIZE);
+    this.pendingBatch = this.personalizedTake(rest, PAGE_SIZE);
     this.prefetchCovers(this.pendingBatch, this.pendingBatch.length, 0);
   }
 
@@ -1424,6 +1495,8 @@ export struct HomePage {
     if (this.switching || index < 0 || index >= this.items.length) {
       return;
     }
+    // 点击事件 → 本地画像（离线推荐信号）。
+    RecService.recordClick(this.items[index].id);
     const ids: number[] = [];
     for (let i = 0; i < this.items.length; i++) {
       ids.push(this.items[i].id);
