@@ -1,5 +1,6 @@
 import { JSON } from '@kit.ArkTS';
 import { DictEntry, RecRawDict } from './RecTypes';
+import { RecMeta } from './RecMeta';
 
 /**
  * 标签词典：genre_dict.json 的只读封装。
@@ -61,6 +62,7 @@ export class RecDict {
       }
       RecDict.stopwords = raw.stopwords === undefined || raw.stopwords === null ? [] : raw.stopwords;
       RecDict.version = raw.version === undefined || raw.version === null ? '' : raw.version;
+      RecMeta.setDictVersion(RecDict.version);
       RecDict.loaded = entries.length > 0;
       return RecDict.loaded;
     } catch (err) {

@@ -5,6 +5,7 @@ import { AppContext } from '../services/AppContext';
 import { VideoCard } from '../models/Types';
 import { CatalogItem, RecExtraFile, RecRawFull } from './RecTypes';
 import { RecDict } from './RecDict';
+import { RecMeta } from './RecMeta';
 
 /**
  * 本地目录池：随包全量目录（3,388 条）+ 后台同步增量。
@@ -49,10 +50,17 @@ export class RecCatalog {
       if (!AppContext.isReady()) {
         return false;
       }
+      // 数据系统版本检查：schema 迁移只做兼容，不清空画像/增量目录。
+      RecMeta.ensure();
       const bytes: Uint8Array = await AppContext.abilityContext()
         .resourceManager.getRawFileContent('recommend/catalog_full.json');
       const text: string = new util.TextDecoder('utf-8').decodeToString(bytes);
       RecCatalog.parsePack(text);
+      const prevPack: string = RecMeta.packVersion();
+      if (prevPack !== RecCatalog.packVersion) {
+        // 随包目录升级：只记录版本，增量目录与画像不受影响（合并时增量优先）。
+        RecMeta.setPackVersion(RecCatalog.packVersion);
+      }
       RecCatalog.extraPath = AppContext.abilityContext().filesDir + '/recsys/catalog_extra.json';
       RecCatalog.loadExtras();
       RecCatalog.rebuild();
@@ -125,13 +133,19 @@ export class RecCatalog {
       fileIo.closeSync(file);
       const text: string = new util.TextDecoder('utf-8').decodeToString(new Uint8Array(buffer));
       const parsed = JSON.parse(text) as RecExtraFile;
+      const oldSchema: number = parsed.schema === undefined || parsed.schema === null ? 0 : parsed.schema;
+      if (oldSchema < RecMeta.EXTRA_SCHEMA) {
+        // 增量目录 schema 升级：先备份旧文件，再逐条补齐新字段（不丢已有条目）。
+        RecMeta.backupFile(RecCatalog.extraPath, 'schema' + oldSchema);
+      }
       const list: CatalogItem[] = parsed.items === undefined || parsed.items === null ? [] : parsed.items;
       for (let i = 0; i < list.length; i++) {
         const item: CatalogItem = list[i];
         if (item !== undefined && item !== null && item.id > 0) {
-          extra.set(item.id, item);
+          extra.set(item.id, RecCatalog.normalizeItem(item));
         }
       }
+      RecMeta.setExtraSchema(RecMeta.EXTRA_SCHEMA);
     } catch (err) {
     }
     RecCatalog.extraItems = extra;
@@ -162,7 +176,13 @@ export class RecCatalog {
       RecCatalog.extraItems.forEach((item: CatalogItem) => {
         list.push(item);
       });
-      const payload: RecExtraFile = { version: 1, updated: Date.now(), items: list };
+      const payload: RecExtraFile = {
+        version: 1,
+        schema: RecMeta.EXTRA_SCHEMA,
+        basePack: RecCatalog.packVersion,
+        updated: Date.now(),
+        items: list
+      };
       const text: string = JSON.stringify(payload);
       const file: fileIo.File = fileIo.openSync(RecCatalog.extraPath,
         fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
@@ -231,6 +251,24 @@ export class RecCatalog {
       new_at: item.lastEp
     };
     return card;
+  }
+
+  /** 兼容旧 schema 的增量条目：缺字段补默认值，保证升级后旧增量仍可用。 */
+  private static normalizeItem(item: CatalogItem): CatalogItem {
+    return {
+      id: item.id,
+      title: item.title === undefined || item.title === null ? '' : item.title,
+      cover: item.cover === undefined || item.cover === null ? '' : item.cover,
+      labels: item.labels === undefined || item.labels === null ? [] : item.labels,
+      pop: item.pop === undefined || item.pop === null ? 0.5 : item.pop,
+      cate: item.cate === undefined || item.cate === null ? -1 : item.cate,
+      eps: item.eps === undefined || item.eps === null ? 0 : item.eps,
+      score: item.score === undefined || item.score === null ? 0 : item.score,
+      hot: item.hot === undefined || item.hot === null ? 0 : item.hot,
+      finished: item.finished === undefined || item.finished === null ? 0 : item.finished,
+      author: item.author === undefined || item.author === null ? '' : item.author,
+      lastEp: item.lastEp === undefined || item.lastEp === null ? 0 : item.lastEp
+    };
   }
 
   /**

@@ -3,8 +3,10 @@ import { Prefs } from '../services/Prefs';
 import { UserPrefs } from '../state/UserPrefs';
 import { RecCatalog } from './RecCatalog';
 import { RecEvent, RecProfileEntry } from './RecTypes';
+import { RecMeta } from './RecMeta';
 
 interface ProfileFile {
+  v?: number;
   at: number;
   w: number[][];
 }
@@ -40,6 +42,12 @@ export class RecProfile {
       const text: string = Prefs.getString(RecProfile.KEY, '');
       if (text.length > 0) {
         const parsed = JSON.parse(text) as ProfileFile;
+        const oldSchema: number = parsed.v === undefined || parsed.v === null ? 0 : parsed.v;
+        // 升级迁移：旧画像格式先备份，再按当前 schema 兼容读取；权重一条不丢。
+        if (oldSchema < RecMeta.PROFILE_SCHEMA) {
+          RecMeta.backupText('profile', text, 'v' + oldSchema);
+        }
+        RecMeta.setProfileSchema(RecMeta.PROFILE_SCHEMA);
         RecProfile.at = parsed.at === undefined || parsed.at === null ? 0 : parsed.at;
         const rows: number[][] = parsed.w === undefined || parsed.w === null ? [] : parsed.w;
         const weights: Map<number, number> = new Map<number, number>();
@@ -209,7 +217,7 @@ export class RecProfile {
       RecProfile.weights.forEach((weight: number, tag: number) => {
         rows.push([tag, Math.round(weight * 1000) / 1000]);
       });
-      const payload: ProfileFile = { at: RecProfile.at, w: rows };
+      const payload: ProfileFile = { v: RecMeta.PROFILE_SCHEMA, at: RecProfile.at, w: rows };
       Prefs.putString(RecProfile.KEY, JSON.stringify(payload));
     } catch (err) {
     }

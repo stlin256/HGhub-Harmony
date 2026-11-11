@@ -7,6 +7,7 @@ import { RecDict } from './RecDict';
 import { RecProfile } from './RecProfile';
 import { RecDiagnostics, RecEvent, RecProfileEntry } from './RecTypes';
 import { RecSync } from './RecSync';
+import { RecMeta } from './RecMeta';
 
 /**
  * 推荐门面：初始化 / 采样 / 事件 / 诊断 / 同步。
@@ -51,6 +52,7 @@ export class RecService {
         RecService.initing = false;
         return;
       }
+      RecMeta.ensure();
       let dictOk: boolean = false;
       try {
         const bytes: Uint8Array = await AppContext.abilityContext()
@@ -256,6 +258,10 @@ export class RecService {
     return {
       ready: RecService.ready,
       packVersion: RecCatalog.version(),
+      dictVersion: RecDict.dictVersion(),
+      schemaVersion: RecMeta.schema(),
+      profileSchema: RecMeta.profileSchema(),
+      extraSchema: RecMeta.EXTRA_SCHEMA,
       catalogCount: RecCatalog.count(),
       extraCount: RecCatalog.extraCount(),
       profileSize: RecProfile.size(),
