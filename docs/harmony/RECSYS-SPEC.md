@@ -34,10 +34,12 @@
 
 | 资产 | 大小 | 处理 |
 |---|---|---|
-| `catalog_pack.json` | 183 KB | **随包**（`rawfile/recommend/`），启动异步载入，作为冷启动基座 |
+| `catalog_full.json` | **602 KB** | **随包**（`rawfile/recommend/`），由 `build-catalog.py` 从 catalog_index 提取：id/标题/封面(去签名)/标签/热度/分类/集数/评分/作者/更新时间；安装即有，避免每个用户首启抓取 |
 | `genre_dict.json` | 26 KB | **随包**，标签词典（直采 + 关键词匹配） |
 | `catalog_index.json` / `corpus_full.jsonl` | 1.3MB / 3.9MB | 不随包、不提交（开发分析用） |
 
+> 随包目录已经覆盖全站公开目录，后台同步只做"增量 + 热度刷新"，不再是首启必需。
+>
 **后台目录同步（RecSync）**：
 
 | 项 | 规则 |
