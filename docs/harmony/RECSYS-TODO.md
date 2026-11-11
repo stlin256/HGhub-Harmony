@@ -37,6 +37,15 @@
 - [~] 懒衰减已实现；事件已带时段桶；最小样本阈值 + Wilson 下界待做（模型特征阶段一并处理）
 - [~] `RecProfile.clear()` 已实现（清画像+事件）；设置页入口待加
 
+## P1.5：端侧模型（路线 B，已完成首版）
+
+- [x] 模型选型调研：`docs/harmony/RECSYS-MODEL-RESEARCH.md`
+- [x] `train-ranker.py`：两塔 MLP 训练 + 固定 batch 128 ONNX 导出
+- [x] `convert-ranker.ps1`：ONNX→.ms 转换（MinGW 运行时问题已解决）+ benchmark
+- [x] `ranker_v1.ms`（121 KB）随包；`RecModel.ets` 推理 + `RecService` 模型分数主排序
+- [x] 模型版本键 `rec_model_version` + 设置页诊断展示
+- [ ] 真实事件积累后做离线回放评估 / 模型迭代（P5）
+
 ## P2：完整打标 + 池增长（M1 / M1.5）
 
 - [ ] `LabelDict.ets`：AC 自动机 + 停用词 + 形式规则
