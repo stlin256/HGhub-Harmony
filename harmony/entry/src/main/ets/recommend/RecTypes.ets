@@ -45,6 +45,9 @@ export interface RecDiagnostics {
   storeReady: boolean;
   storeVersion: number;
   eventCount: number;
+  modelReady: boolean;
+  modelVersion: string;
+  modelScored: number;
 }
 
 /** 随包目录结构（数组优先，体积小）。 */

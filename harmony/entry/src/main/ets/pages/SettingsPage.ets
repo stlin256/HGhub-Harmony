@@ -252,8 +252,9 @@ export struct SettingsPage {
     }
     const packText: string = d.packVersion.length > 0 ? d.packVersion : '未标注';
     const storeText: string = d.storeReady ? ('事件 ' + d.eventCount + ' · 库 v' + d.storeVersion) : '事件库未就绪';
+    const modelText: string = d.modelReady ? ('模型 ' + d.modelVersion + ' · 打分 ' + d.modelScored) : '模型未就绪（回退统计排序）';
     this.recInfo = '目录 ' + d.catalogCount + ' 条（增量 ' + d.extraCount + '）· 包 ' + packText +
-      ' · 画像 ' + d.profileSize + ' 标签 · ' + storeText + ' · schema v' + d.schemaVersion + ' · ' + syncText;
+      ' · 画像 ' + d.profileSize + ' 标签 · ' + storeText + ' · ' + modelText + ' · v' + d.schemaVersion + ' · ' + syncText;
     if (d.topTags.length === 0) {
       this.recTop = '画像为空：先去收藏/播放几部剧，推荐会逐步个性化';
     } else {
