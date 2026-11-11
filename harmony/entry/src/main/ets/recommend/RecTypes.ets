@@ -20,6 +20,8 @@ export interface CatalogItem {
   author: string;
   /** 最近更新集时间（秒级，可能为 0）。 */
   lastEp: number;
+  /** 简介（随包，用于端侧文本特征；截断 160 字）。 */
+  desc: string;
 }
 
 /** 画像条目（标签 id → 权重）。 */

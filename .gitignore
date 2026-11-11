@@ -43,5 +43,9 @@ scripts/harmony/.local/
 # API
 docs/API.md
 
+# Python（脚本缓存）
+__pycache__/
+*.pyc
+
 # Agent instructions (local)
 AGENTS.md

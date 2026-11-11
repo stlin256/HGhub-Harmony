@@ -6,6 +6,14 @@ import { RecEvent, RecProfileEntry } from './RecTypes';
 import { RecMeta } from './RecMeta';
 import { RecStore } from './RecStore';
 
+interface RecImportFile {
+  app?: string;
+  kind?: string;
+  format?: number;
+  exportedAt?: number;
+  profile?: number[][];
+}
+
 interface ProfileFile {
   v?: number;
   at: number;
@@ -228,6 +236,83 @@ export class RecProfile {
       result.push(out[i]);
     }
     return result;
+  }
+
+  /** 画像条目（tag, weight），供导出/展示；按权重降序。 */
+  static entries(): number[][] {
+    const rows: number[][] = [];
+    RecProfile.weights.forEach((weight: number, tag: number) => {
+      rows.push([tag, Math.round(weight * 1000) / 1000]);
+    });
+    rows.sort((a: number[], b: number[]) => b[1] - a[1]);
+    return rows;
+  }
+
+  /** 导出画像 JSON（带格式版本，便于跨设备/跨版本导入）。 */
+  static exportJson(): string {
+    const payload: string = JSON.stringify({
+      app: 'HGhub',
+      kind: 'rec-profile',
+      format: RecMeta.PROFILE_SCHEMA,
+      exportedAt: Date.now(),
+      profile: RecProfile.entries()
+    });
+    return payload;
+  }
+
+  /** 导入画像 JSON：校验格式版本与数值范围，整表替换（不碰事件/目录）。 */
+  static importJson(text: string): boolean {
+    try {
+      const raw = JSON.parse(text) as RecImportFile;
+      if (raw === undefined || raw === null) {
+        return false;
+      }
+      if (raw.kind !== undefined && raw.kind !== null && raw.kind !== 'rec-profile') {
+        return false;
+      }
+      if (raw.format !== undefined && raw.format !== null && raw.format > RecMeta.PROFILE_SCHEMA) {
+        return false;
+      }
+      const rows: number[][] = raw.profile === undefined || raw.profile === null ? [] : raw.profile;
+      const next: Map<number, number> = new Map<number, number>();
+      const clean: number[][] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const row: number[] = rows[i];
+        if (row === undefined || row === null || row.length < 2) {
+          continue;
+        }
+        const tag: number = Number(row[0]);
+        const weight: number = Number(row[1]);
+        if (!Number.isFinite(tag) || tag <= 0 || !Number.isFinite(weight)) {
+          continue;
+        }
+        let w: number = weight;
+        if (w > RecProfile.MAX) {
+          w = RecProfile.MAX;
+        }
+        if (w < RecProfile.MIN) {
+          w = RecProfile.MIN;
+        }
+        next.set(tag, w);
+        clean.push([tag, Math.round(w * 1000) / 1000]);
+        if (clean.length >= 2000) {
+          break;
+        }
+      }
+      if (clean.length === 0) {
+        return false;
+      }
+      RecProfile.weights = next;
+      RecProfile.at = Date.now();
+      RecMeta.setProfileSchema(RecMeta.PROFILE_SCHEMA);
+      Prefs.putBool(RecProfile.SEED_KEY, true);
+      RecProfile.saveNow();
+      RecStore.replaceProfile(clean);
+      RecProfile.loaded = true;
+      return true;
+    } catch (err) {
+      return false;
+    }
   }
 
   static clear(): void {

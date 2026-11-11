@@ -1,4 +1,5 @@
 import { util } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from '../services/AppContext';
 import { Prefs } from '../services/Prefs';
 import { VideoCard } from '../models/Types';
@@ -71,6 +72,8 @@ export class RecService {
       await RecProfile.loadAsync();
       // 端侧模型：加载 .ms 并预热全量目录打分（异步，不阻塞首屏）。
       const modelOk: boolean = await RecModel.init();
+      hilog.info(0x0000, 'HGRec', 'init catalog=%{public}s model=%{public}s',
+        catalogOk ? 'ok' : 'fail', modelOk ? 'ok' : 'fail');
       if (modelOk) {
         RecMeta.setModelVersion(RecModel.modelVersion());
         RecService.warmScores(RecCatalog.cards());
@@ -294,9 +297,38 @@ export class RecService {
       for (let i = 0; i < todo.length && i < scores.length; i++) {
         RecService.modelScores.set(todo[i].id, scores[i]);
       }
+      hilog.info(0x0000, 'HGRec', 'warm scores batch=%{public}d scored=%{public}d',
+        todo.length, RecService.modelScores.size);
     }).catch((err: Object) => {
       RecService.scoring = false;
+      hilog.warn(0x0000, 'HGRec', 'warm scores failed: %{public}s', JSON.stringify(err));
     });
+  }
+
+  /** 画像导出（JSON，含格式版本）。 */
+  static exportProfileJson(): string {
+    return RecProfile.exportJson();
+  }
+
+  /** 画像导入：成功后清空模型分数缓存并后台重算。 */
+  static importProfileJson(text: string): boolean {
+    const ok: boolean = RecProfile.importJson(text);
+    if (ok) {
+      RecService.refreshModelScores();
+    }
+    return ok;
+  }
+
+  static profileEntries(): number[][] {
+    return RecProfile.entries();
+  }
+
+  /** 画像变化后重算模型分数（幂等，异步）。 */
+  static refreshModelScores(): void {
+    RecService.modelScores.clear();
+    if (RecModel.isReady()) {
+      RecService.warmScores(RecCatalog.cards());
+    }
   }
 
   static recordClick(id: number): void {

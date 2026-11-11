@@ -108,7 +108,8 @@ export class RecCatalog {
         hot: row.length > 8 ? Number(row[8]) : 0,
         finished: row.length > 9 ? Number(row[9]) : 0,
         author: row.length > 10 ? String(row[10]) : '',
-        lastEp: row.length > 11 ? Number(row[11]) : 0
+        lastEp: row.length > 11 ? Number(row[11]) : 0,
+        desc: row.length > 12 ? String(row[12]) : ''
       };
       pack.set(item.id, item);
     }
@@ -267,7 +268,8 @@ export class RecCatalog {
       hot: item.hot === undefined || item.hot === null ? 0 : item.hot,
       finished: item.finished === undefined || item.finished === null ? 0 : item.finished,
       author: item.author === undefined || item.author === null ? '' : item.author,
-      lastEp: item.lastEp === undefined || item.lastEp === null ? 0 : item.lastEp
+      lastEp: item.lastEp === undefined || item.lastEp === null ? 0 : item.lastEp,
+      desc: item.desc === undefined || item.desc === null ? '' : item.desc
     };
   }
 
@@ -311,7 +313,8 @@ export class RecCatalog {
         hot: card.hot === undefined || card.hot === null ? 0 : card.hot,
         finished: card.is_finished === true ? 1 : 0,
         author: '',
-        lastEp: card.last_ep_at === undefined || card.last_ep_at === null ? 0 : card.last_ep_at
+        lastEp: card.last_ep_at === undefined || card.last_ep_at === null ? 0 : card.last_ep_at,
+        desc: card.description === undefined || card.description === null ? '' : card.description
       };
       if (!RecCatalog.all.has(card.id)) {
         added++;
