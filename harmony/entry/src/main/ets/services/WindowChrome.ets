@@ -15,6 +15,8 @@ const TAG: string = 'HGWnd';
 export class WindowChrome {
   /** 目标状态：true 表示隐藏状态栏。 */
   private static hidden: boolean = false;
+  /** 目标状态：true 表示播放中保持屏幕常亮（阻止系统自动熄屏）。 */
+  private static keepOn: boolean = false;
   private static queue: Promise<void> = Promise.resolve();
 
   /** 隐藏状态栏，只保留底部导航栏（手势条/三键导航）。幂等。 */
@@ -25,6 +27,35 @@ export class WindowChrome {
   /** 恢复状态栏 + 导航栏。离开播放页必须调用，避免状态栏停留在隐藏状态。 */
   static showStatusBar(): void {
     WindowChrome.apply(false);
+  }
+
+  /**
+   * 播放中保持屏幕常亮（阻止系统自动熄屏），暂停/结束/退后台/离开播放页时必须传 false 恢复。
+   * 幂等、fire-and-forget：内部与系统栏控制共用一条串行队列，只落下最终目标状态。
+   */
+  static setKeepScreenOn(on: boolean): void {
+    if (WindowChrome.keepOn === on) {
+      return;
+    }
+    WindowChrome.keepOn = on;
+    WindowChrome.queue = WindowChrome.queue.then((): Promise<void> => {
+      return WindowChrome.syncKeepOn();
+    }).catch(() => {
+    });
+  }
+
+  private static async syncKeepOn(): Promise<void> {
+    const on: boolean = WindowChrome.keepOn;
+    if (!AppContext.isReady()) {
+      return;
+    }
+    try {
+      const win: window.Window = await window.getLastWindow(AppContext.abilityContext());
+      await win.setWindowKeepScreenOn(on);
+      hilog.info(DOMAIN, TAG, 'keep screen on %{public}s', on ? 'on' : 'off');
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'keep screen on failed: %{public}s', JSON.stringify(err));
+    }
   }
 
   private static apply(hidden: boolean): void {

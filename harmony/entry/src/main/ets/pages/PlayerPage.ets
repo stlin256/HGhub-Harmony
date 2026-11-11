@@ -136,6 +136,8 @@ export struct PlayerPage {
   @State locked: boolean = false;
   /** 上下滑切条中视频层的 Y 位移（vp）：让正在播放的画面跟页面一起滑动，而不是固定不动。 */
   @State videoDragY: number = 0;
+  /** 加载占位缩略图层的 Y 位移（vp）：与视频层一起跟随手势，切页完成后回正显示新视频封面。 */
+  @State posterDragY: number = 0;
   /** 切集/换剧/换线重载中：底部进度条与时间淡出，避免 0:00 / 新时长瞬间跳变。 */
   @State progressSwitching: boolean = false;
   /** 倍速 chip 的轻微缩放脉冲（切换倍速/锁倍速时的过渡反馈）。 */
@@ -206,6 +208,10 @@ export struct PlayerPage {
   private pendingVideoSettle: boolean = false;
   /** videoDragY 兜底复位计时（Swiper 回调异常时 500ms 内回正，避免视频永久偏移）。 */
   private videoDragResetTimer: number = -1;
+  /** 本次上下滑手势开始时的页索引：把"一次手势跨多页"收敛为相邻一条（设计规范：一次手势切一条）。 */
+  private swipeStartIndex: number = -1;
+  /** 跨页收敛检查的延迟计时：等 Swiper 落定后再纠正，避免打断翻页动画。 */
+  private swipeClampTimer: number = -1;
   /** 倍速 chip 脉冲回弹计时。 */
   private ratePulseTimer: number = -1;
   /** 播放页不可见时发生线路切换：回到前台再重载，避免后台起播。 */
@@ -231,8 +237,10 @@ export struct PlayerPage {
       return;
     }
     if (!this.appActive) {
+      // 退到后台立即恢复正常熄屏策略（播放已暂停，不应继续占用常亮）。
       this.service.setActive(false);
       MediaPrefetch.pause();
+      this.syncKeepScreenOn();
       return;
     }
     if (this.pageShown) {
@@ -243,6 +251,7 @@ export struct PlayerPage {
         WindowChrome.hideStatusBar();
       }
     }
+    this.syncKeepScreenOn();
   }
 
   aboutToAppear(): void {
@@ -289,6 +298,8 @@ export struct PlayerPage {
   aboutToDisappear(): void {
     this.destroyed = true;
     WindowChrome.showStatusBar();
+    // 离开播放页恢复系统熄屏策略，避免整机一直常亮。
+    WindowChrome.setKeepScreenOn(false);
     this.clearAllTimers();
     this.detailCache.clear();
     this.metaPending.clear();
@@ -376,6 +387,7 @@ export struct PlayerPage {
       } else if (state === 'paused') {
         this.showChrome();
       }
+      this.syncKeepScreenOn();
     };
     this.service.onTime = (ms: number) => {
       this.positionMs = ms;
@@ -404,6 +416,7 @@ export struct PlayerPage {
       this.settleVideoDragAfterSwitch();
       this.errorText = message;
       this.showChrome();
+      this.syncKeepScreenOn();
     };
     this.service.onSeekDone = (ms: number) => {
       this.positionMs = ms;
@@ -442,6 +455,7 @@ export struct PlayerPage {
       clearTimeout(this.ratePulseTimer);
       this.ratePulseTimer = -1;
     }
+    this.clearSwipeClamp();
   }
 
   /* ── 数据 ─────────────────────────────────────────── */
@@ -540,10 +554,13 @@ export struct PlayerPage {
       this.fetchDetail(id, serial);
       this.playNow(id, point.ep, point.sec, force);
     }
+    // 当前页封面也立刻补一次：加载占位层在起播前就能显示正确封面，不用等详情接口回来。
+    this.loadCover(index);
     this.prefetchNeighbors();
     this.prefetchMeta();
     this.resetCommentPanelContext();
     this.showChrome();
+    this.syncKeepScreenOn();
   }
 
   private playNow(id: number, ep: number, sec: number, force: boolean): void {
@@ -843,8 +860,11 @@ export struct PlayerPage {
   }
 
   private prefetchNeighbors(): void {
+    // 预取前后各 2 条：快速连续上下滑时，相邻页占位不会因为封面还没回来而黑一块。
     this.loadCover(this.currentIndex + 1);
     this.loadCover(this.currentIndex - 1);
+    this.loadCover(this.currentIndex + 2);
+    this.loadCover(this.currentIndex - 2);
   }
 
   private loadCover(index: number): void {
@@ -970,6 +990,7 @@ export struct PlayerPage {
     this.ended = true;
     this.playing = false;
     this.showChrome();
+    this.syncKeepScreenOn();
   }
 
   private maybePrefetch(ms: number): void {
@@ -1499,6 +1520,9 @@ export struct PlayerPage {
       this.swipeAnimating = false;
       this.pendingVideoSettle = false;
       this.clearVideoDragReset();
+      this.clearSwipeClamp();
+      // 记录本次手势起点：松手后若被惯性带过多页，回正到相邻一条。
+      this.swipeStartIndex = this.currentIndex;
     }
     const limit: number = this.frameHeight();
     let dy: number = (extraInfo.currentOffset - this.swipeOffsetBase) * VIDEO_DRAG_SIGN;
@@ -1509,6 +1533,8 @@ export struct PlayerPage {
       dy = -limit;
     }
     this.videoDragY = dy;
+    // 加载占位缩略图与视频层同位移：拖动时不会出现"画面跟着滑、缩略图钉在原地"。
+    this.posterDragY = dy;
   }
 
   /** 松手后的翻页动画：视频层跟随页面继续滑出（下一页往负方向，上一页往正方向）。 */
@@ -1528,6 +1554,7 @@ export struct PlayerPage {
     this.pendingVideoSettle = false;
     animateTo({ duration: 260, curve: Curve.FastOutSlowIn }, () => {
       this.videoDragY = target;
+      this.posterDragY = target;
     });
     // 兜底：任何 Swiper 回调异常都在 500ms 内把视频层回正，避免永久偏移。
     this.scheduleVideoDragReset();
@@ -1544,11 +1571,13 @@ export struct PlayerPage {
       // 新视频在动画期间就 prepared 了：等滑到位再把视频层复位，避免滑到一半画面回正。
       this.pendingVideoSettle = false;
       this.settleVideoDragAfterSwitch();
+      this.scheduleSwipeClamp();
       return;
     }
     if (!this.swipeTargetChanged) {
       this.resetVideoDrag(140);
     }
+    this.scheduleSwipeClamp();
   }
 
   /** 新视频已 prepared（新的画面已可上屏）：视频层从滑出位置瞬时复位到基准位。 */
@@ -1561,6 +1590,8 @@ export struct PlayerPage {
     if (this.videoDragY !== 0) {
       this.videoDragY = 0;
     }
+    // 新页面已落定：缩略图层回正到屏幕中间，显示新视频封面（不再停留在滑出位置）。
+    this.posterDragY = 0;
   }
 
   /** 用 140ms 左右动画把视频层回正（滑到一半回弹等场景）。 */
@@ -1571,6 +1602,7 @@ export struct PlayerPage {
     }
     animateTo({ duration: duration, curve: Curve.FastOutSlowIn }, () => {
       this.videoDragY = 0;
+      this.posterDragY = 0;
     });
   }
 
@@ -1586,9 +1618,10 @@ export struct PlayerPage {
       this.swipeTargetChanged = false;
       this.swipeAnimating = false;
       this.pendingVideoSettle = false;
-      if (this.videoDragY !== 0) {
+      if (this.videoDragY !== 0 || this.posterDragY !== 0) {
         animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
           this.videoDragY = 0;
+          this.posterDragY = 0;
         });
       }
     }, 500);
@@ -1598,6 +1631,63 @@ export struct PlayerPage {
     if (this.videoDragResetTimer >= 0) {
       clearTimeout(this.videoDragResetTimer);
       this.videoDragResetTimer = -1;
+    }
+  }
+
+  /**
+   * 播放中保持屏幕常亮：覆盖起播/切剧/切集加载阶段；暂停、结束、报错、退后台、离开页面时恢复系统熄屏。
+   * 具体由 WindowChrome 串行下发（幂等，只落下最终目标状态）。
+   */
+  private syncKeepScreenOn(): void {
+    const on: boolean = !this.destroyed && this.pageShown && this.appActive &&
+      (this.playing || this.loading || this.starting) && this.errorText.length === 0;
+    WindowChrome.setKeepScreenOn(on);
+  }
+
+  private clearSwipeClamp(): void {
+    if (this.swipeClampTimer >= 0) {
+      clearTimeout(this.swipeClampTimer);
+      this.swipeClampTimer = -1;
+    }
+  }
+
+  /** 等 Swiper 落定后检查本次手势是否跨了多页（见 clampSwipeToAdjacent）。 */
+  private scheduleSwipeClamp(): void {
+    if (this.swipeStartIndex < 0 || this.swipeClampTimer >= 0) {
+      return;
+    }
+    this.swipeClampTimer = setTimeout(() => {
+      this.swipeClampTimer = -1;
+      this.clampSwipeToAdjacent();
+    }, 80);
+  }
+
+  /**
+   * 一次上下滑手势只允许切相邻一条：
+   * Swiper 在快速滑动/惯性下可能一次跨过 2 页以上（表现为"上下滑一下跑到别的视频"），
+   * 这里把落点回正到 start±1，并同步重新加载该条视频，保证切剧顺序稳定、跟手一致。
+   */
+  private clampSwipeToAdjacent(): void {
+    const start: number = this.swipeStartIndex;
+    this.swipeStartIndex = -1;
+    if (this.destroyed || start < 0 || this.ids.length === 0) {
+      return;
+    }
+    const delta: number = this.currentIndex - start;
+    if (delta <= 1 && delta >= -1) {
+      return;
+    }
+    const target: number = Math.max(0, Math.min(this.ids.length - 1, start + (delta > 0 ? 1 : -1)));
+    if (target === this.currentIndex) {
+      return;
+    }
+    PlaybackLog.info('swipe.clamp', 'start=' + start + ' landed=' + this.currentIndex + ' target=' + target);
+    this.currentIndex = target;
+    this.posterDragY = 0;
+    this.openVideo(target, false);
+    try {
+      this.swiperController.changeIndex(target, false);
+    } catch (err) {
     }
   }
 
@@ -2812,7 +2902,8 @@ export struct PlayerPage {
     .backgroundColor(HgColor.playerBackground)
     .opacity(this.starting || this.loading || this.errorText.length > 0 ? 1 : 0)
     .animation({ duration: 220, curve: Curve.FastOutSlowIn })
-    // 注意：海报占位层不跟随滑动位移（它负责加载/切页时盖住视频区，保持在基准位，避免切页后新封面被带出屏幕）。
+    // 与视频层同步位移：上下滑时封面缩略图跟着页面一起走；切页落定后由 posterDragY=0 回正显示新封面。
+    .translate({ y: this.posterDragY })
     .hitTestBehavior(HitTestMode.None)
   }
 
@@ -3104,13 +3195,18 @@ export struct PlayerPage {
           if (this.destroyed || index === this.currentIndex || index < 0 || index >= this.ids.length) {
             return;
           }
+          PlaybackLog.info('swipe.change', 'from=' + this.currentIndex + ' to=' + index + ' total=' + this.ids.length);
           this.currentIndex = index;
           this.haptic(8);
+          // 页面已落定：缩略图层回到屏幕中间，用新视频封面盖住起播前的空白。
+          this.posterDragY = 0;
           this.openVideo(index, false);
           // 切页成功：视频层保持滑出屏幕，等新视频 prepared 后由 settleVideoDragAfterSwitch 复位。
           this.swipeTargetChanged = true;
           this.swipeSessionActive = false;
           this.scheduleVideoDragReset();
+          // 惯性可能带过多页：等落定后收敛到相邻一条，保证上下滑"一次一条"。
+          this.scheduleSwipeClamp();
         })
         // 宽屏评论侧栏打开时 Swiper 收窄为左侧视频区：手势/上下滑切条只在视频区生效，
         // chrome 也随之排在视频区内（侧栏外不会被误触）。
@@ -3182,6 +3278,7 @@ export struct PlayerPage {
       }
       this.service.setActive(this.appActive);
       MediaPrefetch.resume();
+      this.syncKeepScreenOn();
       if (this.pendingLineReload || (this.loadedBase.length > 0 && Lines.current() !== this.loadedBase)) {
         this.applyLineSwitch(Lines.current());
         return;
@@ -3191,6 +3288,7 @@ export struct PlayerPage {
     .onHidden(() => {
       this.pageShown = false;
       WindowChrome.showStatusBar();
+      WindowChrome.setKeepScreenOn(false);
       this.service.setActive(false);
       MediaPrefetch.pause();
     })
