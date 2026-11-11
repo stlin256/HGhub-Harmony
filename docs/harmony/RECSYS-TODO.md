@@ -7,13 +7,14 @@
 ## P0：本期实施（池优先 + 静默同步）
 
 - [x] 编写 SPEC 与 TODO
-- [x] 资源落包：`rawfile/recommend/catalog_pack.json`、`genre_dict.json`
-- [ ] `recommend/RecTypes.ets`
-- [ ] `recommend/RecDict.ets`：词典载入、标签名/别名、关键词最小打标
-- [ ] `recommend/RecCatalog.ets`：预置包载入 + 增量目录合并、id→labels/pop/eps、by_tag、持久化
-- [ ] `recommend/RecProfile.ets`：画像、指数衰减（τ=7d）、种子（收藏/点赞/历史）、防抖持久化
-- [ ] `recommend/RecService.ets`：init / pick / record* / diagnostics / syncNow
-- [ ] `recommend/RecSync.ets`：后台串行目录同步（feed 前 N 页 + 4 分类），限速、单次上限、冷却、可关
+- [x] 资源落包：`rawfile/recommend/catalog_full.json`（602KB，随包全量目录）、`genre_dict.json`
+- [x] `scripts/harmony/build-catalog.py`：从 catalog_index 生成随包目录（可复现）
+- [x] `recommend/RecTypes.ets`
+- [x] `recommend/RecDict.ets`：词典载入、标签名/别名、关键词最小打标
+- [x] `recommend/RecCatalog.ets`：随包全量目录 + 增量合并、id→labels/pop/eps、VideoCard 候选、持久化
+- [x] `recommend/RecProfile.ets`：画像、指数衰减（τ=7d）、种子（收藏/点赞/历史）、防抖持久化
+- [x] `recommend/RecService.ets`：init / pick（加权采样）/ record* / diagnostics / syncNow
+- [x] `recommend/RecSync.ets`：后台串行目录同步（feed 前 3 页 + 4 分类），1.2s 限速、单次 ≤60、6h 冷却、可关
 - [ ] HomePage：`shuffled(pool)` → `RecService.pick(pool, n)`（启动/换一批/刷新/触底/预挑）
 - [ ] HomePage：点击事件
 - [ ] PlayerPage：播放开始/完播/收藏事件
