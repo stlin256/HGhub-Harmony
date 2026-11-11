@@ -1,6 +1,7 @@
 import { HgAsyncCover } from '../HgAsyncCover';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSpace } from '../../design/HgTokens';
 import { Api } from '../../services/Api';
+import { parseWebUrl } from '../../utils/Security';
 
 /** 正文里的一段行内文本（支持加粗/斜体/链接）。 */
 export class HgInline {
@@ -52,37 +53,36 @@ function decodeEntities(raw: string): string {
 }
 
 /** 相对地址补全为 HTTPS 绝对地址；非法/内网/非 http(s) 一律拒绝。 */
+/**
+ * 正文里的相对链接绝对化 + 外部链接合法性判定。
+ *
+ * 安全策略不手写正则/前缀：scheme/host/账号信息全部交给平台 URL 解析器（utils/Security.parseWebUrl，
+ * 内部用 @ohos.url）判断，只保留一条产品规则——不把本机回环地址（本地播放代理/调试端口）
+ * 作为评论/正文学外链带出去。
+ */
 function absolutize(raw: string, base: string): string {
   const text = raw.trim();
   if (text.length === 0) {
     return '';
   }
-  let url = text;
-  if (url.startsWith('//')) {
-    url = 'https:' + url;
-  } else if (url.startsWith('/')) {
-    url = base + url;
-  } else if (!url.startsWith('http://') && !url.startsWith('https://')) {
+  let absolute = text;
+  if (absolute.startsWith('//')) {
+    absolute = 'https:' + absolute;
+  } else if (absolute.startsWith('/')) {
+    absolute = base + absolute;
+  }
+  const parsed = parseWebUrl(absolute);
+  if (parsed === null) {
     return '';
   }
-  if (!url.startsWith('https://') && !url.startsWith('http://')) {
+  if (parsed.username.length > 0 || parsed.password.length > 0) {
     return '';
   }
-  if (url.indexOf('@') >= 0 && url.indexOf('@') < url.indexOf('/')) {
+  const host: string = parsed.hostname.toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
     return '';
   }
-  const hostStart = url.indexOf('://') + 3;
-  const rest = url.substring(hostStart);
-  const slash = rest.indexOf('/');
-  const host = (slash >= 0 ? rest.substring(0, slash) : rest).toLowerCase();
-  if (host.length === 0) {
-    return '';
-  }
-  if (host === 'localhost' || host.endsWith('.local') || host === '127.0.0.1' ||
-    host.startsWith('10.') || host.startsWith('192.168.') || host.startsWith('169.254.')) {
-    return '';
-  }
-  return url;
+  return parsed.href;
 }
 
 function attrOf(tag: string, name: string): string {
