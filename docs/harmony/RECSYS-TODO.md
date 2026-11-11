@@ -22,6 +22,14 @@
 - [x] SettingsPage：推荐开关 + 诊断（目录数/画像数/Top标签/同步状态/手动同步）
 - [~] 编译通过（BUILD SUCCESSFUL）；真机冒烟待设备恢复连接
 
+## P0.5：数据版本与无损迁移
+
+- [x] `RecMeta.ets`：schema/字典/目录包/画像/增量版本键 + 迁移前备份
+- [x] 随包目录版本记录（`rec_pack_version`），换包不清增量
+- [x] 增量目录文件带 `schema/basePack`，旧 schema 备份 + 补默认字段
+- [x] 画像文件带 `v`，旧格式备份后兼容读取
+- [x] 设置诊断展示包/schema 版本
+
 ## P1：RDB 与事件（M0 + M2）
 
 - [ ] `RecStore.ets`：relationalStore（items/events/profile/meta）+ preferences 迁移（幂等）

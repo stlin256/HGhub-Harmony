@@ -117,7 +117,24 @@ jitter  = Math.random()
 | 预置包解析耗时 | 180 KB 首帧后异步；失败降级 |
 | 信息茧房 | 10% jitter + 后续 MMR/探索 |
 
-## 9. 实施顺序（详见 TODO）
+## 9. 数据版本与无损迁移
+
+所有推荐数据系统都带版本号，升级 App 时只做兼容迁移，**不清空画像/增量目录**：
+
+| 数据 | 版本 key | 迁移策略 |
+|---|---|---|
+| 推荐整体 schema | `rec_meta_schema` | 递增迁移；在此按版本追加分支 |
+| 随包目录 | `rec_pack_schema` / `rec_pack_version` | 换包只替换基座，保留增量；合并时增量优先，不删除增量条目 |
+| 增量目录 | `rec_extra_schema`（文件内 `schema`/`basePack`） | 旧 schema 先备份为 `*.bak`，逐条补默认字段后继续使用 |
+| 标签词典 | `rec_dict_version` | 只替换词典，不动画像/目录 |
+| 用户画像 | `rec_profile_schema`（文件内 `v`） | 旧格式先备份文本，再读取权重（一条不丢） |
+| 同步状态 | `rec_sync_at` | 纯时间戳，无迁移 |
+
+- 迁移前的备份落在 `filesDir/recsys/backup/`；
+- 任何迁移失败只记录日志并降级（不清数据）；
+- 设置页「推荐诊断」展示包版本 / schema 版本，便于排查升级问题。
+
+## 10. 实施顺序（详见 TODO）
 
 1. 文档（本 SPEC + TODO）
 2. 资源落包：`genre_dict.json` + `catalog_pack.json`

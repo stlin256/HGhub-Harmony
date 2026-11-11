@@ -90,6 +90,7 @@ def main():
 
     rows.sort(key=lambda r: r[0])
     out = {
+        "schema": 1,
         "v": index.get("version") or "",
         "cates": CATE_ORDER,
         "items": rows,
