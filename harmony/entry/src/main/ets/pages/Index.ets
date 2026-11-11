@@ -15,6 +15,8 @@ import { PlayerPage } from './PlayerPage';
 import { ChannelPage } from './ChannelPage';
 import { RanksPage } from './RanksPage';
 import { SettingsPage } from './SettingsPage';
+import { RecDataPage } from './RecDataPage';
+import { RecHowPage } from './RecHowPage';
 import { PostsPage } from './PostsPage';
 import { PostDetailPage } from './PostDetailPage';
 import { VideoDetailPage } from './VideoDetailPage';
@@ -22,6 +24,7 @@ import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
 import {
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
+  ROUTE_REC_DATA, ROUTE_REC_HOW,
   PlayerParam, ChannelParam, PostParam, VideoParam
 } from '../state/Routes';
 
@@ -210,6 +213,10 @@ struct Index {
       RanksPage()
     } else if (name === ROUTE_SETTINGS) {
       SettingsPage()
+    } else if (name === ROUTE_REC_DATA) {
+      RecDataPage()
+    } else if (name === ROUTE_REC_HOW) {
+      RecHowPage()
     } else if (name === ROUTE_POSTS) {
       PostsPage()
     } else if (name === ROUTE_POST) {

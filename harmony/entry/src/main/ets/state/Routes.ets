@@ -7,6 +7,10 @@ export const ROUTE_SETTINGS: string = 'settings';
 export const ROUTE_POSTS: string = 'posts';
 export const ROUTE_POST: string = 'post';
 export const ROUTE_VIDEO: string = 'video';
+/** 设置页「推荐数据」二级页面（画像 / 导入导出 / 本地计算状态）。 */
+export const ROUTE_REC_DATA: string = 'recData';
+/** 设置页「推荐说明」二级页面（原生步骤卡）。 */
+export const ROUTE_REC_HOW: string = 'recHow';
 
 export interface ChannelParam {
   cate: string;

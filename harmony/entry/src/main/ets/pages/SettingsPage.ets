@@ -4,12 +4,12 @@ import { ImageCache } from '../services/ImageCache';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
+import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
-import { RecDict } from '../recommend/RecDict';
-import { RecDiagnostics } from '../recommend/RecTypes';
 import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
+import { ROUTE_REC_DATA, ROUTE_REC_HOW } from '../state/Routes';
 import { hostOf } from '../utils/Format';
 
 interface ThemeOption {
@@ -173,10 +173,7 @@ export struct SettingsPage {
   @State lineHost: string = '';
   /* ── 离线推荐（端侧，仅本地计算） ── */
   @State recEnabled: boolean = true;
-  @State recInfo: string = '正在载入随包目录…';
-  @State recTop: string = '';
-  @State recBusy: boolean = false;
-  private recTimer: number = -1;
+  @State recTagCount: number = 0;
   @StorageProp(K_LINE_BASE) @Watch('onLineChanged') lineBase: string = '';
   @State checking: boolean = false;
   @State clearing: boolean = false;
@@ -197,6 +194,22 @@ export struct SettingsPage {
     customStyle: true
   });
 
+  /** 自绘确认弹窗的文案与待执行动作：open 前写入，弹窗 build 时读取，保证每次都是最新内容。 */
+  private confirmCopy: ConfirmCopy = new ConfirmCopy('', '', '确定', '取消', false);
+  private pendingConfirm: () => void = () => {};
+  /** 通用确认弹窗控制器：customStyle=true，完全按 App 主题 token 绘制。 */
+  private confirmController: CustomDialogController = new CustomDialogController({
+    builder: ConfirmDialog({
+      copyOf: (): ConfirmCopy => this.confirmCopy,
+      onConfirm: (): void => {
+        this.pendingConfirm();
+      }
+    }),
+    autoCancel: true,
+    alignment: DialogAlignment.Center,
+    customStyle: true
+  });
+
   aboutToAppear(): void {
     this.themeMode = UserPrefs.themeMode();
     this.muteOnStartup = UserPrefs.muteOnStartup();
@@ -206,16 +219,8 @@ export struct SettingsPage {
     this.historyCount = UserPrefs.history().length;
     this.searchHistCount = UserPrefs.searchHist().length;
     this.lineHost = hostOf(this.lineBase.length > 0 ? this.lineBase : Lines.current());
-    // 推荐诊断：RecService 异步载入，先渲染一次，1.5s 后再刷新（不阻塞页面）。
     this.recEnabled = RecService.enabled();
-    this.refreshRecDiag();
-    if (this.recTimer >= 0) {
-      clearTimeout(this.recTimer);
-    }
-    this.recTimer = setTimeout(() => {
-      this.recTimer = -1;
-      this.refreshRecDiag();
-    }, 1500);
+    this.recTagCount = RecService.profileEntries().length;
     // 分组首屏淡入（140ms）：首帧后触发，避免整页硬切。
     this.enterTimer = setTimeout(() => {
       this.enterTimer = -1;
@@ -234,51 +239,6 @@ export struct SettingsPage {
       clearTimeout(this.valueTimer);
       this.valueTimer = -1;
     }
-    if (this.recTimer >= 0) {
-      clearTimeout(this.recTimer);
-      this.recTimer = -1;
-    }
-  }
-
-  /** 刷新推荐诊断信息（目录/画像/同步状态 + Top 标签）。 */
-  private refreshRecDiag(): void {
-    const d: RecDiagnostics = RecService.diagnostics();
-    const syncText: string = d.syncState === 'running' ? '同步中' :
-      (d.syncState === 'done' ? '已同步' : (d.syncState === 'error' ? '同步失败' : '待同步'));
-    if (!d.ready) {
-      this.recInfo = '目录载入中…（' + syncText + '）';
-      this.recTop = '';
-      return;
-    }
-    const packText: string = d.packVersion.length > 0 ? d.packVersion : '未标注';
-    const storeText: string = d.storeReady ? ('事件 ' + d.eventCount + ' · 库 v' + d.storeVersion) : '事件库未就绪';
-    const modelText: string = d.modelReady ? ('模型 ' + d.modelVersion + ' · 打分 ' + d.modelScored) : '模型未就绪（回退统计排序）';
-    this.recInfo = '目录 ' + d.catalogCount + ' 条（增量 ' + d.extraCount + '）· 包 ' + packText +
-      ' · 画像 ' + d.profileSize + ' 标签 · ' + storeText + ' · ' + modelText + ' · v' + d.schemaVersion + ' · ' + syncText;
-    if (d.topTags.length === 0) {
-      this.recTop = '画像为空：先去收藏/播放几部剧，推荐会逐步个性化';
-    } else {
-      const names: string[] = [];
-      for (let i = 0; i < d.topTags.length; i++) {
-        names.push(RecDict.tagName(d.topTags[i].tag));
-      }
-      this.recTop = '偏好：' + names.join('、');
-    }
-  }
-
-  /** 手动触发一次后台目录同步（忽略冷却）。 */
-  private syncRecCatalog(): void {
-    if (!RecService.enabled()) {
-      UiBus.toast('已关闭个性化推荐');
-      return;
-    }
-    this.recBusy = true;
-    this.recInfo = '正在同步目录…';
-    RecService.syncNow(true);
-    setTimeout(() => {
-      this.recBusy = false;
-      this.refreshRecDiag();
-    }, 2500);
   }
 
   /** 清理后数值变化的轻淡入：只做 140ms 淡入，不缩放/不位移，保持简洁。 */
@@ -331,72 +291,53 @@ export struct SettingsPage {
     return '已占用 ' + this.cacheText;
   }
 
+  /**
+   * 打开自绘确认弹窗（文案/语气由调用方传入）。
+   * 替代系统 AlertDialog：系统弹窗配色跟随系统主题，App 深色主题下会突兀。
+   */
+  private openConfirm(copy: ConfirmCopy, action: () => void): void {
+    this.confirmCopy = copy;
+    this.pendingConfirm = action;
+    this.confirmController.open();
+  }
+
   private clearCache(): void {
-    AlertDialog.show({
-      title: '清理缓存',
-      message: '将清除内存与磁盘封面缓存；收藏、观看记录、搜索历史与登录状态都会保留。',
-      primaryButton: {
-        value: '取消',
-        action: () => {
-        }
-      },
-      secondaryButton: {
-        value: '清理',
-        action: () => {
-          this.clearing = true;
-          Api.clearCache();
-          // 清理后立即刷新占用显示（counters 已归零，totalText() 返回 "0 B"）。
-          this.cacheText = ImageCache.totalText();
-          this.clearing = false;
-          this.flashValues();
-          UiBus.toastOk('封面缓存已清理');
-        }
+    this.openConfirm(
+      new ConfirmCopy('清理缓存', '将清除内存与磁盘封面缓存；收藏、观看记录、搜索历史与登录状态都会保留。', '清理', '取消', false),
+      () => {
+        this.clearing = true;
+        Api.clearCache();
+        // 清理后立即刷新占用显示（counters 已归零，totalText() 返回 "0 B"）。
+        this.cacheText = ImageCache.totalText();
+        this.clearing = false;
+        this.flashValues();
+        UiBus.toastOk('封面缓存已清理');
       }
-    });
+    );
   }
 
   private clearHistory(): void {
-    AlertDialog.show({
-      title: '清空观看历史',
-      message: '将删除本机全部观看记录。',
-      primaryButton: {
-        value: '取消',
-        action: () => {
-        }
-      },
-      secondaryButton: {
-        value: '清空',
-        fontColor: HgColor.danger(this.dark),
-        action: () => {
-          UserPrefs.clearHistory();
-          this.historyCount = 0;
-          this.flashValues();
-          UiBus.toastOk('观看历史已清空');
-        }
+    this.openConfirm(
+      new ConfirmCopy('清空观看历史', '将删除本机全部观看记录。', '清空', '取消', true),
+      () => {
+        UserPrefs.clearHistory();
+        this.historyCount = 0;
+        this.flashValues();
+        UiBus.toastOk('观看历史已清空');
       }
-    });
+    );
   }
 
   private clearSearchHistory(): void {
-    AlertDialog.show({
-      title: '清空搜索历史',
-      message: '将删除本机全部搜索历史。',
-      primaryButton: {
-        value: '取消',
-        action: () => {
-        }
-      },
-      secondaryButton: {
-        value: '清空',
-        fontColor: HgColor.danger(this.dark),
-        action: () => {
-          UserPrefs.clearSearchHist();
-          this.searchHistCount = 0;
-          this.flashValues();
-          UiBus.toastOk('搜索历史已清空');
-        }
+    this.openConfirm(
+      new ConfirmCopy('清空搜索历史', '将删除本机全部搜索历史。', '清空', '取消', true),
+      () => {
+        UserPrefs.clearSearchHist();
+        this.searchHistCount = 0;
+        this.flashValues();
+        UiBus.toastOk('搜索历史已清空');
       }
-    });
+    );
   }
 
   private async checkUpdate(): Promise<void> {
@@ -407,23 +348,14 @@ export struct SettingsPage {
     try {
       const info: UpdateInfo = await Api.checkUpdate();
       if (info.has_update) {
-        const message = 'v' + info.current + ' → v' + info.latest +
+        const message: string = 'v' + info.current + ' → v' + info.latest +
           (info.notes !== undefined && info.notes.length > 0 ? '\n\n' + info.notes : '');
-        AlertDialog.show({
-          title: '发现新版本',
-          message: message,
-          primaryButton: {
-            value: '稍后',
-            action: () => {
-            }
-          },
-          secondaryButton: {
-            value: '前往下载',
-            action: () => {
-              Api.openUrl(info.url);
-            }
+        this.openConfirm(
+          new ConfirmCopy('发现新版本', message, '前往下载', '稍后', false),
+          () => {
+            Api.openUrl(info.url);
           }
-        });
+        );
       } else {
         UiBus.toastOk('已是最新版本 v' + info.current);
       }
@@ -716,16 +648,10 @@ export struct SettingsPage {
     Column() {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.star'))
-        Column({ space: 2 }) {
-          Text('个性化推荐')
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text('基于本地收藏 / 播放行为，端侧计算，不上传数据')
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
+        Text('个性化推荐')
+          .fontSize(HgFont.rowTitle)
+          .fontColor(HgColor.textPrimary(this.dark))
+          .layoutWeight(1)
         Toggle({ type: ToggleType.Switch, isOn: this.recEnabled })
           .selectedColor(HgColor.accent(this.dark))
           .onChange((isOn: boolean) => {
@@ -737,7 +663,35 @@ export struct SettingsPage {
             } else {
               UiBus.toastOk('已关闭个性化推荐（回退随机/热门）');
             }
-            this.refreshRecDiag();
+          })
+      }
+      .width('100%')
+      .height(HgSize.hitTarget + HgSpace.m)
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.person'))
+        Column({ space: 2 }) {
+          Text('推荐数据')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text('画像 ' + this.recTagCount + ' 个标签 · 可导入 / 导出 / 清空')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Text('管理')
+          .fontSize(HgFont.caption)
+          .fontColor(HgColor.accent(this.dark))
+          .height(HgSize.hitTarget)
+          .padding({ left: HgSpace.s })
+          .onClick(() => {
+            this.navStack.pushPathByName(ROUTE_REC_DATA, null);
           })
       }
       .width('100%')
@@ -749,31 +703,24 @@ export struct SettingsPage {
         .color(HgColor.hairline(this.dark))
 
       Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.arrow_clockwise'))
+        this.RowIcon($r('sys.symbol.heart'))
         Column({ space: 2 }) {
-          Text('推荐诊断')
+          Text('推荐说明')
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.recInfo)
+          Text('一张图看懂推荐是怎么来的')
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
-            .maxLines(2)
-          if (this.recTop.length > 0) {
-            Text(this.recTop)
-              .fontSize(HgFont.micro)
-              .fontColor(HgColor.accent(this.dark))
-              .maxLines(2)
-          }
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        Text(this.recBusy ? '同步中…' : '同步')
+        Text('查看')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .height(HgSize.hitTarget)
           .padding({ left: HgSpace.s })
           .onClick(() => {
-            this.syncRecCatalog();
+            this.navStack.pushPathByName(ROUTE_REC_HOW, null);
           })
       }
       .width('100%')
@@ -940,6 +887,10 @@ export struct SettingsPage {
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    // 从推荐数据二级页面返回时刷新画像标签数（本页在栈中保留，aboutToAppear 不会重跑）。
+    .onShown(() => {
+      this.recTagCount = RecService.profileEntries().length;
+    })
     // 兜底铺满整页背景：页面转场/底部安全区内边距区不露出默认背景（深色下会像一条黑带）。
     .backgroundColor(HgColor.canvas(this.dark))
   }
