@@ -42,6 +42,9 @@ export interface RecDiagnostics {
   topTags: RecProfileEntry[];
   syncState: string;
   lastSyncAt: number;
+  storeReady: boolean;
+  storeVersion: number;
+  eventCount: number;
 }
 
 /** 随包目录结构（数组优先，体积小）。 */
@@ -78,6 +81,8 @@ export interface RecRawDict {
 
 /** 事件类型（本期子集，对齐设计文档 §8.2）。 */
 export class RecEvent {
+  static readonly IMPRESSION: string = 'impression';
+  static readonly SEARCH: string = 'search';
   static readonly CLICK: string = 'click';
   static readonly PLAY_START: string = 'play_start';
   static readonly COMPLETE: string = 'complete';

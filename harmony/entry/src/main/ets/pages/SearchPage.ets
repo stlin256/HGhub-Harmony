@@ -3,6 +3,7 @@ import { SearchResult, VideoCard } from '../models/Types';
 import { UserPrefs } from '../state/UserPrefs';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
+import { RecService } from '../recommend/RecService';
 import { HgEmptyState, HgSkeletonGrid } from '../components/HgCommon';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
@@ -71,6 +72,7 @@ export struct SearchPage {
   }
 
   private submit(text: string): void {
+    RecService.recordSearch(text);
     const kw = text.trim();
     if (kw.length === 0) {
       return;

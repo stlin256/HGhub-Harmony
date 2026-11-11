@@ -4,6 +4,7 @@ import { UserPrefs } from '../state/UserPrefs';
 import { RecCatalog } from './RecCatalog';
 import { RecEvent, RecProfileEntry } from './RecTypes';
 import { RecMeta } from './RecMeta';
+import { RecStore } from './RecStore';
 
 interface ProfileFile {
   v?: number;
@@ -14,10 +15,10 @@ interface ProfileFile {
 /**
  * 本地画像：标签权重（指数衰减、裁剪、种子）。
  *
- * - 存储：preferences 单 key（M0.5 不引入 RDB）；
- * - 衰减：τ = 7 天，读取/更新时懒计算；
- * - 种子：既有收藏 +3.0、点赞 +1.5、观看历史 +1.0；
- * - 行为：点击 +1.0、播放 +0.4、完播 +2.0、收藏 +3.0、取消收藏 −2.0、快划 −0.6。
+ * 存储策略（无损升级）：
+ * - 主存储：RDB（profile 表，按 tag+bucket，schema 版本见 RecStore）；
+ * - 备份：preferences 的 rec_profile_v1（带 v 字段），迁移/异常时可回退；
+ * - 行为事件：全部写入 RDB events 表（曝光/点击/播放/完播/收藏/搜索/快划）。
  */
 export class RecProfile {
   private static readonly KEY: string = 'rec_profile_v1';
@@ -34,16 +35,43 @@ export class RecProfile {
     return RecProfile.loaded;
   }
 
-  static load(): void {
+  /** 异步初始化：先尝试 RDB（迁移 preferences 画像），失败再回退 preferences。 */
+  static async loadAsync(): Promise<void> {
     if (RecProfile.loaded) {
       return;
     }
+    let loadedFromStore: boolean = false;
+    try {
+      const storeOk: boolean = await RecStore.init();
+      if (storeOk) {
+        const rows: Map<number, number> = await RecStore.loadProfile();
+        if (rows.size > 0) {
+          RecProfile.weights = rows;
+          RecProfile.at = Date.now();
+          loadedFromStore = true;
+        }
+      }
+    } catch (err) {
+      loadedFromStore = false;
+    }
+    if (!loadedFromStore) {
+      RecProfile.loadFromPrefs();
+    }
+    RecProfile.decay(Date.now());
+    RecProfile.seedIfNeeded();
+    RecProfile.loaded = true;
+    // 把内存画像补写回 RDB（首次迁移/来自旧版本时保证两边一致）。
+    RecProfile.weights.forEach((weight: number, tag: number) => {
+      RecStore.upsertProfile(tag, weight);
+    });
+  }
+
+  private static loadFromPrefs(): void {
     try {
       const text: string = Prefs.getString(RecProfile.KEY, '');
       if (text.length > 0) {
         const parsed = JSON.parse(text) as ProfileFile;
         const oldSchema: number = parsed.v === undefined || parsed.v === null ? 0 : parsed.v;
-        // 升级迁移：旧画像格式先备份，再按当前 schema 兼容读取；权重一条不丢。
         if (oldSchema < RecMeta.PROFILE_SCHEMA) {
           RecMeta.backupText('profile', text, 'v' + oldSchema);
         }
@@ -65,9 +93,6 @@ export class RecProfile {
       RecProfile.weights = new Map<number, number>();
       RecProfile.at = Date.now();
     }
-    RecProfile.decay(Date.now());
-    RecProfile.seedIfNeeded();
-    RecProfile.loaded = true;
   }
 
   /** 用既有收藏/点赞/历史作为冷启动种子（只执行一次）。 */
@@ -95,18 +120,28 @@ export class RecProfile {
     RecProfile.scheduleSave();
   }
 
+  /** 记录行为：更新画像 + 写 RDB 事件表。 */
   static record(event: string, id: number): void {
     if (id <= 0) {
       return;
     }
     const delta: number = RecProfile.eta(event);
-    if (delta === 0) {
-      return;
+    if (delta !== 0) {
+      RecProfile.addLabels(RecCatalog.labelsOf(id), delta);
     }
-    RecProfile.addLabels(RecCatalog.labelsOf(id), delta);
+    RecStore.insertEvent(id, event, delta, 0, 0);
+  }
+
+  /** 搜索等"无条目"信号：直接按标签权重累加，并记一条 search 事件。 */
+  static recordLabels(labels: number[], delta: number, kind: string): void {
+    RecProfile.addLabels(labels, delta);
+    RecStore.insertEvent(0, kind, delta, 0, 0);
   }
 
   private static eta(event: string): number {
+    if (event === RecEvent.IMPRESSION) {
+      return -0.02;
+    }
     if (event === RecEvent.CLICK) {
       return 1.0;
     }
@@ -144,6 +179,7 @@ export class RecProfile {
         next = RecProfile.MIN;
       }
       RecProfile.weights.set(tag, next);
+      RecStore.upsertProfile(tag, next);
     }
     RecProfile.scheduleSave();
   }
@@ -199,6 +235,7 @@ export class RecProfile {
     RecProfile.at = Date.now();
     Prefs.putString(RecProfile.KEY, '');
     Prefs.putBool(RecProfile.SEED_KEY, false);
+    RecStore.clearAll();
   }
 
   private static scheduleSave(): void {
