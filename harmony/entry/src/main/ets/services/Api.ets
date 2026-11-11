@@ -1,5 +1,5 @@
-import { JSON } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { bundleManager } from '@kit.AbilityKit';
 import { Net } from './Net';
 import { Lines } from './Lines';
 import { Session } from './Session';
@@ -7,6 +7,7 @@ import { ImageCache } from './ImageCache';
 import { AppContext } from './AppContext';
 import { LineAuto } from './LineAuto';
 import { UserPrefs } from '../state/UserPrefs';
+import { isSafeWebUrl, parseBoundedJson, parseWebUrl } from '../utils/Security';
 import {
   BootInfo, CommentPage, Detail, LineMirrors, LineProbe, LoginResult, Paged, PlaybackInfo, PlayInfo, Post,
   RankResult, SearchResult, UpdateInfo, User, VideoCard
@@ -60,6 +61,8 @@ const WARM_HISTORY_CONCURRENCY: number = 3;
 const LINE_RETRY_COOLDOWN_MS: number = 15000;
 const API_LOG_DOMAIN: number = 0x0000;
 const API_LOG_TAG: string = 'HGApi';
+/** GitHub Release 响应的大小上限（标准 JSON 解析前先卡住，防超大响应拖垮解析）。 */
+const UPDATE_MAX_BODY_LEN: number = 1024 * 1024;
 
 function requireObject(data: Object | null): Object {
   if (data === null) {
@@ -91,8 +94,21 @@ export class Api {
   /** 正在进行的换线（并发失败共享同一次探测）。 */
   private static lineSwitchInflight: Promise<boolean> | null = null;
 
+  /**
+   * 当前安装包版本号：优先读系统 BundleInfo（AppScope/app.json5 的 versionName），
+   * 避免硬编码与发版不同步导致「关于」显示旧版本、检查更新永远提示有新版本。
+   */
   static appVersion(): string {
-    return '2.0.0';
+    try {
+      const info: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      const version: string = info.versionName;
+      if (version !== undefined && version !== null && version.length > 0) {
+        return version;
+      }
+    } catch (err) {
+    }
+    return '2.1.0';
   }
 
   private static token(): string {
@@ -550,17 +566,23 @@ export class Api {
     if (raw.code < 200 || raw.code >= 300) {
       throw new Error('GitHub 返回 HTTP ' + raw.code);
     }
-    const parsed = JSON.parse(raw.text);
+    // 外部响应先卡大小再走标准 JSON 解析；解析失败不向 UI 回显原始内容。
+    const parsed: Object | null = parseBoundedJson(raw.text, UPDATE_MAX_BODY_LEN);
+    if (parsed === null) {
+      throw new Error('更新信息解析失败');
+    }
     const release = requireObject(parsed) as GitHubRelease;
     const tag: string = release.tag_name !== undefined && release.tag_name !== null ? release.tag_name : '';
     const latest = tag.startsWith('v') || tag.startsWith('V') ? tag.substring(1) : tag;
+    // 外链只接受系统 URL 解析器认可的 http/https 地址（开放重定向/伪协议在这里被挡住）。
+    const releaseUrl: string = release.html_url !== undefined && release.html_url !== null
+      ? release.html_url : '';
     const info: UpdateInfo = {
       current: Api.appVersion(),
       latest: latest,
       tag: tag,
       has_update: latest.length > 0 && compareVersion(latest, Api.appVersion()) > 0,
-      url: release.html_url !== undefined && release.html_url !== null
-        ? release.html_url : 'https://github.com/Minireel/HGhub/releases',
+      url: isSafeWebUrl(releaseUrl) ? releaseUrl : 'https://github.com/Minireel/HGhub/releases',
       name: release.name,
       published_at: release.published_at,
       notes: release.body !== undefined && release.body !== null ? release.body.substring(0, 800) : ''
@@ -568,12 +590,21 @@ export class Api {
     return info;
   }
 
-  static openUrl(url: string): void {
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+  /**
+   * 打开外部链接：只放行 http/https（用 @ohos.url 解析 scheme/host，拒绝 javascript:/file:/intent: 等）。
+   * 解析后的 href 作为最终目标，避免大小写/空白绕过；打不开静默失败，不回显内部错误。
+   */
+  static openUrl(raw: string): void {
+    const parsed = parseWebUrl(raw);
+    if (parsed === null) {
       return;
     }
-    AppContext.abilityContext().openLink(url).catch((err: Object) => {
-    });
+    const target: string = parsed.href;
+    try {
+      AppContext.abilityContext().openLink(target).catch((err: Object) => {
+      });
+    } catch (err) {
+    }
   }
 
   /** 清空图片缓存 + 详情缓存（设置页「清理缓存」可改调本方法）。 */
