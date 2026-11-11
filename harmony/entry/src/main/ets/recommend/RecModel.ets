@@ -1,24 +1,32 @@
 import mindSporeLite from '@ohos.ai.mindSporeLite';
 import { util } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from '../services/AppContext';
 import { VideoCard } from '../models/Types';
 import { RecCatalog } from './RecCatalog';
 import { RecProfile } from './RecProfile';
+import { UserPrefs } from '../state/UserPrefs';
+import { WatchProgress } from '../models/Types';
 
 const BUCKETS: number = 256;
-const USER_EXTRA: number = 2;
 const ITEM_EXTRA: number = 9;
-const USER_DIM: number = BUCKETS + USER_EXTRA;
-const ITEM_DIM: number = BUCKETS + ITEM_EXTRA;
+const TEXT_DIM: number = 128;
+/** user / item 同维：256 标签桶 + 9 质量/类目特征 + 128 文本 3-gram（便于模型做按位交互）。 */
+const FEAT_DIM: number = BUCKETS + ITEM_EXTRA + TEXT_DIM;
+const USER_DIM: number = FEAT_DIM;
+const ITEM_DIM: number = FEAT_DIM;
+/** 文本特征在向量中的起始偏移（user 在同一位置，训练/推理口径一致）。 */
+const TEXT_OFF: number = BUCKETS + ITEM_EXTRA;
 const BATCH: number = 128;
 const CATES: number = 4;
 
 /**
  * 端侧排序模型（MindSpore Lite 推理）。
  *
- * 模型：两塔 MLP（user 258 维 / item 265 维 → 各 48 维 → 96 → 48 → sigmoid），
+ * 模型：两塔 MLP + 显式交互（user/item 各 393 维 = 256 标签桶 + 9 质量/类目特征 +
+ * 128 文本 3-gram；两塔各 48 维 → 48 → base 分，另加 user*item 按位乘积的交互分），
  * 固定 batch=128；由 scripts/harmony/train-ranker.py 训练导出 ONNX，
- * scripts/harmony/convert-ranker.ps1 转成 .ms 后随包放入 rawfile/recommend/ranker_v1.ms。
+ * scripts/harmony/convert-ranker.ps1 转成 .ms 后随包放入 rawfile/recommend/ranker_v2.ms。
  *
  * 说明：模型只做"打分"，候选与画像特征均由本地生成，不上传任何数据；模型缺失/加载失败时
  * 由 RecService 回退到现有统计排序，保证可用性（SPEC 降级原则）。
@@ -45,7 +53,7 @@ export class RecModel {
         return false;
       }
       const bytes: Uint8Array = await AppContext.abilityContext()
-        .resourceManager.getRawFileContent('recommend/ranker_v1.ms');
+        .resourceManager.getRawFileContent('recommend/ranker_v2.ms');
       const buffer: ArrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
       const context: mindSporeLite.Context = {
         target: ['cpu'],
@@ -53,16 +61,46 @@ export class RecModel {
       };
       const model: mindSporeLite.Model = await mindSporeLite.loadModelFromBuffer(buffer, context);
       RecModel.model = model;
-      RecModel.version = 'v1';
+      RecModel.version = 'v2';
       RecModel.ready = true;
+      hilog.info(0x0000, 'HGRec', 'model %{public}s loaded', RecModel.version);
       return true;
     } catch (err) {
       RecModel.ready = false;
+      hilog.warn(0x0000, 'HGRec', 'model load failed: %{public}s', JSON.stringify(err));
       return false;
     }
   }
 
-  /** 当前用户向量（画像 → 256 桶 + 2 个统计特征），与训练脚本同一口径。 */
+  /** 文本向量：标题+简介的字符 3-gram 哈希到 64 桶（与训练脚本同一口径）。 */
+  private static textVector(title: string, desc: string): Float32Array {
+    const vec: Float32Array = new Float32Array(TEXT_DIM);
+    const text: string = (title + ' ' + desc).toLowerCase();
+    if (text.length < 3) {
+      return vec;
+    }
+    for (let i = 0; i + 2 < text.length; i++) {
+      let h: number = 2166136261;
+      for (let k = 0; k < 3; k++) {
+        h ^= text.charCodeAt(i + k);
+        h = (h * 16777619) >>> 0;
+      }
+      vec[h % TEXT_DIM] += 1;
+    }
+    let norm: number = 0;
+    for (let i = 0; i < TEXT_DIM; i++) {
+      norm += vec[i] * vec[i];
+    }
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (let i = 0; i < TEXT_DIM; i++) {
+        vec[i] /= norm;
+      }
+    }
+    return vec;
+  }
+
+  /** 当前用户向量（画像 → 256 桶 + 2 统计特征 + 128 文本特征），与训练脚本同一口径。 */
   private static userVector(): Float32Array {
     const vec: Float32Array = new Float32Array(USER_DIM);
     let total: number = 0;
@@ -80,10 +118,46 @@ export class RecModel {
     }
     vec[BUCKETS + 0] = total > 0 ? 1 : 0;
     vec[BUCKETS + 1] = Math.min(1, RecProfile.size() / 10);
+    // 文本画像：收藏(+3)/点赞(+1.5)/历史(+1) 条目的文本向量加权平均。
+    const textBase: number = TEXT_OFF;
+    const favs: number[] = UserPrefs.favs();
+    const likes: number[] = UserPrefs.likes();
+    const history: WatchProgress[] = UserPrefs.history();
+    for (let i = 0; i < favs.length; i++) {
+      RecModel.addItemText(vec, textBase, favs[i], 3.0);
+    }
+    for (let i = 0; i < likes.length; i++) {
+      RecModel.addItemText(vec, textBase, likes[i], 1.5);
+    }
+    for (let i = 0; i < history.length && i < 80; i++) {
+      RecModel.addItemText(vec, textBase, history[i].id, 1.0);
+    }
+    let tnorm: number = 0;
+    for (let i = 0; i < TEXT_DIM; i++) {
+      tnorm += vec[textBase + i] * vec[textBase + i];
+    }
+    tnorm = Math.sqrt(tnorm);
+    if (tnorm > 0) {
+      for (let i = 0; i < TEXT_DIM; i++) {
+        vec[textBase + i] /= tnorm;
+      }
+    }
     return vec;
   }
 
-  /** 条目向量：标签桶 + 质量/类目特征（与训练脚本一致）。 */
+  /** 把某条目的文本向量按权重累加到用户文本特征。 */
+  private static addItemText(vec: Float32Array, base: number, id: number, weight: number): void {
+    const item = RecCatalog.get(id);
+    if (item === null) {
+      return;
+    }
+    const tv: Float32Array = RecModel.textVector(item.title, item.desc);
+    for (let i = 0; i < TEXT_DIM; i++) {
+      vec[base + i] += tv[i] * weight;
+    }
+  }
+
+  /** 条目向量：标签桶 + 质量/类目特征 + 文本 3-gram（与训练脚本一致）。 */
   private static itemVector(card: VideoCard): Float32Array {
     const vec: Float32Array = new Float32Array(ITEM_DIM);
     const labels: number[] = RecCatalog.labelsOf(card.id);
@@ -109,6 +183,10 @@ export class RecModel {
     vec[BUCKETS + 4] = finished === 1 ? 1 : 0;
     if (cate >= 0 && cate < CATES) {
       vec[BUCKETS + 5 + cate] = 1;
+    }
+    const textVec: Float32Array = RecModel.textVector(card.title, item === null ? '' : item.desc);
+    for (let i = 0; i < TEXT_DIM; i++) {
+      vec[TEXT_OFF + i] = textVec[i];
     }
     return vec;
   }

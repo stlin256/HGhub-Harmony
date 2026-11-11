@@ -15,7 +15,7 @@
   典型流程：
     python scripts/harmony/train-ranker.py
     pwsh scripts/harmony/convert-ranker.ps1
-    Copy-Item scripts/harmony/.local/ranker/ranker.ms harmony/entry/src/main/resources/rawfile/recommend/ranker_v1.ms
+    Copy-Item scripts/harmony/.local/ranker/ranker.ms harmony/entry/src/main/resources/rawfile/recommend/ranker_v2.ms
 #>
 [CmdletBinding()]
 param(
@@ -39,9 +39,26 @@ if (-not (Test-Path -LiteralPath (Join-Path $converterDir 'converter_lite.exe'))
 }
 
 # 1) 补齐 MinGW 运行时（DevEco codescanner 插件）
-$envPs1 = Join-Path $repoRoot 'scripts\harmony\env.ps1'
-. $envPs1 -Quiet
-$mingwDir = Join-Path $HarmonyToolchain.DevEcoHome 'plugins\codescanner\cpp-agent\release'
+$devEcoHome = $env:DEVECO_HOME
+if ($devEcoHome.Length -eq 0) {
+  $candidates = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\Huawei\DevEcoStudio-26.0.0'),
+    'C:\Program Files\Huawei\DevEcoStudio-26.0.0',
+    'C:\Program Files (x86)\Huawei\DevEcoStudio-26.0.0'
+  )
+  $installed = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Huawei') -Directory -Filter 'DevEcoStudio-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+  if ($installed) { $candidates = @($installed.FullName) + $candidates }
+  foreach ($c in $candidates) {
+    if (Test-Path -LiteralPath (Join-Path $c 'plugins\codescanner\cpp-agent\release\libstdc++-6.dll')) {
+      $devEcoHome = $c
+      break
+    }
+  }
+}
+if ($devEcoHome.Length -eq 0 -or -not (Test-Path -LiteralPath $devEcoHome)) {
+  throw 'DevEco Studio not found; set DEVECO_HOME to its install directory'
+}
+$mingwDir = Join-Path $devEcoHome 'plugins\codescanner\cpp-agent\release'
 foreach ($name in @('libstdc++-6.dll', 'libgcc_s_seh-1.dll', 'libwinpthread-1.dll')) {
   $src = Join-Path $mingwDir $name
   if (-not (Test-Path -LiteralPath $src)) { throw "missing MinGW runtime: $src" }

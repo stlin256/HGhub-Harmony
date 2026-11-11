@@ -9,7 +9,7 @@
     "v": "2026.11.11",
     "cates": ["ai-duanju", ...],
     "items": [
-      [id, title, cover, labels[], pop, cateIdx, eps, score, hot, finished, author, lastEpAt],
+      [id, title, cover, labels[], pop, cateIdx, eps, score, hot, finished, author, lastEpAt, desc],
       ...
     ]
   }
@@ -26,9 +26,11 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CATE_ORDER = ["ai-duanju", "ai-manju", "ai-huanlian", "ai-mogai"]
-DEFAULT_INDEX = os.path.join(
+DELIVERABLE_DATA = os.path.join(
     ROOT, "scripts", "harmony", ".local", "recsys-deliverable",
-    "hghub-recsys-deliverable", "data", "catalog_index.json")
+    "hghub-recsys-deliverable", "data")
+DEFAULT_INDEX = os.path.join(DELIVERABLE_DATA, "catalog_index.json")
+DEFAULT_CORPUS = os.path.join(DELIVERABLE_DATA, "hg_corpus_full.jsonl")
 DEFAULT_OUT = os.path.join(
     ROOT, "harmony", "entry", "src", "main", "resources", "rawfile", "recommend", "catalog_full.json")
 
@@ -37,6 +39,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--index", default=DEFAULT_INDEX)
     ap.add_argument("--out", default=DEFAULT_OUT)
+    ap.add_argument("--corpus", default=DEFAULT_CORPUS, help="corpus_full.jsonl（提供标题/简介文本特征）")
     args = ap.parse_args()
 
     with open(args.index, encoding="utf-8") as f:
@@ -44,6 +47,25 @@ def main():
     items = index.get("items") or {}
     if not items:
         raise SystemExit("catalog_index.json has no items")
+
+    # 简介（用于端侧文本特征）：从 corpus 提取，截断控制包体。
+    desc_by_id = {}
+    if os.path.exists(args.corpus):
+        with open(args.corpus, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                vid = obj.get("id")
+                if vid is None:
+                    continue
+                desc = (obj.get("description") or obj.get("desc") or "").strip()
+                if desc:
+                    desc_by_id[int(vid)] = desc[:160]
 
     rows = []
     max_hot = 1
@@ -85,6 +107,7 @@ def main():
             1 if v.get("f") else 0,
             (v.get("au") or "").strip(),
             int(v.get("la") or 0),
+            desc_by_id.get(vid, ""),
         ]
         rows.append(row)
 

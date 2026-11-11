@@ -252,6 +252,26 @@ export class RecStore {
     }
   }
 
+  /** 导入画像：整表替换（版本字段由调用方校验后传入）。 */
+  static replaceProfile(rows: number[][]): void {
+    if (!RecStore.readyFlag || RecStore.store === null) {
+      return;
+    }
+    const now: number = Date.now();
+    RecStore.enqueue(async (store: relationalStore.RdbStore) => {
+      await store.executeSql('DELETE FROM profile');
+      for (let i = 0; i < rows.length; i++) {
+        const row: number[] = rows[i];
+        if (row === undefined || row === null || row.length < 2) {
+          continue;
+        }
+        await store.executeSql(
+          'INSERT OR REPLACE INTO profile(tag, bucket, weight, updated) VALUES(?, ?, ?, ?)',
+          [row[0], RecStore.BUCKET_GLOBAL, row[1], now]);
+      }
+    });
+  }
+
   static async clearAll(): Promise<void> {
     const store = RecStore.store;
     if (store === null) {
