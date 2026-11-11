@@ -31,6 +31,7 @@ export class RecMeta {
   private static readonly K_PROFILE_SCHEMA: string = 'rec_profile_schema';
   private static readonly K_EXTRA_SCHEMA: string = 'rec_extra_schema';
   private static readonly K_STORE_SCHEMA: string = 'rec_store_schema';
+  private static readonly K_MODEL_VERSION: string = 'rec_model_version';
 
   /** 启动时执行一次；老版本（无 key）视为 0，逐个迁移到当前版本。 */
   static ensure(): void {
@@ -79,6 +80,14 @@ export class RecMeta {
 
   static storeSchema(): number {
     return Prefs.getNumber(RecMeta.K_STORE_SCHEMA, 0);
+  }
+
+  static setModelVersion(version: string): void {
+    Prefs.putString(RecMeta.K_MODEL_VERSION, version);
+  }
+
+  static modelVersion(): string {
+    return Prefs.getString(RecMeta.K_MODEL_VERSION, '');
   }
 
   /** 迁移前备份：把某个文件复制为 *.bak-<tag>（失败静默，不阻塞主流程）。 */

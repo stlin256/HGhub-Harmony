@@ -9,6 +9,7 @@ import { RecDiagnostics, RecEvent, RecProfileEntry } from './RecTypes';
 import { RecSync } from './RecSync';
 import { RecMeta } from './RecMeta';
 import { RecStore } from './RecStore';
+import { RecModel } from './RecModel';
 
 /**
  * 推荐门面：初始化 / 采样 / 事件 / 诊断 / 同步。
@@ -22,6 +23,9 @@ export class RecService {
   private static initing: boolean = false;
   private static ready: boolean = false;
   private static syncKicked: boolean = false;
+  /** 模型分数缓存（id → sigmoid 点击率）；模型未就绪时为空，pick 回退统计排序。 */
+  private static modelScores: Map<number, number> = new Map<number, number>();
+  private static scoring: boolean = false;
 
   static isReady(): boolean {
     return RecService.ready;
@@ -65,6 +69,12 @@ export class RecService {
       }
       const catalogOk: boolean = await RecCatalog.init();
       await RecProfile.loadAsync();
+      // 端侧模型：加载 .ms 并预热全量目录打分（异步，不阻塞首屏）。
+      const modelOk: boolean = await RecModel.init();
+      if (modelOk) {
+        RecMeta.setModelVersion(RecModel.modelVersion());
+        RecService.warmScores(RecCatalog.cards());
+      }
       RecService.ready = catalogOk;
       RecService.initing = false;
       RecService.inited = true;
@@ -118,19 +128,29 @@ export class RecService {
     }
     const span: number = affMax - affMin;
     const weights: number[] = [];
-    let maxWeight: number = 0;
+    const missing: VideoCard[] = [];
     for (let i = 0; i < pool.length; i++) {
       const card: VideoCard = pool[i];
-      const affNorm: number = span > 1e-6 ? (raw[i] - affMin) / span : 0.5;
-      const pop: number = RecCatalog.popOf(card.id);
-      const fresh: number = RecService.freshOf(card);
-      const jitter: number = Math.random();
-      const score: number = 0.55 * affNorm + 0.25 * pop + 0.10 * fresh + 0.10 * jitter;
+      const modelScore: number | undefined = RecService.modelScores.get(card.id);
+      if (modelScore === undefined || modelScore === null) {
+        missing.push(card);
+      }
+      let score: number;
+      if (modelScore !== undefined && modelScore !== null) {
+        // 模型输出作为主排序分（0..1 点击率），只加极小抖动做探索。
+        score = modelScore * 0.9 + Math.random() * 0.1;
+      } else {
+        // 模型分数尚未就绪（首次启动/新条目）：用统计分兜底，同时后台补分。
+        const affNorm: number = span > 1e-6 ? (raw[i] - affMin) / span : 0.5;
+        const pop: number = RecCatalog.popOf(card.id);
+        const fresh: number = RecService.freshOf(card);
+        score = 0.55 * affNorm + 0.25 * pop + 0.10 * fresh + 0.10 * Math.random();
+      }
       const w: number = Math.exp(score / 0.35);
       weights.push(w);
-      if (w > maxWeight) {
-        maxWeight = w;
-      }
+    }
+    if (missing.length > 0) {
+      RecService.warmScores(missing);
     }
     const out: VideoCard[] = [];
     const used: boolean[] = [];
@@ -251,6 +271,34 @@ export class RecService {
     }
   }
 
+  /** 后台批量补模型分数（去重；同一时刻只跑一批）。 */
+  private static warmScores(cards: VideoCard[]): void {
+    if (RecService.scoring || !RecModel.isReady() || cards.length === 0) {
+      return;
+    }
+    const todo: VideoCard[] = [];
+    for (let i = 0; i < cards.length; i++) {
+      if (!RecService.modelScores.has(cards[i].id)) {
+        todo.push(cards[i]);
+      }
+    }
+    if (todo.length === 0) {
+      return;
+    }
+    RecService.scoring = true;
+    RecModel.scoreCards(todo).then((scores: number[] | null) => {
+      RecService.scoring = false;
+      if (scores === null) {
+        return;
+      }
+      for (let i = 0; i < todo.length && i < scores.length; i++) {
+        RecService.modelScores.set(todo[i].id, scores[i]);
+      }
+    }).catch((err: Object) => {
+      RecService.scoring = false;
+    });
+  }
+
   static recordClick(id: number): void {
     RecService.record(RecEvent.CLICK, id);
   }
@@ -292,7 +340,10 @@ export class RecService {
       lastSyncAt: RecSync.lastSyncAt(),
       storeReady: RecStore.isReady(),
       storeVersion: RecStore.schemaVersion(),
-      eventCount: RecStore.eventCountCached()
+      eventCount: RecStore.eventCountCached(),
+      modelReady: RecModel.isReady(),
+      modelVersion: RecMeta.modelVersion(),
+      modelScored: RecService.modelScores.size
     };
   }
 
