@@ -473,7 +473,6 @@ export struct CategoryPage {
     .padding({ left: HgSpace.m, right: HgSpace.m })
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
-    .margin({ bottom: HgSpace.xl })
     .accessibilityText('热播榜 · 推荐榜 · 潜力榜')
     .onClick(() => {
       this.navStack.pushPathByName(ROUTE_RANKS, null);
@@ -838,7 +837,7 @@ export struct CategoryPage {
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
           .lineHeight(HgFont.linePageLarge)
-        Text(this.channels.length + ' 个频道 · 每周持续上新')
+        Text('每周持续上新')
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
           .margin({ left: HgSpace.s, bottom: 5 })
@@ -855,19 +854,22 @@ export struct CategoryPage {
       Refresh({ refreshing: this.refreshing }) {
         Scroll() {
           Column() {
-            Column() {
-              this.RankEntry()
-            }
-            .width('100%')
-            .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+            // 排行榜/专题两张入口卡片作为一组：组内间距与组外（到频道区）间距显式统一为 HgSpace.xl，
+            // 避免之前 RankEntry 自带 margin + 专题容器无上边距导致的上下不对称。
+            Column({ space: HgSpace.xl }) {
+              Column() {
+                this.RankEntry()
+              }
+              .width('100%')
+              .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
 
-            Column() {
-              this.TopicsEntry()
+              Column() {
+                this.TopicsEntry()
+              }
+              .width('100%')
+              .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
             }
             .width('100%')
-            .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
-            // 与上下的间距对称：上方由 RankEntry 的 margin-bottom 提供（20），这里只补下方 20；
-            // 之前是 top 12 且无下边距，导致专题卡与上方 32、与下方频道标题几乎贴住。
             .margin({ bottom: HgSpace.xl })
 
             ForEach(this.channels, (info: CateInfo, index: number) => {
