@@ -439,11 +439,12 @@ export class Lines {
     return out;
   }
 
-  /** 并发 6 条一组探测，只报结果，不自动切换。 */
-  static async probe(urls: string[]): Promise<LineProbe[]> {
+  /** 并发探测（默认上限 64，一次探测全部候选），只报结果，不自动切换。 */
+  static async probe(urls: string[], concurrency: number = 64): Promise<LineProbe[]> {
     const out: LineProbe[] = [];
-    for (let i = 0; i < urls.length; i += 6) {
-      const chunk = urls.slice(i, i + 6);
+    const step: number = Math.max(1, Math.min(64, concurrency));
+    for (let i = 0; i < urls.length; i += step) {
+      const chunk = urls.slice(i, i + step);
       const tasks: Promise<LineProbe>[] = [];
       for (let j = 0; j < chunk.length; j++) {
         tasks.push(Lines.probeOne(chunk[j]));

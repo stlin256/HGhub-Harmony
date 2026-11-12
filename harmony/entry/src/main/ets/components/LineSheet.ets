@@ -7,8 +7,8 @@ import { UserPrefs } from '../state/UserPrefs';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { hostOf } from '../utils/Format';
 
-/** 探测延迟的候选线路数量上限：当前 + 固定 + 镜像，避免面板打开时探测过久。 */
-const MAX_PROBE_LINES: number = 6;
+/** 延迟探测候选上限：一次性探测全部固定线路 + 镜像（并发由 Lines.probe 内部限制 64）。 */
+const MAX_PROBE_LINES: number = 64;
 
 /**
  * 线路（数据源）面板：固定线路 + 地址发布页镜像。

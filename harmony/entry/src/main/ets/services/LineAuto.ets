@@ -14,10 +14,10 @@ export const PREF_MIRROR_CACHE: string = 'line_mirror_cache';
 
 /** 单条线路探测超时（连接+读取同一上限，避免不可达线路拖 10 秒）。 */
 const PROBE_TIMEOUT_MS: number = 4500;
-/** 每批并发探测条数。 */
-const PROBE_BATCH: number = 5;
-/** 自动检查最多看几条候选（=2 批，控制最坏耗时；偏好/固定线路/缓存镜像优先入列）。 */
-const CANDIDATE_LIMIT: number = 10;
+/** 每批并发探测条数（一次性探测全部候选，上限 64）。 */
+const PROBE_BATCH: number = 64;
+/** 候选线路上限（与 64 并发探测对齐；正常数量远小于此值）。 */
+const CANDIDATE_LIMIT: number = 64;
 /** 启动后延迟多久做首次后台检查（让首屏请求先走）。 */
 const INIT_DELAY_MS: number = 1200;
 /** 播放中线路巡检间隔（仅播放页激活时运行）。 */
