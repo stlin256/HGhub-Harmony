@@ -1,38 +1,70 @@
 /**
  * 服务卡片（2*2）：继续观看。
  *
- * 设计：大面积封面 + 顶部「继续观看」标签；无历史/无封面时使用灰色 SVG 占位。
- * 数据由 EntryFormAbility 通过 formBindingData 注入（LocalStorage）。
- * 点击卡片通过 postCardAction 拉起应用继续观看。
+ * 大面积封面 + 顶部「继续观看」标签；封面来自应用进程预生成的 base64 快照
+ * （wcc_<id>，见 WatchCoverCache），避免卡片直接加载 AES 密文 URL 失败。
+ * 无记录/无快照时用深色底 + 播放符号占位。
  */
+interface CardItem {
+  title: string;
+  ep: number;
+  percent: number;
+  cover: string;
+}
+
 @Entry
 @Component
 struct WidgetCard {
   @LocalStorageProp('has') has: boolean = false;
-  @LocalStorageProp('ep') ep: number = 0;
-  @LocalStorageProp('title') title: string = '';
-  @LocalStorageProp('cover') cover: string = '';
+  @LocalStorageProp('itemsJson') @Watch('onData') itemsJson: string = '[]';
+  @State cover: string = '';
+  @State title: string = '';
+
+  aboutToAppear(): void {
+    this.parse();
+  }
+
+  onData(): void {
+    this.parse();
+  }
+
+  private parse(): void {
+    let list: CardItem[] = [];
+    try {
+      const parsed = JSON.parse(this.itemsJson) as CardItem[];
+      if (parsed !== null) {
+        list = parsed;
+      }
+    } catch (err) {
+      list = [];
+    }
+    if (list.length > 0) {
+      this.cover = list[0].cover;
+      this.title = list[0].title;
+    } else {
+      this.cover = '';
+      this.title = '';
+    }
+  }
 
   private openApp(): void {
     postCardAction(this, {
       action: 'router',
       abilityName: 'EntryAbility',
       params: {
-        hgFormAction: 'continue',
-        hgFormEp: this.ep
+        hgFormAction: 'continue'
       }
     });
   }
 
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
-      if (this.has && this.cover.length > 0) {
+      if (this.cover.length > 0) {
         Image(this.cover)
           .width('100%')
           .height('100%')
           .objectFit(ImageFit.Cover)
       } else {
-        // 无封面：深色底 + 播放符号占位（SVG 在卡片里兼容性不稳定，改用纯 ArkUI）
         Column() {
           Text('▶')
             .fontSize(52)
@@ -44,7 +76,6 @@ struct WidgetCard {
         .backgroundColor('#F01A1A1A')
       }
 
-      // 顶部标签：只在左上角显示「继续观看」，不遮大面积封面。
       Text('继续观看')
         .fontSize(14)
         .fontWeight(FontWeight.Medium)

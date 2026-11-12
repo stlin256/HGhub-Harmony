@@ -1,5 +1,7 @@
 import { JSON } from '@kit.ArkTS';
 import { Prefs } from '../services/Prefs';
+import { WatchCoverCache } from '../services/WatchCoverCache';
+import { WidgetRefresher } from '../services/WidgetRefresher';
 import { User, WatchProgress } from '../models/Types';
 
 /**
@@ -332,9 +334,14 @@ export class UserPrefs {
     AppStorage.setOrCreate<string>(K_FAVS, raw);
     if (on) {
       UserPrefs.setFavMeta(id, title, cover);
+      // 收藏后立即生成服务卡片用的 base64 快照，避免「收藏影视架」一直占位。
+      WatchCoverCache.ensure(id, cover);
     } else {
       UserPrefs.removeFavMeta(id);
     }
+    // 每次收藏/取消收藏立即刷新收藏卡片；快照生成后再补一次，避免首帧占位。
+    WidgetRefresher.requestRefresh(300);
+    WidgetRefresher.requestRefresh(2600);
     return on;
   }
 

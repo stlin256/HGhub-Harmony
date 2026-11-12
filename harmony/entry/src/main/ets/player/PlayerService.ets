@@ -5,6 +5,8 @@ import { Lines } from '../services/Lines';
 import { USER_AGENT } from '../services/Net';
 import { PlaybackInfo } from '../models/Types';
 import { UserPrefs } from '../state/UserPrefs';
+import { WatchCoverCache } from '../services/WatchCoverCache';
+import { WidgetRefresher } from '../services/WidgetRefresher';
 import { PlaybackLog } from './PlaybackLog';
 import { LocalProxy } from './LocalProxy';
 import { MediaPrefetch } from './MediaPrefetch';
@@ -42,6 +44,8 @@ class PlayCacheEntry {
  * release 之后不再发起任何调用，避免 5400102 之类的崩溃/异常。
  */
 export class PlayerService {
+  /** 已触发过服务卡片刷新的视频 id：只在切到新视频时刷新继续观看卡片。 */
+  private static widgetVideoId: number = 0;
   /* ── 页面回调（由页面赋值） ───────────────────────── */
   onLoading: () => void = () => {};
   onPrepared: () => void = () => {};
@@ -1141,6 +1145,13 @@ export class PlayerService {
     const title: string = meta !== null ? meta.title : '';
     const cover: string = meta !== null ? meta.cover : '';
     UserPrefs.addHistory(this.videoId, this.ep, posSec, durSec, title, cover);
+    // 服务卡片缩略图：封面是密文，卡片不能直接加载 → 应用进程内解码成 3:4 小图快照。
+    WatchCoverCache.ensure(this.videoId, cover);
+    // 刷到下一个视频时立即刷新「继续观看」卡片（进度保存也只在换视频时触发一次）。
+    if (PlayerService.widgetVideoId !== this.videoId) {
+      PlayerService.widgetVideoId = this.videoId;
+      WidgetRefresher.requestRefresh(900);
+    }
   }
 
   /** 退出页面兜底：记录进度并释放。 */

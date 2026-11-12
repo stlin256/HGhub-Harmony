@@ -1,6 +1,8 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Detail, WatchProgress } from '../models/Types';
 import { UserPrefs } from '../state/UserPrefs';
+import { WatchCoverCache } from './WatchCoverCache';
+import { WidgetRefresher } from './WidgetRefresher';
 import { Api } from './Api';
 
 const LOG_DOMAIN: number = 0x0000;
@@ -38,7 +40,12 @@ export class UserListPrefetch {
       UserListPrefetch.timer = -1;
       UserListPrefetch.prefetch(UserListPrefetch.localIds()).then(() => {
         UserListPrefetch.backfillLatestHistory();
-        UserListPrefetch.backfillFavoritesMeta();
+        UserListPrefetch.backfillFavoritesMeta().then(() => {
+          UserListPrefetch.captureHistoryCovers();
+          // 封面快照生成后再主动刷新已添加的卡片（避免等系统 30 分钟）。
+          WidgetRefresher.requestRefresh(3500);
+        }).catch(() => {
+        });
       }).catch(() => {
       });
     }, WARM_DELAY_MS);
@@ -111,18 +118,54 @@ export class UserListPrefetch {
         return;
       }
       UserPrefs.addHistory(last.id, last.ep, last.t, last.dur, detailTitle, detailCover);
+      WatchCoverCache.ensure(last.id, detailCover);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'backfill history meta id=%{public}d', last.id);
     } catch (err) {
     }
   }
 
-  /** 旧收藏没有 title/cover：用预热拿到的详情补齐前 4 条，供「收藏影视架」卡片展示。 */
-  private static backfillFavoritesMeta(): void {
+  /**
+   * 为「继续观看」服务卡片预处理最近 3 条历史的封面快照：
+   * 历史里已有 cover URL 时直接抓；没有的（旧记录）跳过，等下次播放/回填再补。
+   */
+  private static captureHistoryCovers(): void {
+    try {
+      const history: WatchProgress[] = UserPrefs.history();
+      for (let i = 0; i < history.length && i < 3; i++) {
+        const item: WatchProgress = history[i];
+        let cover: string = '';
+        const itemCover: string | undefined = item.cover;
+        if (itemCover !== undefined && itemCover !== null) {
+          cover = itemCover;
+        }
+        if (cover.length === 0) {
+          // 旧记录没有 cover：预热已把详情放进 Api 缓存，用详情封面兜底（不回写历史，避免打乱顺序）。
+          const detail: Detail | null = Api.peekVideo(item.id);
+          if (detail !== null) {
+            const detailCover: string = detail.cover !== undefined && detail.cover !== null ? detail.cover : '';
+            cover = detailCover;
+          }
+        }
+        WatchCoverCache.ensure(item.id, cover);
+      }
+    } catch (err) {
+    }
+  }
+
+  /**
+   * 收藏元数据自愈（本地收藏与登录态通用：都统一从 UserPrefs.favs() 的 id 反查详情）：
+   * - 缺 title/cover 的旧收藏：先查 Api 缓存，未命中则主动 warmVideo 拉详情，再写回 fav_meta；
+   * - 同时生成服务卡片用的 base64 封面快照（wcc_<id>）。
+   */
+  private static async backfillFavoritesMeta(): Promise<void> {
     try {
       const favs: number[] = UserPrefs.favs();
       for (let i = 0; i < favs.length && i < 4; i++) {
         const id: number = favs[i];
-        const detail: Detail | null = Api.peekVideo(id);
+        let detail: Detail | null = Api.peekVideo(id);
+        if (detail === null) {
+          detail = await Api.warmVideo(id);
+        }
         if (detail === null) {
           continue;
         }
@@ -131,6 +174,7 @@ export class UserListPrefetch {
         if (title.length > 0 || cover.length > 0) {
           UserPrefs.setFavMeta(id, title, cover);
         }
+        WatchCoverCache.ensure(id, cover);
       }
     } catch (err) {
     }

@@ -18,6 +18,11 @@ export class Prefs {
     return Prefs.store;
   }
 
+  /** 只读快照（卡片刷新服务枚举 form_style_* 用）。 */
+  static snapshot(): preferences.Preferences {
+    return Prefs.ready();
+  }
+
   static getString(key: string, fallback: string): string {
     try {
       const value: preferences.ValueType = Prefs.ready().getSync(key, fallback);
