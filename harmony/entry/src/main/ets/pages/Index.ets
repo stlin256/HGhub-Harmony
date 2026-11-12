@@ -1,5 +1,6 @@
 import { promptAction } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
+import { JSON } from '@kit.ArkTS';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
@@ -38,6 +39,15 @@ import {
   PlayerParam, ChannelParam, PostParam, VideoParam, TopicParam, UserParam
 } from '../state/Routes';
 
+/** 服务卡片「继续观看」携带的最近一条历史。 */
+interface FormContinuePayload {
+  id: number;
+  ep: number;
+  t: number;
+  title?: string;
+  cover?: string;
+}
+
 @Entry
 @Component
 struct Index {
@@ -59,6 +69,8 @@ struct Index {
   @State navEmpty: boolean = true;
   /** 播放页在平行视窗里点「全屏」时置 true：Navigation 临时切回 Stack 满窗显示。 */
   @StorageProp(K_FORCE_FULLSCREEN) @Watch('onForceFullscreenChanged') forceFullscreen: boolean = false;
+  /** 服务卡片「继续观看」拉起：EntryAbility 写入最近一条历史，Index 消费后打开播放页。 */
+  @StorageProp('hgFormContinueJson') @Watch('onFormContinue') formContinueJson: string = '';
   /** 平板适配提示每个版本只弹一次（本进程内也只检查一次）。 */
   private tabletNoticeChecked: boolean = false;
   private tabletDialog: CustomDialogController | null = null;
@@ -194,6 +206,32 @@ struct Index {
 
   private onForceFullscreenChanged(): void {
     this.syncNavMode();
+  }
+
+  /** 服务卡片点击「继续观看」：消费 EntryAbility 写入的历史记录并打开播放页（只消费一次）。 */
+  private onFormContinue(): void {
+    if (this.formContinueJson.length === 0) {
+      return;
+    }
+    const raw: string = this.formContinueJson;
+    AppStorage.setOrCreate<string>('hgFormContinueJson', '');
+    try {
+      const payload = JSON.parse(raw) as FormContinuePayload;
+      if (payload === null || payload.id === undefined || payload.id === null || payload.id <= 0) {
+        return;
+      }
+      const param: PlayerParam = {
+        videoIds: [payload.id],
+        index: 0,
+        title: payload.title !== undefined && payload.title !== null ? payload.title : '继续观看',
+        source: 'form',
+        feedKind: 'video',
+        startEp: payload.ep > 0 ? payload.ep : 1,
+        startTime: payload.t > 0 ? payload.t : 0
+      };
+      this.navStack.pushPathByName(ROUTE_PLAYER, param);
+    } catch (err) {
+    }
   }
 
   /** 平行视窗左栏宽度：窗口 40%，限制在 380–520vp（保证悬浮底栏 340+边距放得下）。 */

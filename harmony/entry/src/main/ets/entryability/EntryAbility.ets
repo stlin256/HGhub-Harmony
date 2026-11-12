@@ -25,7 +25,10 @@ const TAG = 'HGhub';
 
 export default class EntryAbility extends UIAbility {
   private density: number = 3.5;
+  /** 冷启动时由服务卡片拉起：等 Prefs/UserPrefs 初始化后再消费。 */
+  private pendingFormWant: Want | null = null;
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    this.pendingFormWant = want;
     PerfMark.start('startup');
     AppContext.init(this.context);
     // 应用接续：目标设备冷启动时恢复源设备带来的播放上下文。
@@ -55,8 +58,49 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate<number>(K_CONTENT_W, displayInfo.width / density);
     } catch (err) {
     }
-    this.initServices(systemDark);
+    this.initServices(systemDark).then(() => {
+      const pending: Want | null = this.pendingFormWant;
+      this.pendingFormWant = null;
+      if (pending !== null) {
+        this.handleFormWant(pending);
+      }
+    }).catch(() => {
+    });
     hilog.info(DOMAIN, TAG, 'EntryAbility created');
+  }
+
+  /** 应用已在运行时点服务卡片：直接按卡片动作处理。 */
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    this.handleFormWant(want);
+  }
+
+  /** 服务卡片「继续观看」：读取最近一条历史，写入 AppStorage 由 Index 打开播放页。 */
+  private handleFormWant(want: Want): void {
+    try {
+      const params = want.parameters;
+      if (params === undefined || params === null) {
+        return;
+      }
+      const action: Object | undefined = params['hgFormAction'];
+      if (action === undefined || action === null || String(action) !== 'continue') {
+        return;
+      }
+      const list = UserPrefs.history();
+      if (list.length === 0) {
+        return;
+      }
+      const last = list[0];
+      const payload: string = JSON.stringify({
+        id: last.id,
+        ep: last.ep,
+        t: last.t,
+        title: last.title !== undefined && last.title !== null ? last.title : '',
+        cover: last.cover !== undefined && last.cover !== null ? last.cover : ''
+      });
+      AppStorage.setOrCreate<string>('hgFormContinueJson', payload);
+      hilog.info(DOMAIN, TAG, 'form continue id=%{public}d', last.id);
+    } catch (err) {
+    }
   }
 
   onForeground(): void {
