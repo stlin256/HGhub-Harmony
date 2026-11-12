@@ -8,7 +8,7 @@ import { HgColor } from '../design/HgTokens';
 @Component
 export struct HgPressable {
   @Prop dark: boolean = true;
-  @Prop scale: number = HgMotion.pressScale;
+  @Prop pressScale: number = HgMotion.pressScale;
   @Prop disabled: boolean = false;
   /** true 时不拦截点击，仅提供按压视觉（内部已有 onClick）。 */
   @Prop noTap: boolean = false;
@@ -24,7 +24,7 @@ export struct HgPressable {
     Stack() {
       this.content()
     }
-    .scale({ x: this.pressed ? this.scale : 1, y: this.pressed ? this.scale : 1 })
+    .scale({ x: this.pressed ? this.pressScale : 1, y: this.pressed ? this.pressScale : 1 })
     .animation({ duration: HgMotion.pressMs(this.pressed), curve: HgMotion.curve })
     .onTouch((event: TouchEvent) => {
       if (this.disabled) {
