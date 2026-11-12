@@ -1,4 +1,5 @@
 import { Api } from '../services/Api';
+import { UserListPrefetch } from '../services/UserListPrefetch';
 import { Detail, User, WatchProgress } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState } from '../components/HgCommon';
@@ -45,6 +46,10 @@ export struct ProfilePage {
   private cardsFadeTimer: number = -1;
   private historyList: WatchProgress[] = [];
   private loadSeq: number = 0;
+  /** 已做过详情预热的当前 Tab id（收藏/历史变化时只对新增 id 调 warmNow）。 */
+  private warmSeen: number[] = [];
+  /** 组件是否已挂载：异步回包后不再对已卸载的页面 setState。 */
+  private active: boolean = false;
 
   /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
   private contentGutter(): number {
@@ -86,12 +91,15 @@ export struct ProfilePage {
   }
 
   aboutToAppear(): void {
+    this.active = true;
     this.readUser();
     this.refreshLocalLists();
+    this.warmSeen = this.tabIds().slice(0, MAX_CARDS);
     this.loadCards();
   }
 
   aboutToDisappear(): void {
+    this.active = false;
     if (this.cardsFadeTimer >= 0) {
       clearTimeout(this.cardsFadeTimer);
       this.cardsFadeTimer = -1;
@@ -104,6 +112,8 @@ export struct ProfilePage {
 
   onStoreChanged(): void {
     this.refreshLocalLists();
+    // 收藏/历史变化后先增量预热新增 id 的详情（不阻塞；与 loadCards 共用 Api 在途请求，不重复回源）。
+    this.warmNewDetails();
     // 收藏/历史（可能在详情页本地新增）变化时，列表先淡出再重载淡入。
     if (this.cards.length > 0) {
       this.cardsFade = 0;
@@ -141,6 +151,21 @@ export struct ProfilePage {
     this.historyCount = this.historyList.length;
   }
 
+  /** 收藏/历史变化后，把当前 Tab 新增 id 的详情后台预热（已缓存/在途的由 UserListPrefetch 跳过）。 */
+  private warmNewDetails(): void {
+    const ids: number[] = this.tabIds().slice(0, MAX_CARDS);
+    const added: number[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      if (this.warmSeen.indexOf(ids[i]) < 0) {
+        added.push(ids[i]);
+      }
+    }
+    this.warmSeen = ids;
+    if (added.length > 0) {
+      UserListPrefetch.warmNow(added);
+    }
+  }
+
   private tabIds(): number[] {
     if (this.tab === 'fav') {
       return UserPrefs.favs();
@@ -157,8 +182,42 @@ export struct ProfilePage {
     return await Api.warmVideo(id);
   }
 
+  /** 按 target 顺序合并详情：Api 缓存命中优先，其次复用当前已展示卡片（后台补齐时不清空/闪骨架）。 */
+  private mergeCards(target: number[]): Detail[] {
+    const out: Detail[] = [];
+    for (let i = 0; i < target.length; i++) {
+      const id: number = target[i];
+      const hit: Detail | null = Api.peekVideo(id);
+      if (hit !== null) {
+        out.push(hit);
+        continue;
+      }
+      for (let j = 0; j < this.cards.length; j++) {
+        if (this.cards[j].id === id) {
+          out.push(this.cards[j]);
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  /** target 中尚未命中 Api 详情缓存的 id（需要回源补齐）。 */
+  private missingIds(target: number[]): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < target.length; i++) {
+      if (Api.peekVideo(target[i]) === null) {
+        out.push(target[i]);
+      }
+    }
+    return out;
+  }
+
   private async loadCards(): Promise<void> {
     const seq = ++this.loadSeq;
+    if (!this.active) {
+      return;
+    }
     const ids: number[] = this.tabIds();
     const target: number[] = ids.slice(0, MAX_CARDS);
     if (target.length === 0) {
@@ -168,44 +227,51 @@ export struct ProfilePage {
       this.scheduleCardsFadeIn();
       return;
     }
-    this.cardsLoading = true;
     this.cardError = '';
+    // 缓存优先：启动预热 / 详情页看过的详情已在 Api 共享缓存里，先同步渲染命中的卡片，
+    // 命中即 cardsLoading=false 并直接淡入，不再先空白/骨架等网络。
+    const shown: Detail[] = this.mergeCards(target);
+    if (shown.length > 0) {
+      this.cards = shown;
+      this.cardsLoading = false;
+      this.scheduleCardsFadeIn();
+    } else {
+      this.cardsLoading = true;
+    }
+    const missing: number[] = this.missingIds(target);
+    if (missing.length === 0) {
+      return;
+    }
     try {
       let index = 0;
-      while (index < target.length) {
+      while (index < missing.length) {
         const tasks: Promise<Detail | null>[] = [];
-        for (let i = index; i < index + FETCH_CONCURRENCY && i < target.length; i++) {
-          const cached: Detail | null = Api.peekVideo(target[i]);
-          if (cached !== null) {
-            tasks.push(Promise.resolve<Detail | null>(cached));
-          } else {
-            tasks.push(this.fetchOne(target[i]));
-          }
+        for (let i = index; i < index + FETCH_CONCURRENCY && i < missing.length; i++) {
+          tasks.push(this.fetchOne(missing[i]));
         }
         await Promise.all(tasks);
-        if (seq !== this.loadSeq) {
+        if (seq !== this.loadSeq || !this.active) {
           return;
+        }
+        // 每批补齐后按 target 顺序增量更新：已展示卡片继续保留，不清空、不闪骨架。
+        const merged: Detail[] = this.mergeCards(target);
+        if (merged.length > 0) {
+          this.cards = merged;
+          this.cardsLoading = false;
         }
         index += FETCH_CONCURRENCY;
       }
-      const out: Detail[] = [];
-      for (let i = 0; i < target.length; i++) {
-        const hit: Detail | null = Api.peekVideo(target[i]);
-        if (hit !== null) {
-          out.push(hit);
-        }
-      }
-      if (seq !== this.loadSeq) {
+      if (seq !== this.loadSeq || !this.active) {
         return;
       }
-      this.cards = out;
+      this.cards = this.mergeCards(target);
       this.cardError = '';
     } catch (err) {
-      if (seq === this.loadSeq) {
+      if (seq === this.loadSeq && this.active) {
         this.cardError = (err as Error).message;
       }
     } finally {
-      if (seq === this.loadSeq) {
+      if (seq === this.loadSeq && this.active) {
         this.cardsLoading = false;
         this.scheduleCardsFadeIn();
       }
@@ -233,6 +299,7 @@ export struct ProfilePage {
     this.cardsFade = 0;
     this.tab = tab;
     this.cards = [];
+    this.warmSeen = this.tabIds().slice(0, MAX_CARDS);
     this.loadCards();
   }
 

@@ -4,6 +4,7 @@ import { display, window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from '../services/AppContext';
 import { Api } from '../services/Api';
+import { UserListPrefetch } from '../services/UserListPrefetch';
 import { LineAuto } from '../services/LineAuto';
 import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
@@ -148,6 +149,8 @@ export default class EntryAbility extends UIAbility {
       PerfMark.recordStartup(PerfMark.end('startup'));
       this.setupKeyboardAvoidMode(windowStage);
       this.setupWindow(windowStage);
+      // 收藏/历史详情预取：延迟约 1.2s 后台预热（内部不阻塞），打开「我的」直接命中共享详情缓存。
+      UserListPrefetch.warm();
     });
   }
 
