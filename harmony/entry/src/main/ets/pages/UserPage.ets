@@ -1,9 +1,11 @@
 import { Api } from '../services/Api';
 import { Paged, UserProfile, VideoCard } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
+import { HgVideoGridCard } from '../components/HgVideoGridCard';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
+import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
 import { ROUTE_PLAYER, UserParam, PlayerParam } from '../state/Routes';
 import { UiBus } from '../services/UiBus';
@@ -46,16 +48,11 @@ export struct UserPage {
   }
 
   private sideInset(): number {
-    return HgSpace.pageInset + this.gutter();
+    return HgGrid.sideInset(this.windowW);
   }
 
   private gridTemplate(): string {
-    const cols: number = this.columns();
-    let tpl: string = '1fr';
-    for (let i = 1; i < cols; i++) {
-      tpl = tpl + ' 1fr';
-    }
-    return tpl;
+    return HgGrid.template(this.columns());
   }
 
   private async loadFirst(): Promise<void> {
@@ -235,27 +232,14 @@ export struct UserPage {
 
   @Builder
   VideoCardItem(item: VideoCard) {
-    Column({ space: HgSpace.xs }) {
-      HgAsyncCover({
-        url: item.cover,
-        dark: this.dark,
-        radius: HgRadius.card,
-        coverWidth: '100%',
-        coverHeight: 160
-      })
-      Text(item.title)
-        .fontSize(HgFont.secondary)
-        .fontColor(HgColor.textPrimary(this.dark))
-        .maxLines(2)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%')
-    }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .onClick(() => {
-      this.openVideo(item);
+    HgVideoGridCard({
+      dark: this.dark,
+      cover: item.cover,
+      title: item.title,
+      onOpen: () => {
+        this.openVideo(item);
+      }
     })
-    .accessibilityText(item.title)
   }
 
   build() {

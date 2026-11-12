@@ -6,8 +6,10 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgPosterCard } from '../components/HgPosterCard';
 import { HgEmptyState, HgSkeletonGrid } from '../components/HgCommon';
 import { HgListSource } from '../components/browse/HgListSource';
+import { HgFeedGrid } from '../components/browse/HgFeedGrid';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
+import { HgGrid } from '../design/HgGrid';
 import { RecService } from '../recommend/RecService';
 import { CateInfo, CategoryCatalog } from '../services/CategoryCatalog';
 import { K_LINE_BASE } from '../services/Lines';
@@ -510,12 +512,7 @@ export struct HomePage {
 
   /** Grid 列模板：按当前列数生成 '1fr ...'（2/3/4 列均可），禁止写死两列。 */
   private gridTemplate(): string {
-    const cols: number = this.columns();
-    let tpl: string = '1fr';
-    for (let i = 1; i < cols; i++) {
-      tpl = tpl + ' 1fr';
-    }
-    return tpl;
+    return HgGrid.template(this.columns());
   }
 
   /** 首屏骨架卡片数：固定两行，列数与真实网格一致（2/3/4 列 → 4/6/8 张）。 */
@@ -1814,76 +1811,39 @@ export struct HomePage {
         .justifyContent(FlexAlign.Center)
         .padding(HgSpace.xxl)
       } else {
-        Refresh({ refreshing: this.refreshing }) {
-          Grid(this.gridScroller) {
-            GridItem() {
-              this.HomeHeader()
-            }
-            .columnStart(0)
-            // Header 横跨整行：列数变化时必须跟随（不能写死 0..1）。
-            .columnEnd(this.columns() - 1)
-
-            LazyForEach(this.source, (item: VideoCard, index: number) => {
-              GridItem() {
-                HgPosterCard({
-                  videoId: item.id,
-                  title: item.title,
-                  coverUrl: item.cover,
-                  score: item.score,
-                  episodeCount: item.episode_count,
-                  dark: this.dark,
-                  onOpen: (id: number) => {
-                    this.openAt(index);
-                  }
-                })
-              }
-              // 切 TAG / 换一批只淡出淡入瀑布流卡片，Header/Hero 保持挂载与清晰；
-              // 轻微纵向位移给整表替换一点方向感（动画结束复位为 0）。
-              .opacity(this.listOpacity)
-              .translate({ y: this.listOffset })
-              // 曝光事件：可见面积 ≥50% 时上报（去重，供画像/RDB 事件层使用）。
-              .onVisibleAreaChange([0.0, 0.5, 1.0], (isExpanding: boolean, ratio: number) => {
-                if (ratio >= 0.5) {
-                  this.recordImpression(item.id);
-                }
-              })
-            }, (item: VideoCard) => item.id.toString())
-
-            GridItem() {
-              this.GridFooter()
-            }
-            .columnStart(0)
-            .columnEnd(this.columns() - 1)
-          }
-          .columnsTemplate(this.gridTemplate())
-          .columnsGap(HgSpace.s)
-          .rowsGap(HgSpace.m)
-          // 缓存多留几屏（2 列≈11 行 / 4 列≈5 行）：新行在进入视口前已创建，
-          // 慢速拖动时随手指连续滑入，不会「滑一段才整块跳出来」。
-          .cachedCount(22)
-          .scrollBar(BarState.Off)
-          .edgeEffect(EdgeEffect.Spring)
-          .padding({
-            // 宽屏：额外的 gutter 让内容区最大 960vp 居中；Hero 宽度因此随列数自适应且不超 960。
-            left: HgSpace.pageInset + this.gutter(),
-            right: HgSpace.pageInset + this.gutter(),
-            // 悬浮胶囊底栏：58 高 + bottomInset+8 边距，再留 8vp 呼吸位，保证最后一行与 footer 完整露出。
-            bottom: HgSize.tabBarFloating + this.bottomInset + HgSpace.s
-          })
-          .width('100%')
-          .height('100%')
-          .onScrollIndex((first: number, last: number) => {
-            this.maybeLoadMore(last);
-          })
-          .onReachEnd(() => {
+        // 主页瀑布流（Refresh + Grid + LazyForEach + Header/Footer + 曝光）已抽到共享组件，
+        // 其它多列视频海报流页面复用同一实现，仅通过列数/留白/Header 等参数微调。
+        HgFeedGrid({
+          source: this.source,
+          gridScroller: this.gridScroller,
+          dark: this.dark,
+          columns: this.columns(),
+          contentGutter: this.gutter(),
+          topPadding: 0,
+          bottomPadding: HgSize.tabBarFloating + this.bottomInset + HgSpace.s,
+          refreshing: this.refreshing,
+          listOpacity: this.listOpacity,
+          listOffset: this.listOffset,
+          cachedCount: 22,
+          showHeader: true,
+          showFooter: true,
+          header: this.HomeHeader,
+          footer: this.GridFooter,
+          onOpen: (index: number) => {
+            this.openAt(index);
+          },
+          onLoadMore: () => {
             this.loadMore();
-          })
-        }
-        .layoutWeight(1)
-        .width('100%')
-        .refreshOffset(64)
-        .onRefreshing(() => {
-          this.refresh();
+          },
+          onScrollLast: (last: number) => {
+            this.maybeLoadMore(last);
+          },
+          onRefresh: () => {
+            this.refresh();
+          },
+          onImpression: (videoId: number) => {
+            this.recordImpression(videoId);
+          }
         })
       }
     }

@@ -5,6 +5,7 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState } from '../components/HgCommon';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
+import { HgGrid } from '../design/HgGrid';
 import {
   K_BOTTOM_INSET, K_DARK, K_FAVS, K_HISTORY, K_TOP_INSET, K_USER, K_NAV_W, UserPrefs
 } from '../state/UserPrefs';
@@ -99,12 +100,7 @@ export struct ProfilePage {
 
   /** 依列数生成 Grid columnsTemplate。 */
   private gridTemplate(): string {
-    let out: string = '1fr';
-    const count: number = this.gridCols();
-    for (let i = 1; i < count; i++) {
-      out += ' 1fr';
-    }
-    return out;
+    return HgGrid.template(this.gridCols());
   }
 
   private colIndexes(): number[] {
