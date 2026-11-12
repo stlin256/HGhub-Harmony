@@ -3,7 +3,8 @@ import { Comment, CommentPage, Post } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgTopBar } from '../components/HgCommon';
 import { PostContent } from '../components/browse/PostContent';
-import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { UserPrefs } from '../state/UserPrefs';
@@ -60,24 +61,6 @@ export struct PostDetailPage {
   }
 
   aboutToDisappear(): void {
-    if (this.contentFadeTimer >= 0) {
-      clearTimeout(this.contentFadeTimer);
-      this.contentFadeTimer = -1;
-    }
-  }
-
-  /** 详情内容出现时从 62% 透明度 190ms 淡入，首屏头图/正文不硬切。 */
-  private fadeInContent(): void {
-    this.contentFade = 0.62;
-    if (this.contentFadeTimer >= 0) {
-      clearTimeout(this.contentFadeTimer);
-    }
-    this.contentFadeTimer = setTimeout(() => {
-      this.contentFadeTimer = -1;
-      animateTo({ duration: HgDuration.overlay, curve: Curve.FastOutSlowIn }, () => {
-        this.contentFade = 1;
-      });
-    }, 40);
   }
 
   private async loadPost(): Promise<void> {
@@ -105,7 +88,6 @@ export struct PostDetailPage {
       const count = post.counts !== undefined ? post.counts.like : 0;
       this.likeCount = count;
       this.hasPost = true;
-      this.fadeInContent();
       this.loadComments();
     } catch (err) {
       this.errorText = (err as Error).message;
@@ -508,7 +490,12 @@ export struct PostDetailPage {
         })
 
         if (this.loading) {
-          this.DetailSkeleton()
+          Column() {
+            this.DetailSkeleton()
+          }
+          .layoutWeight(1)
+          .width('100%')
+          .transition(HgMotion.statusTransition())
         } else if (!this.hasPost) {
           Column() {
             HgEmptyState({
@@ -526,6 +513,7 @@ export struct PostDetailPage {
           .width('100%')
           .justifyContent(FlexAlign.Center)
           .padding(HgSpace.xxl)
+          .transition(HgMotion.statusTransition())
         } else {
           Scroll() {
             Column() {
@@ -575,8 +563,7 @@ export struct PostDetailPage {
           .align(Alignment.Top)
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
-          // 首屏头图/正文淡入（见 fadeInContent）。
-          .opacity(this.contentFade)
+          .transition(HgMotion.statusTransition())
         }
       }
       .width('100%')
@@ -585,5 +572,6 @@ export struct PostDetailPage {
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    .systemTransition(NavigationSystemTransitionType.FADE)
   }
 }
