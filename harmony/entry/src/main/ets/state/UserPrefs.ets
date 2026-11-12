@@ -10,6 +10,8 @@ export const K_THEME_MODE = 'hgThemeMode';
 export const K_DARK = 'hgDark';
 export const K_MUTED = 'hgMuted';
 export const K_MUTE_ON_STARTUP = 'hgMuteOnStartup';
+/** 优先高清（HEVC）：有高清源时优先播放。 */
+export const K_PREFER_HEVC = 'hgPreferHevc';
 export const K_VOLUME = 'hgVolume';
 export const K_LIKES = 'hgLikesJson';
 export const K_FAVS = 'hgFavsJson';
@@ -97,6 +99,7 @@ export class UserPrefs {
     AppStorage.setOrCreate<boolean>(K_DARK, UserPrefs.resolveDark(mode, systemDark));
     AppStorage.setOrCreate<boolean>(K_MUTED, Prefs.getBool('muted', true));
     AppStorage.setOrCreate<boolean>(K_MUTE_ON_STARTUP, Prefs.getBool('mute_on_startup', true));
+    AppStorage.setOrCreate<boolean>(K_PREFER_HEVC, Prefs.getBool('prefer_hevc', false));
     AppStorage.setOrCreate<number>(K_VOLUME, Prefs.getNumber('volume', 0.7));
     AppStorage.setOrCreate<string>(K_VIDEO_SCALE, UserPrefs.normalizeVideoScale(Prefs.getString('video_scale', 'contain')));
     AppStorage.setOrCreate<string>(K_LIKES, Prefs.getString('likes', '[]'));
@@ -171,6 +174,17 @@ export class UserPrefs {
     if (on) {
       UserPrefs.setMuted(true);
     }
+  }
+
+  /** 优先高清（HEVC）：默认关闭，避免老设备/弱网首播变慢。 */
+  static preferHevc(): boolean {
+    const value = AppStorage.get<boolean>(K_PREFER_HEVC);
+    return value === undefined ? false : value;
+  }
+
+  static setPreferHevc(on: boolean): void {
+    Prefs.putBool('prefer_hevc', on);
+    AppStorage.setOrCreate<boolean>(K_PREFER_HEVC, on);
   }
 
   static volume(): number {

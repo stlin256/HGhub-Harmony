@@ -21,6 +21,7 @@ import { Api } from '../services/Api';
 import { Lines } from '../services/Lines';
 import { USER_AGENT } from '../services/Net';
 import { PlaybackInfo } from '../models/Types';
+import { UserPrefs } from '../state/UserPrefs';
 import { PlaybackLog } from './PlaybackLog';
 import { MediaCache, MediaFetch, MEDIA_KIND_MEDIA, MEDIA_KIND_PLAYLIST } from './MediaCache';
 import {
@@ -601,12 +602,20 @@ export class MediaPrefetch {
     return expiry;
   }
 
+  /** 取预热地址：跟随「优先高清」偏好，与 PlayerService 的取流规则保持一致。 */
   private static mainUrl(info: PlaybackInfo): string {
     const streams = info.streams;
-    if (streams === undefined || streams === null || streams.main === undefined || streams.main === null) {
+    if (streams === undefined || streams === null) {
       return '';
     }
-    return streams.main;
+    if (UserPrefs.preferHevc()) {
+      const hevc: string | undefined = streams.hevc;
+      if (hevc !== undefined && hevc !== null && hevc.length > 0) {
+        return hevc;
+      }
+    }
+    const main: string | undefined = streams.main;
+    return main === undefined || main === null ? '' : main;
   }
 
   /** 预热请求头：Referer/UA + PlaybackInfo 里的 CDN 鉴权头（与直连播放一致）。 */

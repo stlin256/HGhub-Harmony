@@ -18,6 +18,10 @@ export struct LineSheet {
   /** 自动线路状态文案（正在检测/当前可用/已自动切换）+ 检测中 loading。 */
   @State autoStatus: string = LineAuto.statusText();
   @State autoBusy: boolean = false;
+  /** 线路延迟（url → ms；-1 表示探测失败）。 */
+  @State latency: Map<string, number> = new Map<string, number>();
+  /** 是否正在探测延迟。 */
+  @State probing: boolean = false;
   onClose: () => void = () => {};
 
   aboutToAppear(): void {
@@ -35,6 +39,7 @@ export struct LineSheet {
     try {
       const result = await Api.lineMirrors();
       this.mirrors = result.items;
+      this.probeLatency();
     } catch (err) {
       this.error = (err as Error).message;
       // 发布页不可达时用上次缓存的镜像兜底（缓存可能为空，此时只显示错误）。
@@ -46,6 +51,61 @@ export struct LineSheet {
       this.loading = false;
       this.autoStatus = LineAuto.statusText();
     }
+  }
+
+  /** 探测当前线路 + 前 4 条镜像的延迟（60s 内复用缓存），结果用于列表右侧展示。 */
+  private async probeLatency(): Promise<void> {
+    if (this.probing) {
+      return;
+    }
+    const urls: string[] = [this.current];
+    for (let i = 0; i < this.mirrors.length && urls.length < 5; i++) {
+      const item: LineItem = this.mirrors[i];
+      if (item !== undefined && item !== null && item.url !== this.current) {
+        urls.push(item.url);
+      }
+    }
+    this.probing = true;
+    try {
+      const result: Map<string, number> = await LineAuto.probeLatency(urls);
+      const next: Map<string, number> = new Map<string, number>();
+      result.forEach((ms: number, url: string) => {
+        next.set(url, ms);
+      });
+      this.latency = next;
+    } catch (err) {
+    } finally {
+      this.probing = false;
+    }
+  }
+
+  /** 延迟文案与颜色：<100ms 绿、<300ms 黄、其余红、探测失败灰。 */
+  private latencyText(url: string): string {
+    const ms: number = this.latency.get(url) ?? -2;
+    if (ms === -2) {
+      return this.probing ? '检测中…' : '';
+    }
+    if (ms < 0) {
+      return '超时';
+    }
+    return ms + 'ms';
+  }
+
+  private latencyColor(url: string): string {
+    const ms: number = this.latency.get(url) ?? -2;
+    if (ms === -2) {
+      return HgColor.textTertiary(this.dark);
+    }
+    if (ms < 0) {
+      return HgColor.textTertiary(this.dark);
+    }
+    if (ms < 100) {
+      return HgColor.success(this.dark);
+    }
+    if (ms < 300) {
+      return HgColor.warning(this.dark);
+    }
+    return HgColor.danger(this.dark);
   }
 
   private switchTo(url: string): void {
@@ -110,6 +170,14 @@ export struct LineSheet {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
+
+      if (this.latencyText(item.url).length > 0) {
+        Text(this.latencyText(item.url))
+          .fontSize(HgFont.caption)
+          .fontColor(this.latencyColor(item.url))
+          .maxLines(1)
+          .margin({ right: HgSpace.s })
+      }
 
       if (this.current === item.url) {
         SymbolGlyph($r('sys.symbol.checkmark'))

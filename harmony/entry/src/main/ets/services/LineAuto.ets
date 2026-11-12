@@ -1,5 +1,5 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { LineItem } from '../models/Types';
+import { LineItem, LineProbe } from '../models/Types';
 import { Lines } from './Lines';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
@@ -20,6 +20,14 @@ const PROBE_BATCH: number = 5;
 const CANDIDATE_LIMIT: number = 10;
 /** 启动后延迟多久做首次后台检查（让首屏请求先走）。 */
 const INIT_DELAY_MS: number = 1200;
+/** 播放中线路巡检间隔（仅播放页激活时运行）。 */
+const WATCH_INTERVAL_MS: number = 5 * 60 * 1000;
+/** 连续失败多少次触发自动切换。 */
+const WATCH_FAIL_THRESHOLD: number = 2;
+/** 线路面板延迟探测结果缓存时长（避免每次打开都重新探测）。 */
+const PROBE_CACHE_TTL_MS: number = 60 * 1000;
+/** 用户手动选线后的冷却期（期间不做回切，尊重用户选择）。 */
+const MANUAL_COOLDOWN_MS: number = 5 * 60 * 1000;
 
 /** 单条线路探测结果。 */
 class ProbeResult {
@@ -64,6 +72,17 @@ export class LineAuto {
   private static inflight: Promise<boolean> | null = null;
   private static checking: boolean = false;
   private static status: string = '';
+
+  /* ── 播放中巡检 ───────────────────────────────────── */
+  private static watchTimer: number = -1;
+  private static watching: boolean = false;
+  private static watchFailCount: number = 0;
+  /** 用户最后一次手动选线时间（毫秒），用于回切冷却。 */
+  private static lastManualAt: number = 0;
+
+  /* ── 延迟探测缓存 ─────────────────────────────────── */
+  private static probeCache: Map<string, number> = new Map<string, number>();
+  private static probeCacheAt: Map<string, number> = new Map<string, number>();
 
   /**
    * 启动时调用（需在 Prefs.init / Lines.load / Session.load 之后）：
@@ -127,6 +146,139 @@ export class LineAuto {
     }
   }
 
+  /**
+   * 批量探测线路延迟（供线路面板展示），60 秒内复用缓存。
+   * 只探测、不切换；失败结果记为 -1。
+   */
+  static async probeLatency(urls: string[]): Promise<Map<string, number>> {
+    const out: Map<string, number> = new Map<string, number>();
+    const now: number = Date.now();
+    const pending: string[] = [];
+    for (let i = 0; i < urls.length; i++) {
+      const url: string = Lines.normalize(urls[i]);
+      if (url.length === 0) {
+        continue;
+      }
+      const cachedAt: number = LineAuto.probeCacheAt.get(url) ?? 0;
+      const cachedMs: number = LineAuto.probeCache.get(url) ?? -1;
+      if (cachedAt > 0 && now - cachedAt < PROBE_CACHE_TTL_MS) {
+        out.set(url, cachedMs);
+        continue;
+      }
+      pending.push(url);
+    }
+    if (pending.length === 0) {
+      return out;
+    }
+    const results: LineProbe[] = await Lines.probe(pending);
+    for (let i = 0; i < results.length; i++) {
+      const r: LineProbe = results[i];
+      const ms: number = r.ok ? r.ms : -1;
+      LineAuto.probeCache.set(r.url, ms);
+      LineAuto.probeCacheAt.set(r.url, now);
+      out.set(r.url, ms);
+    }
+    return out;
+  }
+
+  /** 播放页激活时调用：启动播放中线路巡检（仅播放中运行，暂停/离开即停）。 */
+  static startWatch(): void {
+    if (!LineAuto.enabled || LineAuto.watching) {
+      return;
+    }
+    LineAuto.watching = true;
+    LineAuto.watchFailCount = 0;
+    LineAuto.scheduleWatch();
+    hilog.info(LOG_DOMAIN, LOG_TAG, 'watch.start');
+  }
+
+  /** 停止巡检并清理定时器（暂停/离开播放页/退后台时调用）。 */
+  static stopWatch(): void {
+    if (!LineAuto.watching && LineAuto.watchTimer < 0) {
+      return;
+    }
+    LineAuto.watching = false;
+    if (LineAuto.watchTimer >= 0) {
+      clearTimeout(LineAuto.watchTimer);
+      LineAuto.watchTimer = -1;
+    }
+    hilog.info(LOG_DOMAIN, LOG_TAG, 'watch.stop');
+  }
+
+  private static scheduleWatch(): void {
+    if (!LineAuto.watching) {
+      return;
+    }
+    if (LineAuto.watchTimer >= 0) {
+      clearTimeout(LineAuto.watchTimer);
+    }
+    LineAuto.watchTimer = setTimeout(() => {
+      LineAuto.watchTimer = -1;
+      LineAuto.watchTick().catch(() => {
+      });
+    }, WATCH_INTERVAL_MS);
+  }
+
+  /** 单次巡检：当前线路连续失败达阈值则切换；镜像线路时顺带尝试回切主站。 */
+  private static async watchTick(): Promise<void> {
+    if (!LineAuto.watching) {
+      return;
+    }
+    try {
+      const current: string = Lines.current();
+      const result: LineProbe[] = await Lines.probe([current]);
+      const ok: boolean = result.length > 0 && result[0].ok;
+      if (ok) {
+        LineAuto.watchFailCount = 0;
+      } else {
+        LineAuto.watchFailCount++;
+        hilog.warn(LOG_DOMAIN, LOG_TAG, 'watch.fail count=%{public}d', LineAuto.watchFailCount);
+        if (LineAuto.watchFailCount >= WATCH_FAIL_THRESHOLD) {
+          LineAuto.watchFailCount = 0;
+          await LineAuto.retryAfterFailure();
+        }
+      }
+      await LineAuto.tryReturnToMain();
+    } catch (err) {
+      hilog.warn(LOG_DOMAIN, LOG_TAG, 'watch.tick.fail');
+    } finally {
+      LineAuto.scheduleWatch();
+    }
+  }
+
+  /** 当前在镜像线路时，尝试回切主站（主站可用才切；手动选线后 5 分钟内不打扰）。 */
+  private static async tryReturnToMain(): Promise<void> {
+    if (!LineAuto.enabled) {
+      return;
+    }
+    const fixed: LineItem[] = Lines.fixed();
+    if (fixed.length === 0) {
+      return;
+    }
+    const main: string = Lines.normalize(fixed[0].url);
+    if (main.length === 0) {
+      return;
+    }
+    const current: string = Lines.current();
+    if (current === main) {
+      return;
+    }
+    if (LineAuto.lastManualAt > 0 && Date.now() - LineAuto.lastManualAt < MANUAL_COOLDOWN_MS) {
+      return;
+    }
+    const result: LineProbe[] = await Lines.probe([main]);
+    if (result.length === 0 || !result[0].ok) {
+      return;
+    }
+    if (Lines.current() !== current) {
+      return;
+    }
+    if (LineAuto.switchTo(main, current)) {
+      LineAuto.status = '已回主站（' + hostOf(main) + '）';
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'watch.return.main');
+    }
+  }
+
   /** 线路面板展示的自动状态文案（正在检测/当前可用/已自动切换/未找到可用线路）。 */
   static statusText(): string {
     if (!LineAuto.enabled) {
@@ -148,6 +300,7 @@ export class LineAuto {
       return;
     }
     Prefs.putString(PREF_PREFERRED, normalized);
+    LineAuto.lastManualAt = Date.now();
     LineAuto.status = '当前线路可用（' + hostOf(normalized) + '）';
     hilog.info(LOG_DOMAIN, LOG_TAG, 'preferred host=%{public}s', hostOf(normalized));
   }
