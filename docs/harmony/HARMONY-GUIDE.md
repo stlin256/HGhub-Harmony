@@ -816,7 +816,7 @@ SymbolGlyph($r('sys.symbol.checkmark_circle'))
 ```
 
 - `$SDK/component/symbolglyph.d.ts:L641`（fontSize）、`:L659`（fontColor）、`:L745`（renderingStrategy）、`:L727`（effectStrategy）
-- 自定义图标（播放/暂停/清晰度/投屏等业务图标）：放 `resources/base/media/*.svg`，用 `$r('app.media.ic_play')` 给 `Image`；单色 SVG 可用 `.fillColor('#FFFFFF')`（`Image` 的 `fillColor` 对 SVG 有效）。原项目的 `public/` 图标（app-icon.svg 等）可直接迁到 `resources/base/media/`。
+- 自定义图标（播放/暂停/清晰度/投屏等业务图标）：放 `resources/base/media/*.svg`，用 `$r('app.media.ic_play')` 给 `Image`；单色 SVG 可用 `.fillColor('#FFFFFF')`（`Image` 的 `fillColor` 对 SVG 有效）。原项目的应用图标（上游 `app-icon.svg`，已随仓库精简移除）可参考迁到 `resources/base/media/`。
 - **图标规范建议**：一套 24×24 viewBox 的 SVG，统一 `stroke-width="2"`；深色背景用白色 `fill`；播放器控制条图标单独一套（28~32vp）。
 
 ### 3.11 弹层：bindSheet / bindMenu / bindContentCover / AlertDialog / promptAction
@@ -2215,7 +2215,7 @@ port.onmessage = (e: MessageEvents) => {
 2. App 内调用 `networkSecurity.isCleartextPermittedByHostName('127.0.0.1')` 断言 true；
 3. 播放 `http://127.0.0.1:<port>/hls` 观察是否还报 `5411012`。
 
-### 9.3 安全清单（对齐原项目 docs/security.md 的取舍）
+### 9.3 安全清单（对齐上游 docs/security.md 的取舍；该文档已移除，结论保留在本文）
 
 | 项 | 建议 |
 | --- | --- |

@@ -6,4 +6,4 @@
 *.ico binary
 *.icns binary
 *.woff2 binary
-pnpm-lock.yaml -text
+*.ms binary
