@@ -1,4 +1,5 @@
 import { Api } from '../services/Api';
+import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { RankItem, RankResult, SearchResult, VideoCard } from '../models/Types';
 import { UserPrefs } from '../state/UserPrefs';
 import { HgListSource } from '../components/browse/HgListSource';
@@ -79,7 +80,14 @@ export struct SearchPage {
     this.pageGone = false;
     // 上次离开时被中断的热榜请求：回页后允许重新发起。
     this.rankLoading = false;
-    this.loadHotRank();
+    const cachedRank: RankResult | null = ScreenPrefetch.rank('hot');
+    if (cachedRank !== null) {
+      const items: RankItem[] = cachedRank.items !== undefined && cachedRank.items !== null ? cachedRank.items : [];
+      this.rankItems = items.length > HOT_RANK_SIZE ? items.slice(0, HOT_RANK_SIZE) : items;
+      this.rankError = '';
+    } else {
+      this.loadHotRank();
+    }
     this.hist = UserPrefs.searchHist();
   }
 

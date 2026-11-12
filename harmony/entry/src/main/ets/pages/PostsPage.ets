@@ -1,4 +1,5 @@
 import { Api } from '../services/Api';
+import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { Paged, Post } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
@@ -35,7 +36,29 @@ export struct PostsPage {
   private loadSeq: number = 0;
 
   aboutToAppear(): void {
-    this.loadFirst();
+    if (!this.seedFromPrefetch()) {
+      this.loadFirst();
+    }
+  }
+
+  /** 启动预热命中：首屏直接渲染（下拉刷新仍可更新）。 */
+  private seedFromPrefetch(): boolean {
+    const cached: Paged<Post> | null = ScreenPrefetch.posts();
+    if (cached === null) {
+      return false;
+    }
+    const list: Post[] = cached.items !== undefined && cached.items !== null ? cached.items : [];
+    if (list.length === 0) {
+      return false;
+    }
+    this.source.resetAll(list.slice(0));
+    this.hasData = true;
+    this.page = 1;
+    this.pages = cached.pagination !== undefined && cached.pagination.pages > 0 ? cached.pagination.pages : 1;
+    this.finished = this.page >= this.pages;
+    this.loading = false;
+    this.errorText = '';
+    return true;
   }
 
   aboutToDisappear(): void {
@@ -124,7 +147,12 @@ export struct PostsPage {
         return;
       }
       const list: Post[] = res.items !== undefined && res.items !== null ? res.items : [];
+      // 跨批去重：已有卡片 + 本批重复 id 都跳过，避免 LazyForEach 重复 key / 卡片重复。
       const seen: Set<number> = new Set<number>();
+      const current: Post[] = this.source.snapshot();
+      for (let i = 0; i < current.length; i++) {
+        seen.add(current[i].id);
+      }
       const fresh: Post[] = [];
       for (let i = 0; i < list.length; i++) {
         if (!seen.has(list[i].id)) {

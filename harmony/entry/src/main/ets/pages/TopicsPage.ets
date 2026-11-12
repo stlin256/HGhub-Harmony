@@ -1,4 +1,5 @@
 import { Api } from '../services/Api';
+import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { Paged, Topic } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
@@ -28,6 +29,18 @@ export struct TopicsPage {
   private loadSeq: number = 0;
 
   aboutToAppear(): void {
+    const cached: Paged<Topic> | null = ScreenPrefetch.topics();
+    if (cached !== null) {
+      const list: Topic[] = cached.items === undefined || cached.items === null ? [] : cached.items;
+      if (list.length > 0) {
+        this.items = list;
+        this.page = 1;
+        this.pages = cached.pagination !== undefined && cached.pagination.pages > 0 ? cached.pagination.pages : 1;
+        this.finished = this.page >= this.pages;
+        this.loading = false;
+        return;
+      }
+    }
     this.loadFirst();
   }
 

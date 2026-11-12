@@ -1,4 +1,5 @@
 import { Api } from '../services/Api';
+import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { CateInfo, CategoryCatalog } from '../services/CategoryCatalog';
 import { Paged, Post, VideoCard } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
@@ -333,6 +334,18 @@ export struct CategoryPage {
       this.setRowLoading(route, true);
     }
     this.setRowError(route, '');
+    // 启动预热命中该频道首屏：先用缓存渲染预览行；下拉刷新（skeleton=false）仍回源更新。
+    if (skeleton) {
+      const warm: Paged<VideoCard> | null = ScreenPrefetch.channel(route);
+      if (warm !== null) {
+        const warmList: VideoCard[] = warm.items !== undefined && warm.items !== null ? warm.items : [];
+        if (warmList.length > 0) {
+          this.setRowData(route, warmList.length > PREVIEW_SIZE ? warmList.slice(0, PREVIEW_SIZE) : warmList);
+          this.setRowLoading(route, false);
+          return;
+        }
+      }
+    }
     try {
       const res: Paged<VideoCard> = await Api.category(route, 1, PREVIEW_SIZE);
       if (this.pageGone || this.routeSeq.get(route) !== seq) {
@@ -371,6 +384,19 @@ export struct CategoryPage {
       this.postsLoading = true;
     }
     this.postsError = '';
+    // 启动预热命中吃瓜首屏：先用缓存渲染预览；下拉刷新仍回源。
+    if (skeleton) {
+      const warm: Paged<Post> | null = ScreenPrefetch.posts();
+      if (warm !== null) {
+        const warmList: Post[] = warm.items !== undefined && warm.items !== null ? warm.items : [];
+        if (warmList.length > 0) {
+          this.flashPosts();
+          this.posts = warmList.length > PREVIEW_SIZE ? warmList.slice(0, PREVIEW_SIZE) : warmList;
+          this.postsLoading = false;
+          return;
+        }
+      }
+    }
     try {
       const res: Paged<Post> = await Api.posts(1, PREVIEW_SIZE);
       if (this.pageGone) {
