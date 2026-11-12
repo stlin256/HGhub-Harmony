@@ -1,4 +1,4 @@
-import { ConfigurationConstant, Configuration, UIAbility } from '@kit.AbilityKit';
+import { AbilityConstant, ConfigurationConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { display, window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -7,6 +7,7 @@ import { Api } from '../services/Api';
 import { LineAuto } from '../services/LineAuto';
 import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
+import { ContinuationState } from '../services/ContinuationState';
 import { RecService } from '../recommend/RecService';
 import { Prefs } from '../services/Prefs';
 import { Session } from '../services/Session';
@@ -21,9 +22,24 @@ const TAG = 'HGhub';
 
 export default class EntryAbility extends UIAbility {
   private density: number = 3.5;
-  onCreate(): void {
+  onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     PerfMark.start('startup');
     AppContext.init(this.context);
+    // 应用接续：目标设备冷启动时恢复源设备带来的播放上下文。
+    if (launchParam !== undefined && launchParam !== null &&
+      launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION) {
+      try {
+        const params = want.parameters;
+        if (params !== undefined && params !== null) {
+          const data: Object | undefined = params['hghub_continue'];
+          if (data !== undefined && data !== null) {
+            ContinuationState.apply(String(data));
+            hilog.info(DOMAIN, TAG, 'continuation state received');
+          }
+        }
+      } catch (err) {
+      }
+    }
     const systemDark: boolean = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
     // 初始窗口尺寸（vp）：后续由 windowSizeChange 调平（旋转 / 分屏 / 折叠）。
@@ -91,7 +107,37 @@ export default class EntryAbility extends UIAbility {
     }
   }
 
+  /**
+   * 应用接续（源设备）：把当前播放上下文写入 wantParam，交给目标设备。
+   * 返回 AGREE 表示允许接续；无播放上下文时也允许（仅迁移应用本身）。
+   */
+  onContinue(wantParam: Record<string, Object>): AbilityConstant.OnContinueResult {
+    try {
+      const json: string = ContinuationState.payloadJson();
+      if (json.length > 0) {
+        wantParam['hghub_continue'] = json;
+      }
+      hilog.info(DOMAIN, TAG, 'onContinue payload=' + (json.length > 0 ? 'yes' : 'no'));
+    } catch (err) {
+    }
+    return AbilityConstant.OnContinueResult.AGREE;
+  }
+
+  /**
+   * 应用接续（目标设备）：迁移启动时系统调用 onWindowStageRestore 而非 onWindowStageCreate，
+   * 这里走与正常启动一致的页面加载逻辑。
+   */
+  onWindowStageRestore(windowStage: window.WindowStage): void {
+    hilog.info(DOMAIN, TAG, 'onWindowStageRestore');
+    this.loadMainContent(windowStage);
+  }
+
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    this.loadMainContent(windowStage);
+  }
+
+  /** 加载主页面：正常启动与接续恢复共用同一套窗口配置。 */
+  private loadMainContent(windowStage: window.WindowStage): void {
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         hilog.error(DOMAIN, TAG, 'Failed to load content: %{public}s', JSON.stringify(err));

@@ -24,6 +24,7 @@
         "startWindowIcon": "$media:app_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        "continuable": true,
         "backgroundModes": ["audioPlayback"],
         "skills": [
           {
@@ -45,6 +46,9 @@
       },
       {
         "name": "ohos.permission.KEEP_BACKGROUND_RUNNING"
+      },
+      {
+        "name": "ohos.permission.DISTRIBUTED_DATASYNC"
       }
     ]
   }

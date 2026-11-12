@@ -16,6 +16,7 @@ import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
 import { PlayerService } from '../player/PlayerService';
 import { PlayerSeekPolicy } from '../player/PlayerSeekPolicy';
+import { ContinuationState } from '../services/ContinuationState';
 import { MediaPrefetch } from '../player/MediaPrefetch';
 import { PlaybackLog } from '../player/PlaybackLog';
 import { PlayerSeekBar } from '../components/player/PlayerSeekBar';
@@ -184,6 +185,8 @@ export struct PlayerPage {
   private pageShown: boolean = true;
   /** 最近一次已记录"播放开始"的条目 id：切集/换剧只记一次，避免重复计数。 */
   private lastPlayRecordId: number = -1;
+  /** 上次写入应用接续状态的时间（5s 节流）。 */
+  private lastContinueAt: number = 0;
   /** 待确认的画质切换目标（null=无）；onPrepared 确认成功，onError 回退。 */
   private pendingQuality: boolean | null = null;
   /** 高清源回退是否已发生（避免无限回退）。 */
@@ -424,6 +427,7 @@ export struct PlayerPage {
     this.service.onTime = (ms: number) => {
       this.positionMs = ms;
       this.maybePrefetch(ms);
+      this.syncContinuationState();
     };
     this.service.onBuffered = (ms: number) => {
       this.bufferedMs = ms;
@@ -490,6 +494,21 @@ export struct PlayerPage {
       this.videoH = height;
       this.recomputeVideoRect(width > 0 && height > 0);
     };
+  }
+
+  /** 把当前播放上下文写入应用接续状态（5s 节流，供跨设备接续使用）。 */
+  private syncContinuationState(): void {
+    const now: number = Date.now();
+    if (now - this.lastContinueAt < 5000) {
+      return;
+    }
+    this.lastContinueAt = now;
+    const id: number = this.currentId();
+    if (id <= 0) {
+      return;
+    }
+    ContinuationState.update(id, this.ep, this.positionMs, this.titleText(),
+      this.ids, this.currentIndex, this.params.feedKind, this.params.source);
   }
 
   /** 根据当前播放响应刷新画质徽章：无高清源不显示，高清中显示 HD，标准中显示 SD。 */
