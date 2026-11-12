@@ -6,7 +6,7 @@ import { LineAuto } from '../services/LineAuto';
 import { UiBus } from '../services/UiBus';
 import { WindowChrome } from '../services/WindowChrome';
 import {
-  K_APP_ACTIVE, K_BOTTOM_INSET, K_CONTENT_W, K_LEFT_INSET, K_RIGHT_INSET, K_TOP_INSET, K_VIDEO_SCALE,
+  K_APP_ACTIVE, K_BOTTOM_INSET, K_FORCE_FULLSCREEN, K_CONTENT_W, K_LEFT_INSET, K_RIGHT_INSET, K_TOP_INSET, K_VIDEO_SCALE,
   K_WINDOW_H, K_WINDOW_W, UserPrefs
 } from '../state/UserPrefs';
 import { PlayerParam } from '../state/Routes';
@@ -92,14 +92,16 @@ export struct PlayerPage {
   @StorageProp(K_LEFT_INSET) leftInset: number = 0;
   @StorageProp(K_RIGHT_INSET) rightInset: number = 0;
   /** 窗口宽高（vp；全屏播放页时两者等于窗口尺寸）：宽屏评论区侧栏的展开判定与面板宽度。 */
-  @StorageProp(K_WINDOW_W) windowW: number = 400;
+  @StorageProp(K_WINDOW_W) @Watch('onPaneSizeChanged') windowW: number = 400;
   @StorageProp(K_WINDOW_H) windowH: number = 780;
   /** 平行视窗右栏宽度（vp）：小于窗口宽度即表示当前播放页嵌在右栏中，而非全屏。 */
-  @StorageProp(K_CONTENT_W) contentW: number = 400;
+  @StorageProp(K_CONTENT_W) @Watch('onPaneSizeChanged') contentW: number = 400;
   /** 平行视窗进入/退出播放页的轻量转场（淡入 + 右滑入/滑出）。 */
   @State paneOpacity: number = 1;
   @State paneOffsetX: number = 0;
   private paneExiting: boolean = false;
+  /** 只在首次进入分栏右栏时播淡入；从播放页 push 其它页面再返回不重复动画。 */
+  private paneEntered: boolean = false;
   @StorageProp(K_APP_ACTIVE) @Watch('onAppActiveChanged') appActive: boolean = true;
   /** 设置页持久化的画面比例（contain/fill/cover）：切换后立即重设 AVPlayer 缩放模式。 */
   @StorageProp(K_VIDEO_SCALE) @Watch('onVideoScaleChanged') videoScale: string = 'contain';
@@ -142,6 +144,8 @@ export struct PlayerPage {
   @State retryText: string = '';
   /** 系统媒体会话就绪后展示投播入口。 */
   /** 投播入口默认可用（与其它 chrome 一起出现），会话未就绪时系统 picker 自行处理空态。 */
+  /** 平行视窗下用户主动全屏：Index 监听该标记后把 Navigation 切回 Stack（满窗），离开播放页复位。 */
+  @StorageProp(K_FORCE_FULLSCREEN) forceFullscreen: boolean = false;
   @State castAvailable: boolean = true;
   /** 系统投播面板是否打开：打开期间禁止 chrome 自动隐藏，否则 picker 随 chrome 卸载而消失。 */
   @State castPanelOpen: boolean = false;
@@ -262,6 +266,26 @@ export struct PlayerPage {
     return this.windowW > 0 && this.contentW > 0 && this.contentW + 2 < this.windowW;
   }
 
+  /** 平行视窗下显示「全屏/退出全屏」；全屏时按钮用于回到分栏。 */
+  private canToggleFullscreen(): boolean {
+    return this.inSplitPane() || this.forceFullscreen;
+  }
+
+  /**
+   * 平行视窗/全屏切换：只改 AppStorage 标记，由 Index 监听后切换 Navigation 模式
+   * （Split ↔ Stack），并配合系统栏显隐；离开播放页自动复位为分栏。
+   */
+  private togglePaneFullscreen(): void {
+    const next: boolean = !this.forceFullscreen;
+    AppStorage.setOrCreate<boolean>(K_FORCE_FULLSCREEN, next);
+    if (next) {
+      WindowChrome.hideStatusBar();
+    } else {
+      WindowChrome.showStatusBar();
+    }
+    PlaybackLog.info('ui.fullscreen', next ? 'enter' : 'exit');
+  }
+
   /* ── 生命周期 ─────────────────────────────────────── */
   /** 应用退到后台时立即暂停（页面仍在前台也要停），回前台不自动续播。 */
   onAppActiveChanged(): void {
@@ -333,7 +357,12 @@ export struct PlayerPage {
 
   aboutToDisappear(): void {
     this.destroyed = true;
+    // 离开播放页：仅复位自己设置的全屏标记，并恢复非播放页的系统栏配色。
+    if (this.forceFullscreen) {
+      AppStorage.setOrCreate<boolean>(K_FORCE_FULLSCREEN, false);
+    }
     WindowChrome.showStatusBar();
+    WindowChrome.syncSystemBarColors(UserPrefs.dark());
     // 离开播放页恢复系统熄屏策略，避免整机一直常亮。
     WindowChrome.setKeepScreenOn(false);
     LineAuto.stopWatch();
@@ -343,6 +372,25 @@ export struct PlayerPage {
     this.metaPending.clear();
     MediaPrefetch.reset();
     this.service.release();
+  }
+
+  /** 窗口/分栏宽度变化（旋转、进出分栏、全屏切换）：重新对齐状态栏显隐与系统栏配色。 */
+  onPaneSizeChanged(): void {
+    if (this.destroyed || !this.pageShown) {
+      return;
+    }
+    this.syncPaneBars();
+  }
+
+  /** 播放页系统栏策略：分栏且非全屏 → 显示状态栏（可读）；全窗/全屏 → 隐藏状态栏 + 纯黑导航栏。 */
+  private syncPaneBars(): void {
+    if (this.forceFullscreen || !this.inSplitPane()) {
+      WindowChrome.hideStatusBar();
+      WindowChrome.syncSystemBarColors(true, true);
+    } else {
+      WindowChrome.showStatusBar();
+      WindowChrome.syncSystemBarColors(UserPrefs.dark());
+    }
   }
 
   /** 设置页/播放页面板切换「视频比例」：立即重设 AVPlayer 缩放模式并重算展示矩形（动画过渡）。 */
@@ -2207,10 +2255,8 @@ export struct PlayerPage {
    * 用最小内边距兜底，保证标题/返回键不被状态栏或挖孔压住（隐藏状态栏后也留有呼吸空间）。
    */
   private topSafePad(): number {
-    // 平行视窗右栏：NavDestination 已在状态栏下方，无需再叠加系统顶部安全区。
-    if (this.inSplitPane()) {
-      return HgSpace.m;
-    }
+    // 本 App 全屏沉浸布局下，左右栏都从 y=0 起（左栏列表自己加 topInset），
+    // 分栏右栏同样要叠加系统顶部安全区，否则状态栏会压住返回键/标题。
     return this.topInset > 0 ? this.topInset : TOP_SAFE_FALLBACK;
   }
 
@@ -2556,6 +2602,22 @@ export struct PlayerPage {
           .backgroundColor(HgColor.videoChip)
           .margin({ right: HgSpace.xs })
           .accessibilityText('投播到其他设备')
+        }
+
+        if (this.canToggleFullscreen()) {
+          Text(this.forceFullscreen ? '退出全屏' : '全屏')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.videoInk2)
+            .maxLines(1)
+            .height(32)
+            .padding({ left: 10, right: 10 })
+            .backgroundColor(HgColor.videoChip)
+            .borderRadius(16)
+            .margin({ right: HgSpace.xs })
+            .onClick(() => {
+              this.togglePaneFullscreen();
+            })
+            .accessibilityText(this.forceFullscreen ? '退出全屏，回到平行视窗' : '全屏播放')
         }
 
         Row({ space: 2 }) {
@@ -3640,14 +3702,19 @@ export struct PlayerPage {
         return;
       }
       this.pageShown = true;
-      if (!this.inSplitPane()) {
-        WindowChrome.hideStatusBar();
-      } else {
-        // 平行视窗进入播放页：180ms 淡入 + 归位（退出动画在返回时做）。
-        animateTo({ duration: 180, curve: Curve.FastOutSlowIn }, () => {
+      this.syncPaneBars();
+      if (this.inSplitPane() && !this.forceFullscreen) {
+        if (!this.paneEntered) {
+          this.paneEntered = true;
+          // 平行视窗首次进入播放页：180ms 淡入 + 归位（退出动画在返回时做）。
+          animateTo({ duration: 180, curve: Curve.FastOutSlowIn }, () => {
+            this.paneOpacity = 1;
+            this.paneOffsetX = 0;
+          });
+        } else {
           this.paneOpacity = 1;
           this.paneOffsetX = 0;
-        });
+        }
       }
       this.service.setActive(this.appActive);
       MediaPrefetch.resume();
@@ -3661,6 +3728,7 @@ export struct PlayerPage {
     .onHidden(() => {
       this.pageShown = false;
       WindowChrome.showStatusBar();
+      WindowChrome.syncSystemBarColors(UserPrefs.dark());
       WindowChrome.setKeepScreenOn(false);
       this.service.setActive(false);
       MediaPrefetch.pause();
@@ -3680,6 +3748,11 @@ export struct PlayerPage {
       }
       if (this.locked) {
         this.toggleLock();
+        return true;
+      }
+      // 全屏态按返回：先退回平行视窗分栏，而不是直接退出播放页。
+      if (this.forceFullscreen) {
+        this.togglePaneFullscreen();
         return true;
       }
       if (this.inSplitPane() && !this.paneExiting) {

@@ -1,11 +1,15 @@
 import { promptAction } from '@kit.ArkUI';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
-  K_BOTTOM_INSET, K_CONTENT_W, K_DARK, K_NAV_W, K_TOP_INSET, K_WINDOW_W
+  K_BOTTOM_INSET, K_CONTENT_W, K_DARK, K_FORCE_FULLSCREEN, K_NAV_W, K_TOP_INSET, K_WINDOW_W
 } from '../state/UserPrefs';
 import { HgResponsive } from '../design/HgResponsive';
 import { UiBus } from '../services/UiBus';
+import { WindowChrome } from '../services/WindowChrome';
+import { Prefs } from '../services/Prefs';
+import { Api } from '../services/Api';
 import { ContinuationState, ContinuePayload } from '../services/ContinuationState';
 import { HgColor, HgFont, HgSize } from '../design/HgTokens';
 import { HomePage } from './HomePage';
@@ -27,6 +31,7 @@ import { UserPage } from './UserPage';
 import { FollowPage } from './FollowPage';
 import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
+import { TabletNoticeDialog } from '../components/TabletNoticeDialog';
 import {
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
   ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC, ROUTE_USER, ROUTE_FOLLOW,
@@ -37,7 +42,7 @@ import {
 @Component
 struct Index {
   @Provide('hgNavStack') navStack: NavPathStack = new NavPathStack();
-  @StorageProp(K_DARK) dark: boolean = true;
+  @StorageProp(K_DARK) @Watch('onDarkChanged') dark: boolean = true;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
   @State loginVisible: boolean = false;
@@ -52,6 +57,13 @@ struct Index {
   @State navSplit: boolean = false;
   /** 平行视窗右栏是否为空（未打开详情），用于展示引导占位。 */
   @State navEmpty: boolean = true;
+  /** 播放页在平行视窗里点「全屏」时置 true：Navigation 临时切回 Stack 满窗显示。 */
+  @StorageProp(K_FORCE_FULLSCREEN) @Watch('onForceFullscreenChanged') forceFullscreen: boolean = false;
+  /** 平板适配提示每个版本只弹一次（本进程内也只检查一次）。 */
+  private tabletNoticeChecked: boolean = false;
+  private tabletDialog: CustomDialogController | null = null;
+  /** applyNavSplit 重入保护：复位全屏标记会触发 @Watch，避免一次返回重算/重播两次模式动画。 */
+  private navApplying: boolean = false;
   private tabsController: HdsTabsController = new HdsTabsController();
   private readonly selectedColor: string = '';
 
@@ -92,6 +104,10 @@ struct Index {
       } catch (err) {
       }
       this.navStack.clear();
+      // clear() 不保证触发 Navigation interception：显式重算，避免分栏停在右栏空白。
+      setTimeout(() => {
+        this.syncNavMode();
+      }, 0);
     };
     UiBus.toast = (message: string) => {
       promptAction.showToast({ message: message, duration: 2000 });
@@ -102,11 +118,13 @@ struct Index {
     UiBus.toastInfo = (message: string) => {
       promptAction.showToast({ message: message, duration: 2000 });
     };
-    // 平行视窗：拦截路由变化，播放页强制 Stack（全屏），其余宽屏页面 Split。
+    // 平行视窗：根页面保持全宽多列瀑布流，只有打开内容页时才带动画切 Split（左侧列表 + 右侧播放/内容）。
+    // 在 willShow 阶段提前切模式，Navigation 的模式切换动画才能生效；didShow 再兜底校正。
     try {
       this.navStack.setInterception({
         willShow: (from: NavDestinationContext | NavBar, to: NavDestinationContext | NavBar,
           operation: NavigationOperation, isAnimated: boolean) => {
+          this.applyNavSplit(this.toHasContent(to));
         },
         didShow: (from: NavDestinationContext | NavBar, to: NavDestinationContext | NavBar,
           operation: NavigationOperation, isAnimated: boolean) => {
@@ -117,6 +135,64 @@ struct Index {
       });
     } catch (err) {
     }
+    WindowChrome.syncSystemBarColors(this.dark);
+    this.syncNavMode();
+    this.maybeShowTabletNotice();
+  }
+
+  /** to 是否为 NavDestination 内容页（而非底部 Tab 的 NavBar）。 */
+  private toHasContent(to: NavDestinationContext | NavBar): boolean {
+    // NavBar 是字符串字面量 'navBar'，只有 NavDestinationContext 才有 pathInfo。
+    if (typeof to === 'string') {
+      return false;
+    }
+    try {
+      const ctx = to as NavDestinationContext;
+      return ctx !== undefined && ctx !== null && ctx.pathInfo !== undefined && ctx.pathInfo !== null;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /** 平板/大屏适配提示：每个版本首次在平板启动时提示一次（开发者无平板设备，无法实机验证）。 */
+  private maybeShowTabletNotice(): void {
+    if (this.tabletNoticeChecked) {
+      return;
+    }
+    // 平板或大屏设备都提示；平板竖屏可能 <840vp，因此设备类型也纳入判定。
+    const tabletDevice: boolean = deviceInfo.deviceType === 'tablet' || deviceInfo.deviceType === '2in1';
+    if (!tabletDevice && this.windowW < HgResponsive.EXPANDED) {
+      return;
+    }
+    this.tabletNoticeChecked = true;
+    const version: string = Api.appVersion();
+    if (Prefs.getString('tablet_notice_version', '') === version) {
+      return;
+    }
+    // 等首帧稳定后再开弹窗；版本记录放到「我知道了」关闭回调，open 失败时下次启动还会再提示。
+    setTimeout(() => {
+      try {
+        this.tabletDialog = new CustomDialogController({
+          builder: TabletNoticeDialog({
+            dark: this.dark,
+            onClosed: () => {
+              Prefs.putString('tablet_notice_version', version);
+            }
+          }),
+          autoCancel: false,
+          customStyle: true
+        });
+        this.tabletDialog.open();
+      } catch (err) {
+      }
+    }, 600);
+  }
+
+  private onDarkChanged(): void {
+    WindowChrome.syncSystemBarColors(this.dark);
+  }
+
+  private onForceFullscreenChanged(): void {
     this.syncNavMode();
   }
 
@@ -127,29 +203,43 @@ struct Index {
 
   private onWindowWidthChanged(): void {
     this.syncNavMode();
+    this.maybeShowTabletNotice();
   }
 
   /**
    * 同步平行视窗状态：
-   * - 窗口 ≥840vp → Split（内容页含播放页都在右栏，左侧列表保留），左右栏宽度写入 K_NAV_W/K_CONTENT_W；
-   * - 窄窗口 → Stack（手机全屏导航），两栏宽度都等于窗口宽。
+   * - 窗口 ≥840vp 且导航栈里有内容页 → Split（左侧瀑布流列表 + 右侧内容/播放），带模式切换动画；
+   * - 根页面/窄窗口/用户主动全屏 → Stack（全宽多列瀑布流）。
+   * 左右栏宽度写入 K_NAV_W/K_CONTENT_W，Tab 页与详情页分别按各自栏宽重排。
    */
   private syncNavMode(): void {
+    let hasContent: boolean = false;
     try {
-      const names: string[] = this.navStack.getAllPathName();
-      this.navEmpty = names.length === 0;
+      hasContent = this.navStack.size() > 0;
     } catch (err) {
-      this.navEmpty = true;
+      hasContent = false;
+    }
+    this.applyNavSplit(hasContent);
+  }
+
+  private applyNavSplit(hasContent: boolean): void {
+    if (this.navApplying) {
+      return;
+    }
+    this.navApplying = true;
+    // 回到根页面时复位全屏标记，保证下次打开内容页仍按平行视窗展示。
+    if (!hasContent && AppStorage.get<boolean>(K_FORCE_FULLSCREEN) === true) {
+      AppStorage.setOrCreate<boolean>(K_FORCE_FULLSCREEN, false);
     }
     const wide: boolean = this.windowW >= HgResponsive.EXPANDED;
-    // 平行视窗：宽屏下所有内容页（含播放页）都进右栏播放/展示，左栏列表保留；
-    // 播放页不再强制 Stack 全屏，避免"点一下就直接跳进去、视窗没起作用"。
-    const split: boolean = wide;
-    this.navSplit = split;
-    const navW: number = split ? this.navBarWidth() : this.windowW;
-    const contentW: number = split ? Math.max(320, this.windowW - navW) : this.windowW;
+    const forceFull: boolean = AppStorage.get<boolean>(K_FORCE_FULLSCREEN) === true;
+    this.navEmpty = !hasContent;
+    this.navSplit = wide && hasContent && !forceFull;
+    const navW: number = this.navSplit ? this.navBarWidth() : this.windowW;
+    const contentW: number = this.navSplit ? Math.max(320, this.windowW - navW) : this.windowW;
     AppStorage.setOrCreate<number>(K_NAV_W, navW);
     AppStorage.setOrCreate<number>(K_CONTENT_W, contentW);
+    this.navApplying = false;
   }
 
   onBackPress(): boolean {
@@ -331,9 +421,10 @@ struct Index {
       }
       .mode(this.navSplit ? NavigationMode.Split : NavigationMode.Stack)
       .navBarWidth(this.navBarWidth())
-      .navBarWidthRange([380, 520])
+      // 固定为当前计算宽度：分栏线不可拖（栏宽变化无法回写 K_NAV_W/K_CONTENT_W，会与内容布局不一致）。
+      .navBarWidthRange([this.navBarWidth(), this.navBarWidth()])
       .minContentWidth(360)
-      .enableModeChangeAnimation(false)
+      .enableModeChangeAnimation(true)
       .hideTitleBar(true)
       .navDestination(this.PageMap)
       .id('hgNav')
