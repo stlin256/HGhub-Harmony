@@ -12,8 +12,11 @@ import { UiBus } from '../services/UiBus';
 import { PlayerParam, ROUTE_FOLLOW, ROUTE_PLAYER, ROUTE_RANKS, ROUTE_SETTINGS } from '../state/Routes';
 import { fmt, fmtTime } from '../utils/Format';
 
-const MAX_CARDS: number = 12;
+/** 首屏 / 每次滚动加载的条数（分页大小）。 */
+const PAGE_SIZE: number = 12;
 const FETCH_CONCURRENCY: number = 4;
+/** 距列表底部小于该值（vp）时触发加载更多。 */
+const LOAD_MORE_THRESHOLD: number = 300;
 /** 切 Tab 过渡：旧列表淡出 / 新列表淡入时长（任务指定 110ms / 170ms；HgTokens 无对应档位）。 */
 const SWITCH_FADE_OUT_MS: number = 110;
 const SWITCH_FADE_IN_MS: number = 170;
@@ -37,6 +40,11 @@ export struct ProfilePage {
   @State private displayTab: string = 'fav';
   @State cards: Detail[] = [];
   @State cardsLoading: boolean = false;
+  /** 当前 Tab 已加载条数（分页进度）与总条数。 */
+  @State private loadedCount: number = 0;
+  @State private totalCount: number = 0;
+  /** 是否正在加载下一批（底部 LoadingProgress 与并发守卫）。 */
+  @State private loadingMore: boolean = false;
   @State cardError: string = '';
   @State favCount: number = 0;
   @State historyCount: number = 0;
@@ -68,6 +76,16 @@ export struct ProfilePage {
   private swapPending: boolean = false;
   /** 淡出窗口内 loadCards 暂不回写 cards，等过渡节点统一换数据，避免硬切。 */
   private transitioning: boolean = false;
+  /** loadCards 首屏重载进行中：禁止滚动触发加载更多，避免两套分页逻辑交叉回写。 */
+  private reloading: boolean = false;
+  /** 收藏 / 历史各自的分页进度（切 Tab 时保存/恢复）。 */
+  private favLoaded: number = 0;
+  private historyLoaded: number = 0;
+  /** 内容高度 / 视口高度（vp，onAreaChange 维护）：用于判断距底部阈值。 */
+  private contentHeight: number = 0;
+  private viewportHeight: number = 0;
+  /** 切 Tab 后短暂抑制滚动触发，避免恢复滚动位置时误触发加载更多。 */
+  private loadMoreSuppressUntil: number = 0;
 
   /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
   private contentGutter(): number {
@@ -112,7 +130,8 @@ export struct ProfilePage {
     this.active = true;
     this.readUser();
     this.refreshLocalLists();
-    this.warmSeen = this.tabIds().slice(0, MAX_CARDS);
+    this.loadedCount = this.progressOfTab(this.tab);
+    this.warmSeen = this.tabIds().slice(0, this.loadedCount);
     this.loadCards();
   }
 
@@ -128,7 +147,12 @@ export struct ProfilePage {
   }
 
   onStoreChanged(): void {
+    // 之前已全部加载：新增收藏/历史后继续全部显示，避免「已经到底」后突然又出现加载提示。
+    const wasAllLoaded: boolean = this.totalCount > 0 && this.loadedCount >= this.totalCount;
     this.refreshLocalLists();
+    if (wasAllLoaded) {
+      this.loadedCount = this.totalCount;
+    }
     // 收藏/历史变化后先增量预热新增 id 的详情（不阻塞；与 loadCards 共用 Api 在途请求，不重复回源）。
     this.warmNewDetails();
     // 收藏/历史（可能在详情页本地新增）变化时，列表先淡出再重载淡入。
@@ -166,11 +190,55 @@ export struct ProfilePage {
     this.favCount = UserPrefs.favs().length;
     this.historyList = UserPrefs.history();
     this.historyCount = this.historyList.length;
+    const total: number = this.idsForTab(this.tab).length;
+    this.totalCount = total;
+    if (this.loadedCount > total) {
+      this.loadedCount = total;
+    }
+  }
+
+  /** 指定 Tab 的分页进度：至少首屏 PAGE_SIZE，之前加载更多则保留进度，按该 Tab 当前总数收敛。 */
+  private progressOfTab(tab: string): number {
+    const total: number = this.idsForTab(tab).length;
+    const saved: number = tab === 'fav' ? this.favLoaded : this.historyLoaded;
+    const want: number = saved > PAGE_SIZE ? saved : PAGE_SIZE;
+    return want > total ? total : want;
+  }
+
+  /** 保存当前 Tab 的分页进度（切 Tab 前调用）。 */
+  private saveProgress(): void {
+    if (this.tab === 'fav') {
+      this.favLoaded = this.loadedCount;
+    } else {
+      this.historyLoaded = this.loadedCount;
+    }
+  }
+
+  /** 分页进度与当前 Tab 总条数对齐（首次进入取首屏，数量变化时收敛）。 */
+  private syncProgress(): void {
+    const total: number = this.idsForTab(this.tab).length;
+    this.totalCount = total;
+    if (total === 0) {
+      this.loadedCount = 0;
+      return;
+    }
+    if (this.loadedCount <= 0) {
+      this.loadedCount = total < PAGE_SIZE ? total : PAGE_SIZE;
+      return;
+    }
+    if (this.loadedCount > total) {
+      this.loadedCount = total;
+    }
+  }
+
+  /** 是否还有未加载的 id（底部「已经到底啦」提示用）。 */
+  private hasMore(): boolean {
+    return this.loadedCount < this.totalCount;
   }
 
   /** 收藏/历史变化后，把当前 Tab 新增 id 的详情后台预热（已缓存/在途的由 UserListPrefetch 跳过）。 */
   private warmNewDetails(): void {
-    const ids: number[] = this.tabIds().slice(0, MAX_CARDS);
+    const ids: number[] = this.tabIds().slice(0, this.loadedCount);
     const added: number[] = [];
     for (let i = 0; i < ids.length; i++) {
       if (this.warmSeen.indexOf(ids[i]) < 0) {
@@ -216,11 +284,14 @@ export struct ProfilePage {
     return await Api.warmVideo(id);
   }
 
-  /** 按 target 顺序合并详情：Api 缓存命中优先，其次复用当前已展示卡片（后台补齐时不清空/闪骨架）。 */
+  /** 按 target 顺序合并详情：Api 缓存命中优先，其次复用当前已展示卡片（后台补齐时不清空/闪骨架）；按 id 去重。 */
   private mergeCards(target: number[]): Detail[] {
     const out: Detail[] = [];
     for (let i = 0; i < target.length; i++) {
       const id: number = target[i];
+      if (this.indexOfCard(out, id) >= 0) {
+        continue;
+      }
       const hit: Detail | null = Api.peekVideo(id);
       if (hit !== null) {
         out.push(hit);
@@ -234,6 +305,16 @@ export struct ProfilePage {
       }
     }
     return out;
+  }
+
+  /** 在卡片数组里查找 id 下标（-1 表示不存在）。 */
+  private indexOfCard(list: Detail[], id: number): number {
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].id === id) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   /** target 中尚未命中 Api 详情缓存的 id（需要回源补齐）。 */
@@ -353,8 +434,30 @@ export struct ProfilePage {
     if (!this.active) {
       return;
     }
+    // 首屏重载期间禁止滚动触发加载更多，避免两套分页逻辑交叉回写。
+    this.reloading = true;
+    try {
+      await this.loadCardsInner(seq);
+    } finally {
+      if (seq === this.loadSeq) {
+        this.reloading = false;
+        // 等一帧布局后再判断内容是否不足一屏（自动补页，保证可滚动触发加载更多）。
+        setTimeout(() => {
+          if (this.active) {
+            this.checkFillAfterLoad();
+          }
+        }, 48);
+      }
+    }
+  }
+
+  /** loadCards 主体（seq 用于取消过期批次）。 */
+  private async loadCardsInner(seq: number): Promise<void> {
+    // 重新载入首屏（切 Tab / 收藏变化 / 清空历史）：取消加载更多，分页进度按当前 Tab 收敛。
+    this.loadingMore = false;
+    this.syncProgress();
     const ids: number[] = this.tabIds();
-    const target: number[] = ids.slice(0, MAX_CARDS);
+    const target: number[] = ids.slice(0, this.loadedCount);
     if (target.length === 0) {
       if (this.swapPending) {
         // 目标 Tab 为空：交叉淡入到空态，不硬切、不闪骨架。
@@ -430,8 +533,143 @@ export struct ProfilePage {
         this.cardsLoading = false;
         if (!this.transitioning && !this.swapPending) {
           this.scheduleCardsFadeIn();
+          this.reapplyScroll();
         }
       }
+    }
+  }
+
+  /**
+   * 滚动接近底部（剩余 < LOAD_MORE_THRESHOLD vp）时加载下一批；
+   * 仅当还有未加载 id、没有并发加载、且不处于切 Tab 过渡/滚动恢复窗口时触发。
+   */
+  private maybeLoadMore(): void {
+    if (!this.active || this.reloading || this.loadingMore || this.transitioning || this.swapPending) {
+      return;
+    }
+    if (Date.now() < this.loadMoreSuppressUntil) {
+      return;
+    }
+    if (this.loadedCount >= this.totalCount) {
+      return;
+    }
+    if (this.contentHeight <= 0 || this.viewportHeight <= 0) {
+      return;
+    }
+    try {
+      const y: number = this.scroller.currentOffset().yOffset;
+      const remain: number = this.contentHeight - this.viewportHeight - y;
+      if (remain <= LOAD_MORE_THRESHOLD) {
+        this.loadMore();
+      }
+    } catch (err) {
+    }
+  }
+
+  /** 内容不足一屏且还有未加载 id：自动补一页，避免页面无法滚动导致加载更多永远不触发。 */
+  private checkFillAfterLoad(): void {
+    if (!this.active || this.reloading || this.loadingMore || this.transitioning || this.swapPending) {
+      return;
+    }
+    if (this.cards.length === 0 || !this.hasMore()) {
+      return;
+    }
+    if (this.contentHeight <= 0 || this.viewportHeight <= 0) {
+      return;
+    }
+    if (this.contentHeight <= this.viewportHeight) {
+      this.loadMore();
+    }
+  }
+
+  /** 加载下一页：先推进分页进度（同一批不会重复请求），详情分批回源后增量追加。 */
+  private loadMore(): void {
+    if (!this.active || this.reloading || this.loadingMore || this.transitioning || this.swapPending) {
+      return;
+    }
+    const ids: number[] = this.tabIds();
+    this.totalCount = ids.length;
+    if (this.loadedCount >= ids.length) {
+      return;
+    }
+    const from: number = this.loadedCount;
+    let next: number = from + PAGE_SIZE;
+    if (next > ids.length) {
+      next = ids.length;
+    }
+    const batch: number[] = ids.slice(from, next);
+    if (batch.length === 0) {
+      return;
+    }
+    this.loadedCount = next;
+    this.loadingMore = true;
+    const seq: number = this.loadSeq;
+    // 新批次 id 增量预热（已缓存/在途的由 UserListPrefetch/Api 去重）。
+    UserListPrefetch.warmNow(batch);
+    this.appendBatch(batch, seq).catch(() => {
+    });
+  }
+
+  /** 分批取回下一批详情并按顺序增量追加（不清空已有卡片、不闪骨架）。 */
+  private async appendBatch(batch: number[], seq: number): Promise<void> {
+    try {
+      let index = 0;
+      while (index < batch.length) {
+        const tasks: Promise<Detail | null>[] = [];
+        for (let i = index; i < index + FETCH_CONCURRENCY && i < batch.length; i++) {
+          const cached: Detail | null = Api.peekVideo(batch[i]);
+          if (cached !== null) {
+            tasks.push(Promise.resolve<Detail | null>(cached));
+          } else {
+            tasks.push(this.fetchOne(batch[i]));
+          }
+        }
+        await Promise.all(tasks);
+        if (seq !== this.loadSeq || !this.active) {
+          return;
+        }
+        this.applyLoadedCards();
+        index += FETCH_CONCURRENCY;
+      }
+    } catch (err) {
+    } finally {
+      if (seq === this.loadSeq && this.active) {
+        this.loadingMore = false;
+        // 等一帧布局后再判断是否还需要补页（内容仍不足一屏时继续加载）。
+        setTimeout(() => {
+          if (this.active) {
+            this.checkFillAfterLoad();
+          }
+        }, 48);
+      }
+    }
+  }
+
+  /** 按当前分页进度把已缓存详情合并进列表（只追加、按 id 去重、保持顺序）。 */
+  private applyLoadedCards(): void {
+    if (!this.active || this.transitioning || this.swapPending) {
+      return;
+    }
+    const ids: number[] = this.tabIds();
+    const limit: number = this.loadedCount > ids.length ? ids.length : this.loadedCount;
+    const merged: Detail[] = this.mergeCards(ids.slice(0, limit));
+    if (merged.length > this.cards.length) {
+      this.cards = merged;
+    }
+  }
+
+  /** 数据补齐后若仍低于该 Tab 上次滚动位置（切换时被内容高度钳制），再对齐一次。 */
+  private reapplyScroll(): void {
+    const saved: number = this.displayTab === 'fav' ? this.favScrollY : this.historyScrollY;
+    if (saved <= 0) {
+      return;
+    }
+    try {
+      const y: number = this.scroller.currentOffset().yOffset;
+      if (saved - y > 2) {
+        this.scrollToY(saved);
+      }
+    } catch (err) {
     }
   }
 
@@ -461,14 +699,20 @@ export struct ProfilePage {
     if (this.tab === tab) {
       return;
     }
-    // 先记住当前 Tab 的滚动位置，稍后恢复目标 Tab 自己的位置。
+    // 先记住当前 Tab 的滚动位置与分页进度，稍后恢复目标 Tab 自己的。
     this.saveScrollOffset();
     this.clearSwitchTimer();
     this.clearFadeTimer();
-    // 取消旧 Tab 的在途加载，防止过期批次回写。
+    // 取消旧 Tab 的在途加载（含加载更多），防止过期批次回写。
     this.loadSeq++;
+    this.loadingMore = false;
+    this.saveProgress();
     this.tab = tab;
-    const target: number[] = this.idsForTab(tab).slice(0, MAX_CARDS);
+    this.refreshLocalLists();
+    this.loadedCount = this.progressOfTab(tab);
+    // 恢复滚动位置后的短暂窗口内不触发加载更多，避免把「恢复到上次底部」误判成用户上拉。
+    this.loadMoreSuppressUntil = Date.now() + 500;
+    const target: number[] = this.idsForTab(tab).slice(0, this.loadedCount);
     this.warmSeen = target;
     const cached: Detail[] = this.cachedCards(target);
     if (cached.length > 0) {
@@ -554,6 +798,10 @@ export struct ProfilePage {
           this.cardsFadeTimer = setTimeout(() => {
             this.cardsFadeTimer = -1;
             UserPrefs.clearHistory();
+            // 清空历史：重置历史分页进度与滚动位置。
+            this.historyLoaded = 0;
+            this.historyScrollY = 0;
+            this.loadingMore = false;
             this.refreshLocalLists();
             this.cards = [];
             this.loadCards();
@@ -855,6 +1103,29 @@ export struct ProfilePage {
         ForEach(this.rowIndexes(), (rowIndex: number) => {
           this.CardRow(rowIndex)
         }, (rowIndex: number) => 'row-' + rowIndex + '-' + this.gridCols())
+        if (this.loadingMore) {
+          // 加载下一批：底部进度提示（不清空/不替换已有卡片）。
+          Row({ space: HgSpace.s }) {
+            LoadingProgress()
+              .width(20)
+              .height(20)
+              .color(HgColor.textTertiary(this.dark))
+            Text('加载中…')
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.textTertiary(this.dark))
+          }
+          .width('100%')
+          .height(44)
+          .justifyContent(FlexAlign.Center)
+        } else if (!this.hasMore()) {
+          // 全部加载完：底部结束提示。
+          Text('— 已经到底啦 —')
+            .width('100%')
+            .height(36)
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .textAlign(TextAlign.Center)
+        }
         if (this.displayTab === 'history') {
           Text('清空观看历史')
             .width('100%')
@@ -982,15 +1253,33 @@ export struct ProfilePage {
           right: HgSpace.pageInset + this.contentGutter(),
           top: HgSpace.m
         })
+        // 记录内容总高度（vp）：距底部阈值判断用。
+        .onAreaChange((oldValue: Area, newValue: Area) => {
+          const height: number = parseFloat(String(newValue.height));
+          if (!isNaN(height) && height > 0) {
+            this.contentHeight = height;
+          }
+          this.checkFillAfterLoad();
+        })
       }
       .layoutWeight(1)
       .width('100%')
       .align(Alignment.Top)
       .scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring)
-      // 记录收藏/历史各自的滚动位置（onScroll 已废弃，用 onDidScroll + currentOffset 读绝对值）。
+      // 记录收藏/历史各自的滚动位置（onScroll 已废弃，用 onDidScroll + currentOffset 读绝对值）；
+      // 距底部阈值内触发加载更多（收藏/历史无限滚动）。
       .onDidScroll((xOffset: number, yOffset: number) => {
         this.saveScrollOffset();
+        this.maybeLoadMore();
+      })
+      // 记录视口高度（vp）：首屏内容不足一屏时自动补一页，保证可滚动触发加载更多。
+      .onAreaChange((oldValue: Area, newValue: Area) => {
+        const height: number = parseFloat(String(newValue.height));
+        if (!isNaN(height) && height > 0) {
+          this.viewportHeight = height;
+        }
+        this.checkFillAfterLoad();
       })
     }
     .width('100%')
