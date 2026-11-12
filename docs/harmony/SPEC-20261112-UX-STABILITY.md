@@ -144,3 +144,10 @@ SearchBar: [图标 + 输入框(自绘占位)] [结果态：返回箭头；idle�
 2) 修复后复核：11 项修复全部落实，无新增阻塞；补充 N1-N8（全屏导航栏被回刷、左上返回不一致、窄窗全屏残留、重入缺 try/finally、onShown 透明度、系统栏调用去重、版本读取时机、2in1 文案），已全部修复。
 
 已知系统限制：setWindowSystemBarProperties 在非全屏/非最大化窗口（悬浮窗、系统分屏）不生效，此类窗口下导航栏配色可能仍由系统决定。
+
+### R13 页面级启动预载（消除"打开页面先骨架"）
+- 新增 ScreenPrefetch：启动 ~1.2s 后并行预热 排行榜(hot/recommend/potential)、吃瓜第一页、专题第一页、频道首屏（CategoryCatalog 已知频道）。
+- 快照带抓取时间与线路：TTL（榜单 3min / 列表 5min）、切线路自动失效、getter 返回副本、不缓存空列表。
+- 页面接入：RanksPage 先用快照渲染当前榜（其余后台补）、PostsPage/TopicsPage/ChannelPage 首屏快照直出、SearchPage 热榜快照、CategoryPage 频道预览与吃瓜预览快照；下拉刷新仍回源。
+- 审查修复：空榜必须回源（否则死骨架）、分页跨批去重、共享缓存数组副本、Topics/Search 由 TTL 自然自愈。
+- 未预载项说明：关注流需登录、搜索结果为用户输入、详情页复用既有 Api 详情缓存（peek + 后台刷新），不额外预热。
