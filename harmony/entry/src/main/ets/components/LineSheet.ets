@@ -5,6 +5,9 @@ import { Api } from '../services/Api';
 import { UiBus } from '../services/UiBus';
 import { UserPrefs } from '../state/UserPrefs';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
+import { HgPressable } from './HgPressable';
+import { HgSkeletonBlock } from './HgSkeletonBlock';
 import { hostOf } from '../utils/Format';
 
 /** 延迟探测候选上限：一次性探测全部固定线路 + 镜像（并发由 Lines.probe 内部限制 64）。 */
@@ -233,6 +236,7 @@ export struct LineSheet {
         .padding({ left: 7, right: 7, top: 3, bottom: 3 })
         .backgroundColor(this.latencyBg(url))
         .borderRadius(HgRadius.badge)
+        .transition(HgMotion.fadeIn(HgMotion.fast))
     }
   }
 
@@ -244,45 +248,49 @@ export struct LineSheet {
       .padding({ left: 7, right: 7, top: 3, bottom: 3 })
       .backgroundColor(HgColor.accent(this.dark))
       .borderRadius(HgRadius.badge)
+      .transition(HgMotion.fadeIn(HgMotion.fast))
   }
 
   /** 一行线路：名称/域名 + 延迟 + 选中态。 */
   @Builder
   LineRow(item: LineItem) {
-    Row({ space: HgSpace.s }) {
-      Column({ space: 2 }) {
-        Text(this.lineName(item))
-          .fontSize(HgFont.rowTitle)
-          .fontColor(HgColor.textPrimary(this.dark))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(hostOf(item.url))
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.textTertiary(this.dark))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
+    HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+      Row({ space: HgSpace.s }) {
+        Column({ space: 2 }) {
+          Text(this.lineName(item))
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(hostOf(item.url))
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
 
-      this.LatencyChip(item.url)
+        this.LatencyChip(item.url)
 
-      if (this.current === item.url) {
-        this.UseBadge()
-        SymbolGlyph($r('sys.symbol.checkmark'))
-          .fontSize(HgIconSize.compact)
-          .fontColor([HgColor.accent(this.dark)])
+        if (this.current === item.url) {
+          this.UseBadge()
+          SymbolGlyph($r('sys.symbol.checkmark'))
+            .fontSize(HgIconSize.compact)
+            .fontColor([HgColor.accent(this.dark)])
+        }
       }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+      .padding({ left: HgSpace.m, right: HgSpace.m })
+      .backgroundColor(this.current === item.url ? HgColor.accentSoft(this.dark) : Color.Transparent)
+      .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
+      .onClick(() => {
+        this.switchTo(item.url);
+      })
+      .accessibilityText('线路 ' + this.lineName(item) + '，' + hostOf(item.url) +
+        (this.current === item.url ? '，使用中' : '，点击切换'))
     }
-    .width('100%')
-    .height(HgSize.listRowDouble)
-    .padding({ left: HgSpace.m, right: HgSpace.m })
-    .backgroundColor(this.current === item.url ? HgColor.accentSoft(this.dark) : Color.Transparent)
-    .onClick(() => {
-      this.switchTo(item.url);
-    })
-    .accessibilityText('线路 ' + this.lineName(item) + '，' + hostOf(item.url) +
-      (this.current === item.url ? '，使用中' : '，点击切换'))
   }
 
   @Builder
@@ -310,24 +318,12 @@ export struct LineSheet {
       ForEach([0, 1, 2], (index: number) => {
         Row() {
           Column({ space: 6 }) {
-            Row()
-              .width('46%')
-              .height(HgFont.rowTitle)
-              .backgroundColor(HgColor.skeletonBase(this.dark))
-              .borderRadius(4)
-            Row()
-              .width('70%')
-              .height(HgFont.caption)
-              .backgroundColor(HgColor.skeletonBase(this.dark))
-              .borderRadius(4)
+            HgSkeletonBlock({ dark: this.dark, blockWidth: '46%', blockHeight: HgFont.rowTitle, radius: 4 })
+            HgSkeletonBlock({ dark: this.dark, blockWidth: '70%', blockHeight: HgFont.caption, radius: 4 })
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
-          Row()
-            .width(40)
-            .height(18)
-            .backgroundColor(HgColor.skeletonBase(this.dark))
-            .borderRadius(HgRadius.badge)
+          HgSkeletonBlock({ dark: this.dark, blockWidth: 40, blockHeight: 18, radius: HgRadius.badge })
         }
         .width('100%')
         .height(HgSize.listRowDouble)
@@ -343,6 +339,7 @@ export struct LineSheet {
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
     .border({ width: 1, color: HgColor.hairline(this.dark) })
+    .transition(HgMotion.statusTransition())
   }
 
   /** 镜像线路加载失败：错误 + 重试。 */
@@ -355,20 +352,23 @@ export struct LineSheet {
         .layoutWeight(1)
         .maxLines(2)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-      Text('重试')
-        .fontSize(HgFont.caption)
-        .fontColor(HgColor.accent(this.dark))
-        .height(HgSize.compactControl)
-        .padding({ left: HgSpace.m, right: HgSpace.m })
-        .onClick(() => {
-          this.loadMirrors();
-        })
-        .accessibilityText('重新获取镜像线路')
+      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+        Text('重试')
+          .fontSize(HgFont.caption)
+          .fontColor(HgColor.accent(this.dark))
+          .height(HgSize.compactControl)
+          .padding({ left: HgSpace.m, right: HgSpace.m })
+          .onClick(() => {
+            this.loadMirrors();
+          })
+          .accessibilityText('重新获取镜像线路')
+      }
     }
     .width('100%')
     .padding(HgSpace.m)
     .backgroundColor(HgColor.dangerSurface(this.dark))
     .borderRadius(HgRadius.group)
+    .transition(HgMotion.statusTransition())
   }
 
   @Builder
@@ -381,20 +381,23 @@ export struct LineSheet {
         .fontSize(HgFont.caption)
         .fontColor(HgColor.textSecondary(this.dark))
         .layoutWeight(1)
-      Text('刷新')
-        .fontSize(HgFont.caption)
-        .fontColor(HgColor.accent(this.dark))
-        .height(HgSize.compactControl)
-        .padding({ left: HgSpace.m, right: HgSpace.m })
-        .onClick(() => {
-          this.loadMirrors();
-        })
+      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+        Text('刷新')
+          .fontSize(HgFont.caption)
+          .fontColor(HgColor.accent(this.dark))
+          .height(HgSize.compactControl)
+          .padding({ left: HgSpace.m, right: HgSpace.m })
+          .onClick(() => {
+            this.loadMirrors();
+          })
+      }
     }
     .width('100%')
     .padding(HgSpace.m)
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
     .border({ width: 1, color: HgColor.hairline(this.dark) })
+    .transition(HgMotion.statusTransition())
   }
 
   /** 镜像列表外框：圆角卡片 + 行分隔线。 */
@@ -415,6 +418,7 @@ export struct LineSheet {
     .borderRadius(HgRadius.group)
     .border({ width: 1, color: HgColor.hairline(this.dark) })
     .clip(true)
+    .transition(HgMotion.statusTransition())
   }
 
   @Builder
@@ -454,19 +458,21 @@ export struct LineSheet {
       .alignItems(HorizontalAlign.Start)
 
       if (this.showCloseButton) {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.xmark'))
-            .fontSize(HgIconSize.compact)
-            .fontColor([HgColor.textSecondary(this.dark)])
+        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+          Stack() {
+            SymbolGlyph($r('sys.symbol.xmark'))
+              .fontSize(HgIconSize.compact)
+              .fontColor([HgColor.textSecondary(this.dark)])
+          }
+          .width(HgSize.compactControl)
+          .height(HgSize.compactControl)
+          .borderRadius(HgSize.compactControl / 2)
+          .backgroundColor(HgColor.surface3(this.dark))
+          .onClick(() => {
+            this.close();
+          })
+          .accessibilityText('关闭线路面板')
         }
-        .width(HgSize.compactControl)
-        .height(HgSize.compactControl)
-        .borderRadius(HgSize.compactControl / 2)
-        .backgroundColor(HgColor.surface3(this.dark))
-        .onClick(() => {
-          this.close();
-        })
-        .accessibilityText('关闭线路面板')
       }
     }
     .width('100%')
@@ -506,17 +512,21 @@ export struct LineSheet {
             .width(16)
             .height(16)
             .color(HgColor.accent(this.dark))
+            .transition(HgMotion.fadeIn(HgMotion.fast))
         } else {
-          Text('自动选择')
-            .fontSize(HgFont.caption)
-            .fontColor(HgColor.accent(this.dark))
-            .backgroundColor(HgColor.accentSoft(this.dark))
-            .borderRadius(HgRadius.chip)
-            .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.xs, bottom: HgSpace.xs })
-            .onClick(() => {
-              this.autoSelect();
-            })
-            .accessibilityText('自动检测并选择可用线路')
+          HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+            Text('自动选择')
+              .fontSize(HgFont.caption)
+              .fontColor(HgColor.accent(this.dark))
+              .backgroundColor(HgColor.accentSoft(this.dark))
+              .borderRadius(HgRadius.chip)
+              .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.xs, bottom: HgSpace.xs })
+              .transition(HgMotion.fadeIn(HgMotion.fast))
+              .onClick(() => {
+                this.autoSelect();
+              })
+              .accessibilityText('自动检测并选择可用线路')
+          }
         }
       }
       .width('100%')
@@ -561,21 +571,25 @@ export struct LineSheet {
                   .width(16)
                   .height(16)
                   .color(HgColor.accent(this.dark))
+                  .transition(HgMotion.fadeIn(HgMotion.fast))
               } else {
-                Row({ space: HgSpace.xxs }) {
-                  SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-                    .fontSize(HgIconSize.inline)
-                    .fontColor([HgColor.accent(this.dark)])
-                  Text('刷新')
-                    .fontSize(HgFont.micro)
-                    .fontColor(HgColor.accent(this.dark))
+                HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+                  Row({ space: HgSpace.xxs }) {
+                    SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+                      .fontSize(HgIconSize.inline)
+                      .fontColor([HgColor.accent(this.dark)])
+                    Text('刷新')
+                      .fontSize(HgFont.micro)
+                      .fontColor(HgColor.accent(this.dark))
+                  }
+                  .height(HgSize.compactControl)
+                  .padding({ left: HgSpace.s, right: HgSpace.s })
+                  .transition(HgMotion.fadeIn(HgMotion.fast))
+                  .onClick(() => {
+                    this.loadMirrors();
+                  })
+                  .accessibilityText('刷新镜像线路')
                 }
-                .height(HgSize.compactControl)
-                .padding({ left: HgSpace.s, right: HgSpace.s })
-                .onClick(() => {
-                  this.loadMirrors();
-                })
-                .accessibilityText('刷新镜像线路')
               }
             }
             .width('100%')

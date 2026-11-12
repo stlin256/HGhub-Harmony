@@ -3,7 +3,11 @@ import { UserListPrefetch } from '../services/UserListPrefetch';
 import { Detail, User, WatchProgress } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState } from '../components/HgCommon';
-import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
+import { HgPressable } from '../components/HgPressable';
+import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
 import {
@@ -18,9 +22,6 @@ const PAGE_SIZE: number = 12;
 const FETCH_CONCURRENCY: number = 4;
 /** 距列表底部小于该值（vp）时触发加载更多。 */
 const LOAD_MORE_THRESHOLD: number = 300;
-/** 切 Tab 过渡：旧列表淡出 / 新列表淡入时长（任务指定 110ms / 170ms；HgTokens 无对应档位）。 */
-const SWITCH_FADE_OUT_MS: number = 110;
-const SWITCH_FADE_IN_MS: number = 170;
 /** 换数据后等一帧再对齐滚动位置（此时列表透明度仍很低，校正不可见）。 */
 const SCROLL_RESTORE_DELAY_MS: number = 32;
 
@@ -87,6 +88,27 @@ export struct ProfilePage {
   private viewportHeight: number = 0;
   /** 切 Tab 后短暂抑制滚动触发，避免恢复滚动位置时误触发加载更多。 */
   private loadMoreSuppressUntil: number = 0;
+  /** 我的页确认弹窗（清空历史/退出登录）：复用统一弹窗壳，替代系统 AlertDialog。 */
+  private confirmCopy: ConfirmCopy = new ConfirmCopy('', '', '确定', '取消', false);
+  private pendingConfirm: () => void = () => {};
+  private confirmController: CustomDialogController = new CustomDialogController({
+    builder: ConfirmDialog({
+      copyOf: (): ConfirmCopy => this.confirmCopy,
+      onConfirm: (): void => {
+        this.pendingConfirm();
+      }
+    }),
+    autoCancel: true,
+    alignment: DialogAlignment.Center,
+    customStyle: true
+  });
+
+  /** 打开统一主题化确认弹窗（文案/动作 open 前写入）。 */
+  private openConfirm(copy: ConfirmCopy, action: () => void): void {
+    this.confirmCopy = copy;
+    this.pendingConfirm = action;
+    this.confirmController.open();
+  }
 
   /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
   private contentGutter(): number {
@@ -122,6 +144,15 @@ export struct ProfilePage {
     return rows * (tileW / 0.75) + (rows - 1) * HgSpace.s;
   }
 
+  /** 单个骨架 tile 高度（vp）：与真实卡片同 3:4 几何，供 HgSkeletonBlock 统一呼吸动画。 */
+  private skeletonTileHeight(): number {
+    const cols: number = this.gridCols();
+    const block: number = (this.windowW > HgResponsive.CONTENT_MAX ? HgResponsive.CONTENT_MAX : this.windowW)
+      - HgSpace.pageInset * 2;
+    const tileW: number = (block - HgSpace.s * (cols - 1)) / cols;
+    return tileW / 0.75;
+  }
+
   aboutToAppear(): void {
     this.active = true;
     this.readUser();
@@ -151,9 +182,11 @@ export struct ProfilePage {
     }
     // 收藏/历史变化后先增量预热新增 id 的详情（不阻塞；与 loadCards 共用 Api 在途请求，不重复回源）。
     this.warmNewDetails();
-    // 收藏/历史（可能在详情页本地新增）变化时，列表先淡出再重载淡入。
+    // 收藏/历史（可能在详情页本地新增）变化时，列表先淡出（exitFast）再重载淡入。
     if (this.cards.length > 0) {
-      this.cardsFade = 0;
+      animateTo({ duration: HgMotion.ms(HgMotion.exitFast), curve: HgMotion.curve }, () => {
+        this.cardsFade = 0;
+      });
     }
     this.loadCards();
   }
@@ -340,14 +373,15 @@ export struct ProfilePage {
   }
 
   /**
-   * 交叉淡入换数据：旧列表淡出 110ms → swap 换数据 → 新列表淡入 170ms。
+   * 交叉淡入换数据：旧列表淡出 HgMotion.exitFast(120ms) → swap 换数据 → 新列表淡入 HgMotion.standard(220ms)。
    * 淡出窗口内 loadCards 不回写 cards（transitioning=true），保证换数据只发生在透明度最低点。
    */
   private startCrossFade(swap: () => void): void {
     this.clearSwitchTimer();
     this.clearFadeTimer();
     this.transitioning = true;
-    animateTo({ duration: SWITCH_FADE_OUT_MS, curve: Curve.FastOutSlowIn }, () => {
+    const outMs: number = HgMotion.ms(HgMotion.exitFast);
+    animateTo({ duration: outMs, curve: HgMotion.curve }, () => {
       this.cardsFade = 0;
     });
     this.switchTimer = setTimeout(() => {
@@ -358,10 +392,10 @@ export struct ProfilePage {
       } catch (err) {
       }
       // 无论换数据是否异常都要淡回可见，避免列表停留在透明态。
-      animateTo({ duration: SWITCH_FADE_IN_MS, curve: Curve.FastOutSlowIn }, () => {
+      animateTo({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve }, () => {
         this.cardsFade = 1;
       });
-    }, SWITCH_FADE_OUT_MS);
+    }, outMs);
   }
 
   /** 取消未完成的列表淡入定时器（避免与切 Tab 过渡互相打断）。 */
@@ -672,7 +706,7 @@ export struct ProfilePage {
   /** 数据落定后把列表透明度从 0 淡回 1（140ms），与切 Tab/清空历史的淡出配对。 */
   private scheduleCardsFadeIn(): void {
     if (this.cardsFade >= 1) {
-      // 已可见：无需再淡入，也避免打断切 Tab 的 170ms 淡入动画。
+      // 已可见：无需再淡入，也避免打断切 Tab 的 standard 淡入动画。
       return;
     }
     if (this.cardsFadeTimer >= 0) {
@@ -680,15 +714,36 @@ export struct ProfilePage {
     }
     this.cardsFadeTimer = setTimeout(() => {
       this.cardsFadeTimer = -1;
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
         this.cardsFade = 1;
       });
     }, 40);
   }
 
+  /** 点击 Tab：切 Tab；再次点击当前 Tab 时 280ms 回顶（MOTION §3.10 返回顶部）。 */
+  private onTabTap(tab: string): void {
+    if (this.tab === tab) {
+      this.scrollToTop();
+      return;
+    }
+    this.switchTab(tab);
+  }
+
+  /** 280ms 平滑回顶（scrollTo 动画参数走 HgMotion.page/curve）。 */
+  private scrollToTop(): void {
+    try {
+      this.scroller.scrollTo({
+        xOffset: 0,
+        yOffset: 0,
+        animation: { duration: HgMotion.ms(HgMotion.page), curve: HgMotion.curve }
+      });
+    } catch (err) {
+    }
+  }
+
   /**
    * 切 Tab：不清空列表（避免内容高度骤变导致跳顶/骨架闪、封面重载）。
-   * 有缓存：旧列表淡出 110ms → 换数据 → 新列表淡入 170ms；
+   * 有缓存：旧列表淡出 exitFast 120ms → 换数据 → 新列表淡入 standard 220ms；
    * 无缓存：保留旧列表展示，loadCards 数据就绪后再交叉淡入（禁止骨架闪）。
    */
   private switchTab(tab: string): void {
@@ -774,59 +829,41 @@ export struct ProfilePage {
   }
 
   private clearHistory(): void {
-    AlertDialog.show({
-      title: '清空观看历史',
-      message: '将删除本机全部观看记录，收藏与登录状态不受影响。',
-      primaryButton: {
-        value: '取消',
-        action: () => {
-        }
-      },
-      secondaryButton: {
-        value: '清空',
-        fontColor: HgColor.danger(this.dark),
-        action: () => {
-          // 列表先 140ms 淡出，再清数据/重载（空态随后淡入），避免列表"砰"地消失。
+    this.openConfirm(
+      new ConfirmCopy('清空观看历史', '将删除本机全部观看记录，收藏与登录状态不受影响。', '清空', '取消', true),
+      () => {
+        // 列表先 exitFast 淡出，再清数据/重载（空态随后淡入），避免列表"砰"地消失。
+        animateTo({ duration: HgMotion.ms(HgMotion.exitFast), curve: HgMotion.curve }, () => {
           this.cardsFade = 0;
-          if (this.cardsFadeTimer >= 0) {
-            clearTimeout(this.cardsFadeTimer);
-          }
-          this.cardsFadeTimer = setTimeout(() => {
-            this.cardsFadeTimer = -1;
-            UserPrefs.clearHistory();
-            // 清空历史：重置历史分页进度与滚动位置。
-            this.historyLoaded = 0;
-            this.historyScrollY = 0;
-            this.loadingMore = false;
-            this.refreshLocalLists();
-            this.cards = [];
-            this.loadCards();
-            UiBus.toastOk('观看历史已清空');
-          }, HgDuration.micro);
+        });
+        if (this.cardsFadeTimer >= 0) {
+          clearTimeout(this.cardsFadeTimer);
         }
+        this.cardsFadeTimer = setTimeout(() => {
+          this.cardsFadeTimer = -1;
+          UserPrefs.clearHistory();
+          // 清空历史：重置历史分页进度与滚动位置。
+          this.historyLoaded = 0;
+          this.historyScrollY = 0;
+          this.loadingMore = false;
+          this.refreshLocalLists();
+          this.cards = [];
+          this.loadCards();
+          UiBus.toastOk('观看历史已清空');
+        }, HgMotion.ms(HgMotion.exitFast));
       }
-    });
+    );
   }
 
   private logout(): void {
-    AlertDialog.show({
-      title: '退出登录',
-      message: '退出后收藏与历史仍保留在本机。',
-      primaryButton: {
-        value: '取消',
-        action: () => {
-        }
-      },
-      secondaryButton: {
-        value: '退出',
-        fontColor: HgColor.danger(this.dark),
-        action: () => {
-          Api.logout();
-          UserPrefs.setUser(null);
-          UiBus.toastInfo('已退出登录');
-        }
+    this.openConfirm(
+      new ConfirmCopy('退出登录', '退出后收藏与历史仍保留在本机。', '退出', '取消', true),
+      () => {
+        Api.logout();
+        UserPrefs.setUser(null);
+        UiBus.toastInfo('已退出登录');
       }
-    });
+    );
   }
 
   private avatarBg(): string {
@@ -872,82 +909,84 @@ export struct ProfilePage {
 
   @Builder
   ProfileCard() {
-    Row({ space: HgSpace.m }) {
-      this.Avatar()
-      Column({ space: HgSpace.xxs }) {
-        Text(this.loggedIn ? this.nickname : '未登录')
-          .width('100%')
-          .fontSize(HgFont.pageTitle)
-          .fontWeight(HgFont.weightBold)
-          .fontColor(HgColor.textPrimary(this.dark))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.loggedIn
-          ? '@' + this.username + ' · ID ' + this.userId
-          : '登录后可同步点赞、收藏与评论')
-          .width('100%')
-          .fontSize(HgFont.micro)
-          .fontColor(HgColor.textTertiary(this.dark))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Row({ space: HgSpace.m }) {
-          if (this.loggedIn) {
-            this.StatItem('点赞', this.likeCount)
-            this.StatItem('收藏', this.collectCount)
-            this.StatItem('关注', this.followingCount)
-          } else {
-            this.StatItem('收藏', this.favCount)
-            this.StatItem('观看', this.historyCount)
+    HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+      Row({ space: HgSpace.m }) {
+        this.Avatar()
+        Column({ space: HgSpace.xxs }) {
+          Text(this.loggedIn ? this.nickname : '未登录')
+            .width('100%')
+            .fontSize(HgFont.pageTitle)
+            .fontWeight(HgFont.weightBold)
+            .fontColor(HgColor.textPrimary(this.dark))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.loggedIn
+            ? '@' + this.username + ' · ID ' + this.userId
+            : '登录后可同步点赞、收藏与评论')
+            .width('100%')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Row({ space: HgSpace.m }) {
+            if (this.loggedIn) {
+              this.StatItem('点赞', this.likeCount)
+              this.StatItem('收藏', this.collectCount)
+              this.StatItem('关注', this.followingCount)
+            } else {
+              this.StatItem('收藏', this.favCount)
+              this.StatItem('观看', this.historyCount)
+            }
           }
+          .margin({ top: HgSpace.xs })
         }
-        .margin({ top: HgSpace.xs })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
 
-      if (this.loggedIn) {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.lock_open'))
-            .fontSize(HgIconSize.compact)
-            .fontColor([HgColor.textTertiary(this.dark)])
+        if (this.loggedIn) {
+          Stack() {
+            SymbolGlyph($r('sys.symbol.lock_open'))
+              .fontSize(HgIconSize.compact)
+              .fontColor([HgColor.textTertiary(this.dark)])
+          }
+          .width(HgSize.hitTarget)
+          .height(HgSize.hitTarget)
+          .borderRadius(HgSize.hitTarget / 2)
+          .onClick(() => {
+            this.logout();
+          })
+        } else {
+          Row({ space: HgSpace.xxs }) {
+            Text('登录')
+              .fontSize(HgFont.caption)
+              .fontWeight(HgFont.weightMedium)
+              .fontColor(HgColor.onAccent(this.dark))
+            SymbolGlyph($r('sys.symbol.chevron_right'))
+              .fontSize(HgIconSize.micro)
+              .fontColor([HgColor.onAccent(this.dark)])
+          }
+          .height(32)
+          .padding({ left: HgSpace.m, right: HgSpace.s })
+          .backgroundColor(HgColor.accent(this.dark))
+          .borderRadius(HgRadius.chip)
+          .accessibilityText('登录')
+          .onClick(() => {
+            UiBus.openLogin();
+          })
         }
-        .width(HgSize.hitTarget)
-        .height(HgSize.hitTarget)
-        .borderRadius(HgSize.hitTarget / 2)
-        .onClick(() => {
-          this.logout();
-        })
-      } else {
-        Row({ space: HgSpace.xxs }) {
-          Text('登录')
-            .fontSize(HgFont.caption)
-            .fontWeight(HgFont.weightMedium)
-            .fontColor(HgColor.onAccent(this.dark))
-          SymbolGlyph($r('sys.symbol.chevron_right'))
-            .fontSize(HgIconSize.micro)
-            .fontColor([HgColor.onAccent(this.dark)])
-        }
-        .height(32)
-        .padding({ left: HgSpace.m, right: HgSpace.s })
-        .backgroundColor(HgColor.accent(this.dark))
-        .borderRadius(HgRadius.chip)
-        .accessibilityText('登录')
-        .onClick(() => {
+      }
+      .width('100%')
+      .padding(HgSpace.l)
+      .backgroundColor(HgColor.surface1(this.dark))
+      .borderRadius(HgRadius.group)
+      .border({ width: 0.5, color: HgColor.hairline(this.dark) })
+      .accessibilityText('登录')
+      .onClick(() => {
+        if (!this.loggedIn) {
           UiBus.openLogin();
-        })
-      }
+        }
+      })
     }
-    .width('100%')
-    .padding(HgSpace.l)
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
-    .border({ width: 0.5, color: HgColor.hairline(this.dark) })
-    .accessibilityText('登录')
-    .onClick(() => {
-      if (!this.loggedIn) {
-        UiBus.openLogin();
-      }
-    })
   }
 
   @Builder
@@ -962,10 +1001,10 @@ export struct ProfilePage {
         .height(30)
         .backgroundColor(this.tab === 'fav' ? HgColor.surface1(this.dark) : Color.Transparent)
         .borderRadius(HgRadius.chip)
-        .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
+        .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
         .accessibilityText('我的收藏')
         .onClick(() => {
-          this.switchTab('fav');
+          this.onTabTap('fav');
         })
       Text('观看历史')
         .fontSize(HgFont.secondary)
@@ -976,10 +1015,10 @@ export struct ProfilePage {
         .height(30)
         .backgroundColor(this.tab === 'history' ? HgColor.surface1(this.dark) : Color.Transparent)
         .borderRadius(HgRadius.chip)
-        .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
+        .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
         .accessibilityText('观看历史')
         .onClick(() => {
-          this.switchTab('history');
+          this.onTabTap('history');
         })
     }
     .width('100%')
@@ -991,54 +1030,56 @@ export struct ProfilePage {
 
   @Builder
   GridTile(item: Detail, index: number) {
-    Stack({ alignContent: Alignment.BottomStart }) {
-      HgAsyncCover({
-        url: item.cover,
-        dark: this.dark,
-        radius: 0,
-        decodeWidth: 360,
-        decodeHeight: 480,
-        coverWidth: '100%',
-        coverHeight: '100%'
-      })
-      Column()
-        .width('100%')
-        .height('55%')
-        .linearGradient({ angle: 180, colors: [['#00000000', 0.0], ['#CC000000', 1.0]] })
-      Column({ space: HgSpace.xs }) {
-        if (this.displayTab === 'history' && this.progressLabel(item.id).length > 0) {
-          Row({ space: 2 }) {
-            Text(this.progressLabel(item.id))
-              .fontSize(HgFont.nano)
-              .fontColor(HgColor.videoInk2)
-            if (this.progressTimeLabel(item.id).length > 0) {
-              Text(this.progressTimeLabel(item.id))
-                .fontSize(HgFont.nano)
-                .fontColor(HgColor.videoInk3)
-            }
-          }
-          .padding({ left: 4, right: 4, top: 1, bottom: 1 })
-          .backgroundColor(HgColor.videoChipStrong)
-          .borderRadius(HgRadius.badge)
-        }
-        Text(item.title)
+    HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+      Stack({ alignContent: Alignment.BottomStart }) {
+        HgAsyncCover({
+          url: item.cover,
+          dark: this.dark,
+          radius: 0,
+          decodeWidth: 360,
+          decodeHeight: 480,
+          coverWidth: '100%',
+          coverHeight: '100%'
+        })
+        Column()
           .width('100%')
-          .fontSize(HgFont.micro)
-          .fontColor(HgColor.videoInk)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .height('55%')
+          .linearGradient({ angle: 180, colors: [['#00000000', 0.0], ['#CC000000', 1.0]] })
+        Column({ space: HgSpace.xs }) {
+          if (this.displayTab === 'history' && this.progressLabel(item.id).length > 0) {
+            Row({ space: 2 }) {
+              Text(this.progressLabel(item.id))
+                .fontSize(HgFont.nano)
+                .fontColor(HgColor.videoInk2)
+              if (this.progressTimeLabel(item.id).length > 0) {
+                Text(this.progressTimeLabel(item.id))
+                  .fontSize(HgFont.nano)
+                  .fontColor(HgColor.videoInk3)
+              }
+            }
+            .padding({ left: 4, right: 4, top: 1, bottom: 1 })
+            .backgroundColor(HgColor.videoChipStrong)
+            .borderRadius(HgRadius.badge)
+          }
+          Text(item.title)
+            .width('100%')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.videoInk)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        .padding(HgSpace.xs)
       }
       .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .padding(HgSpace.xs)
+      .aspectRatio(0.75)
+      .borderRadius(HgRadius.row)
+      .clip(true)
+      .onClick(() => {
+        this.openCard(item, index);
+      })
     }
-    .width('100%')
-    .aspectRatio(0.75)
-    .borderRadius(HgRadius.row)
-    .clip(true)
-    .onClick(() => {
-      this.openCard(item, index);
-    })
   }
 
   @Builder
@@ -1066,11 +1107,12 @@ export struct ProfilePage {
       Grid() {
         ForEach([0, 1, 2, 3, 4, 5], (index: number) => {
           GridItem() {
-            Column()
-              .width('100%')
-              .aspectRatio(0.75)
-              .backgroundColor(HgColor.skeletonBase(this.dark))
-              .borderRadius(HgRadius.row)
+            HgSkeletonBlock({
+              dark: this.dark,
+              blockWidth: '100%',
+              blockHeight: this.skeletonTileHeight(),
+              radius: HgRadius.row
+            })
           }
         }, (index: number) => 'grid-sk-' + index + '-' + this.gridCols())
       }
@@ -1079,6 +1121,7 @@ export struct ProfilePage {
       .rowsGap(HgSpace.s)
       .width('100%')
       .height(this.skeletonGridHeight())
+      .transition(HgMotion.statusTransition())
     } else if (this.cards.length === 0) {
       Column() {
         HgEmptyState({
@@ -1094,13 +1137,14 @@ export struct ProfilePage {
       }
       .width('100%')
       .padding({ top: HgSpace.xxl })
+      .transition(HgMotion.statusTransition())
     } else {
       Column({ space: HgSpace.s }) {
         ForEach(this.rowIndexes(), (rowIndex: number) => {
           this.CardRow(rowIndex)
         }, (rowIndex: number) => 'row-' + rowIndex + '-' + this.gridCols())
         if (this.loadingMore) {
-          // 加载下一批：底部进度提示（不清空/不替换已有卡片）。
+          // 加载下一批：底部进度提示（不清空/不替换已有卡片），140ms 淡入。
           Row({ space: HgSpace.s }) {
             LoadingProgress()
               .width(20)
@@ -1113,33 +1157,38 @@ export struct ProfilePage {
           .width('100%')
           .height(44)
           .justifyContent(FlexAlign.Center)
+          .transition(HgMotion.fadeIn(HgMotion.fast))
         } else if (!this.hasMore()) {
-          // 全部加载完：底部结束提示。
+          // 全部加载完：底部结束提示一次淡入。
           Text('— 已经到底啦 —')
             .width('100%')
             .height(36)
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .textAlign(TextAlign.Center)
+            .transition(HgMotion.fadeIn(HgMotion.fast))
         }
         if (this.displayTab === 'history') {
-          Text('清空观看历史')
-            .width('100%')
-            .height(HgSize.secondaryAction)
-            .fontSize(HgFont.secondary)
-            .fontColor(HgColor.danger(this.dark))
-            .textAlign(TextAlign.Center)
-            .backgroundColor(HgColor.surface2(this.dark))
-            .borderRadius(HgRadius.chip)
-            .margin({ top: HgSpace.m })
-            .accessibilityText('清空观看历史')
-            .onClick(() => {
-              this.clearHistory();
-            })
+          HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+            Text('清空观看历史')
+              .width('100%')
+              .height(HgSize.secondaryAction)
+              .fontSize(HgFont.secondary)
+              .fontColor(HgColor.danger(this.dark))
+              .textAlign(TextAlign.Center)
+              .backgroundColor(HgColor.surface2(this.dark))
+              .borderRadius(HgRadius.chip)
+              .margin({ top: HgSpace.m })
+              .accessibilityText('清空观看历史')
+              .onClick(() => {
+                this.clearHistory();
+              })
+          }
         }
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+      .transition(HgMotion.statusTransition())
     }
   }
 
@@ -1154,45 +1203,47 @@ export struct ProfilePage {
 
   @Builder
   FollowEntry() {
-    Row({ space: HgSpace.m }) {
-      Stack() {
-        Row()
-          .width(36)
-          .height(36)
-          .backgroundColor(HgColor.accentSoft(this.dark))
-          .borderRadius(18)
-        SymbolGlyph($r('sys.symbol.heart'))
-          .fontSize(HgFont.section)
-          .fontColor([HgColor.accent(this.dark)])
-      }
-      .width(36)
-      .height(36)
+    HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+      Row({ space: HgSpace.m }) {
+        Stack() {
+          Row()
+            .width(36)
+            .height(36)
+            .backgroundColor(HgColor.accentSoft(this.dark))
+            .borderRadius(18)
+          SymbolGlyph($r('sys.symbol.heart'))
+            .fontSize(HgFont.section)
+            .fontColor([HgColor.accent(this.dark)])
+        }
+        .width(36)
+        .height(36)
 
-      Column({ space: 2 }) {
-        Text('关注')
-          .fontSize(HgFont.rowTitle)
-          .fontColor(HgColor.textPrimary(this.dark))
-        Text('关注作者的最新作品')
-          .fontSize(HgFont.micro)
-          .fontColor(HgColor.textTertiary(this.dark))
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
+        Column({ space: 2 }) {
+          Text('关注')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text('关注作者的最新作品')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
 
-      SymbolGlyph($r('sys.symbol.chevron_right'))
-        .fontSize(HgIconSize.compact)
-        .fontColor([HgColor.textTertiary(this.dark)])
+        SymbolGlyph($r('sys.symbol.chevron_right'))
+          .fontSize(HgIconSize.compact)
+          .fontColor([HgColor.textTertiary(this.dark)])
+      }
+      .width('100%')
+      .height(64)
+      .padding({ left: HgSpace.m, right: HgSpace.m })
+      .backgroundColor(HgColor.surface1(this.dark))
+      .borderRadius(HgRadius.group)
+      .accessibilityText('关注作者的最新作品')
+      .onClick(() => {
+        this.navStack.pushPathByName(ROUTE_FOLLOW, null);
+      })
+      .accessibilityText('关注，查看关注作者的作品')
     }
-    .width('100%')
-    .height(64)
-    .padding({ left: HgSpace.m, right: HgSpace.m })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
-    .accessibilityText('关注作者的最新作品')
-    .onClick(() => {
-      this.navStack.pushPathByName(ROUTE_FOLLOW, null);
-    })
-    .accessibilityText('关注，查看关注作者的作品')
   }
 
   build() {
@@ -1204,18 +1255,20 @@ export struct ProfilePage {
           .fontColor(HgColor.textPrimary(this.dark))
           .lineHeight(HgFont.linePageLarge)
           .layoutWeight(1)
-        Stack() {
-          SymbolGlyph($r('sys.symbol.gearshape'))
-            .fontSize(HgIconSize.control)
-            .fontColor([HgColor.textSecondary(this.dark)])
+        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+          Stack() {
+            SymbolGlyph($r('sys.symbol.gearshape'))
+              .fontSize(HgIconSize.control)
+              .fontColor([HgColor.textSecondary(this.dark)])
+          }
+          .width(HgSize.hitTarget)
+          .height(HgSize.hitTarget)
+          .borderRadius(HgSize.hitTarget / 2)
+          .accessibilityText('设置')
+          .onClick(() => {
+            this.navStack.pushPathByName(ROUTE_SETTINGS, null);
+          })
         }
-        .width(HgSize.hitTarget)
-        .height(HgSize.hitTarget)
-        .borderRadius(HgSize.hitTarget / 2)
-        .accessibilityText('我的')
-        .onClick(() => {
-          this.navStack.pushPathByName(ROUTE_SETTINGS, null);
-        })
       }
       .width('100%')
       .padding({
@@ -1230,7 +1283,7 @@ export struct ProfilePage {
           this.ProfileCard()
           this.FollowEntry()
           this.Segmented()
-          // 切 Tab 用 110/170ms 交叉淡入淡出；数量变化/清空历史仍用 140ms 淡入淡出，不做位移。
+          // 切 Tab 用 exitFast/standard 交叉淡入淡出；数量变化/清空历史用 fast/exitFast，不做位移。
           Column() {
             this.CardsArea()
           }

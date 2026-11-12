@@ -1,3 +1,4 @@
+import { HgMotion } from '../design/HgMotion';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { K_DARK } from '../state/UserPrefs';
 
@@ -26,6 +27,25 @@ export class ConfirmCopy {
 }
 
 /**
+ * 自定义弹窗统一动效（弹窗壳）：进入 surface 260ms 淡入 + 0.96→1 缩放，关闭 exitStandard 200ms，
+ * 全部经 HgMotion.ms() 处理（减少动态效果时直达终态）。AboutDialog / ConfirmDialog / TabletNoticeDialog 共用。
+ */
+export class HgDialogMotion {
+  /** 弹窗进入时长（ms）。 */
+  static enterMs(): number {
+    return HgMotion.ms(HgMotion.surface);
+  }
+
+  /** 弹窗关闭时长（ms；退场动画结束后再 controller.close）。 */
+  static exitMs(): number {
+    return HgMotion.ms(HgMotion.exitStandard);
+  }
+
+  /** 弹窗入场起始缩放（0.96→1）。 */
+  static readonly enterScale: number = 0.96;
+}
+
+/**
  * 通用确认弹窗：customStyle=true 时不使用系统弹窗底色，完全按 App 主题 token 绘制。
  */
 @CustomDialog
@@ -34,14 +54,64 @@ export struct ConfirmDialog {
   controller?: CustomDialogController;
   /** 文案由调用方在 open 前写入，build 时读取（异步拿到的版本号 / 更新说明也能保持最新）。 */
   copyOf: () => ConfirmCopy = () => new ConfirmCopy('', '', '确定', '取消', false);
-  /** 点确认后的动作（弹窗先关闭，再执行）。 */
+  /** 点确认后的动作（弹窗关闭后执行）。 */
   onConfirm: () => void = () => {};
+  /** 弹窗入场/退场状态（统一弹窗壳动效）。 */
+  @State entered: boolean = false;
+  private started: boolean = false;
+  private closing: boolean = false;
+  private closeTimer: number = -1;
+  private enterTimer: number = -1;
 
-  private dismiss(): void {
-    try {
-      this.controller?.close();
-    } catch (err) {
+  /** 开始入场动画（幂等）：onAppear 与 aboutToAppear 兜底二选一触发，保证弹窗可见。 */
+  private startEnter(): void {
+    if (this.started) {
+      return;
     }
+    this.started = true;
+    animateTo({ duration: HgDialogMotion.enterMs(), curve: HgMotion.curve }, () => {
+      this.entered = true;
+    });
+  }
+
+  aboutToAppear(): void {
+    // 首帧后兜底触发；正常情况下 onAppear 已触发（started 会拦掉重复）。
+    this.enterTimer = setTimeout(() => {
+      this.enterTimer = -1;
+      this.startEnter();
+    }, 16);
+  }
+
+  aboutToDisappear(): void {
+    if (this.enterTimer >= 0) {
+      clearTimeout(this.enterTimer);
+      this.enterTimer = -1;
+    }
+    if (this.closeTimer >= 0) {
+      clearTimeout(this.closeTimer);
+      this.closeTimer = -1;
+    }
+  }
+
+  /** 关闭：先播 200ms 退场动画，再真正 close，最后执行后续动作（幂等，快速连点不重复）。 */
+  private dismiss(after?: () => void): void {
+    if (this.closing) {
+      return;
+    }
+    this.closing = true;
+    animateTo({ duration: HgDialogMotion.exitMs(), curve: HgMotion.curve }, () => {
+      this.entered = false;
+    });
+    this.closeTimer = setTimeout(() => {
+      this.closeTimer = -1;
+      try {
+        this.controller?.close();
+      } catch (err) {
+      }
+      if (after !== undefined) {
+        after();
+      }
+    }, HgDialogMotion.exitMs());
   }
 
   build() {
@@ -80,8 +150,9 @@ export struct ConfirmDialog {
           .borderRadius(HgRadius.chip)
           .accessibilityText('确定')
           .onClick(() => {
-            this.dismiss();
-            this.onConfirm();
+            this.dismiss(() => {
+              this.onConfirm();
+            });
           })
       }
       .width('100%')
@@ -94,5 +165,10 @@ export struct ConfirmDialog {
     .border({ width: 1, color: HgColor.hairline(this.dark) })
     .shadow({ radius: 24, color: HgColor.shadowElev3, offsetX: 0, offsetY: 8 })
     .alignItems(HorizontalAlign.Start)
+    .opacity(this.entered ? 1 : 0)
+    .scale({ x: this.entered ? 1 : HgDialogMotion.enterScale, y: this.entered ? 1 : HgDialogMotion.enterScale })
+    .onAppear(() => {
+      this.startEnter();
+    })
   }
 }

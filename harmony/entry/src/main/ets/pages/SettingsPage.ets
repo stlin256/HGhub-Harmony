@@ -7,11 +7,13 @@ import { ImageCache } from '../services/ImageCache';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
-import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
-import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { ConfirmCopy, ConfirmDialog, HgDialogMotion } from '../components/HgConfirmDialog';
+import { HgPressable } from '../components/HgPressable';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
-import { K_BOTTOM_INSET, K_DARK, K_MULTI_SOURCE, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
+import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
 import { ROUTE_REC_DATA, ROUTE_REC_HOW } from '../state/Routes';
 import { hostOf } from '../utils/Format';
 
@@ -39,6 +41,9 @@ const SCALE_OPTIONS: ScaleOption[] = [
   { key: 'cover', label: '裁切', desc: '裁切：保持画面比例铺满屏幕，裁掉超出画面的边缘' }
 ];
 
+/** 减少动态效果开关的 AppStorage 键：与 HgMotion.reduced() 共用，全局生效。 */
+const K_REDUCE_MOTION: string = 'hgReduceMotion';
+
 /**
  * 「关于」自定义弹窗：替代系统 AlertDialog。
  * AlertDialog 的配色跟随系统主题（夜间模式下与 App 深色/浅色主题不一致），
@@ -48,7 +53,7 @@ const SCALE_OPTIONS: ScaleOption[] = [
 struct AboutDialog {
   @StorageProp(K_DARK) dark: boolean = true;
   controller?: CustomDialogController;
-  /** 打开动画状态：0.94→1 轻微放大 + 淡入；关闭先反向再真正 close。 */
+  /** 入场/退场状态：统一弹窗壳动效（260ms 淡入 + 0.96→1；关闭 200ms 退场后再真正 close）。 */
   @State entered: boolean = false;
   private started: boolean = false;
   private closing: boolean = false;
@@ -61,7 +66,7 @@ struct AboutDialog {
       return;
     }
     this.started = true;
-    animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+    animateTo({ duration: HgDialogMotion.enterMs(), curve: HgMotion.curve }, () => {
       this.entered = true;
     });
   }
@@ -85,13 +90,13 @@ struct AboutDialog {
     }
   }
 
-  /** 关闭：先 120ms 淡出 + 缩到 0.96，再真正关闭（点遮罩/返回键仍走系统默认关闭）。 */
+  /** 关闭：先播统一退场动画，再真正关闭（点遮罩/返回键仍走系统默认关闭）。 */
   private dismiss(): void {
     if (this.closing) {
       return;
     }
     this.closing = true;
-    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
+    animateTo({ duration: HgDialogMotion.exitMs(), curve: HgMotion.curve }, () => {
       this.entered = false;
     });
     this.closeTimer = setTimeout(() => {
@@ -100,7 +105,7 @@ struct AboutDialog {
         this.controller?.close();
       } catch (err) {
       }
-    }, HgDuration.microExit);
+    }, HgDialogMotion.exitMs());
   }
 
   build() {
@@ -151,7 +156,7 @@ struct AboutDialog {
     .border({ width: 1, color: HgColor.hairline(this.dark) })
     .shadow({ radius: 24, color: HgColor.shadowElev3, offsetX: 0, offsetY: 8 })
     .opacity(this.entered ? 1 : 0)
-    .scale({ x: this.entered ? 1 : 0.94, y: this.entered ? 1 : 0.94 })
+    .scale({ x: this.entered ? 1 : HgDialogMotion.enterScale, y: this.entered ? 1 : HgDialogMotion.enterScale })
     .onAppear(() => {
       this.startEnter();
     })
@@ -188,9 +193,14 @@ export struct SettingsPage {
   @StorageProp(K_LINE_BASE) @Watch('onLineChanged') lineBase: string = '';
   @State checking: boolean = false;
   @State clearing: boolean = false;
-  /** 首屏分组淡入（140ms）状态与定时器。 */
-  @State entered: boolean = false;
-  private enterTimer: number = -1;
+  /** 减少动态效果开关：写入 AppStorage('hgReduceMotion')，HgMotion.ms() 全局生效。 */
+  @State reduceMotion: boolean = false;
+  /** 主题切换遮罩：切换瞬间用旧主题 canvas 色盖住整页，180ms 淡出（只动透明度、不位移）。 */
+  @State themeOverlay: number = 0;
+  private overlayDark: boolean = true;
+  private themeOverlayTimer: number = -1;
+  /** 清理缓存执行态定时器：先渲染 16 LoadingProgress，再同步清理。 */
+  private clearTimer: number = -1;
   /** 清理缓存/清空历史后数值的轻淡入（140ms）状态与定时器。 */
   @State valueOpacity: number = 1;
   private valueTimer: number = -1;
@@ -236,19 +246,17 @@ export struct SettingsPage {
     this.lineHost = hostOf(this.lineBase.length > 0 ? this.lineBase : Lines.current());
     this.recEnabled = RecService.enabled();
     this.recTagCount = RecService.profileEntries().length;
-    // 分组首屏淡入（140ms）：首帧后触发，避免整页硬切。
-    this.enterTimer = setTimeout(() => {
-      this.enterTimer = -1;
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
-        this.entered = true;
-      });
-    }, 16);
+    this.reduceMotion = AppStorage.get<boolean>(K_REDUCE_MOTION) ?? false;
   }
 
   aboutToDisappear(): void {
-    if (this.enterTimer >= 0) {
-      clearTimeout(this.enterTimer);
-      this.enterTimer = -1;
+    if (this.themeOverlayTimer >= 0) {
+      clearTimeout(this.themeOverlayTimer);
+      this.themeOverlayTimer = -1;
+    }
+    if (this.clearTimer >= 0) {
+      clearTimeout(this.clearTimer);
+      this.clearTimer = -1;
     }
     if (this.valueTimer >= 0) {
       clearTimeout(this.valueTimer);
@@ -265,7 +273,7 @@ export struct SettingsPage {
     }
     this.valueTimer = setTimeout(() => {
       this.valueTimer = -1;
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
         this.valueOpacity = 1;
       });
     }, 16);
@@ -287,9 +295,29 @@ export struct SettingsPage {
     return HgSpace.pageInset + gutter;
   }
 
+  /**
+   * 主题切换：先盖一层旧主题 canvas 色遮罩，再换主题并 180ms 淡出遮罩（MOTION §3.9：只动颜色/透明度，不位移）。
+   * 系统栏颜色由 UserPrefs/Index 立即下发，不做动画。
+   */
   private setTheme(mode: string): void {
+    if (this.themeMode === mode) {
+      return;
+    }
+    this.overlayDark = this.dark;
+    this.themeOverlay = 1;
     this.themeMode = mode;
     UserPrefs.setThemeMode(mode, UserPrefs.systemDark());
+    if (this.themeOverlayTimer >= 0) {
+      clearTimeout(this.themeOverlayTimer);
+      this.themeOverlayTimer = -1;
+    }
+    // 等一帧让新主题完成首次渲染，再淡出旧色遮罩，避免闪一帧错误主题。
+    this.themeOverlayTimer = setTimeout(() => {
+      this.themeOverlayTimer = -1;
+      animateTo({ duration: HgMotion.ms(HgMotion.themeFade), curve: HgMotion.curve }, () => {
+        this.themeOverlay = 0;
+      });
+    }, 16);
     UiBus.toastInfo('主题已切换');
   }
 
@@ -320,13 +348,20 @@ export struct SettingsPage {
     this.openConfirm(
       new ConfirmCopy('清理缓存', '将清除内存与磁盘封面缓存；收藏、观看记录、搜索历史与登录状态都会保留。', '清理', '取消', false),
       () => {
+        if (this.clearing) {
+          return;
+        }
+        // 先切到执行态让 16 LoadingProgress 渲染一帧，再同步清理（清理本身是同步 API）。
         this.clearing = true;
-        Api.clearCache();
-        // 清理后立即刷新占用显示（counters 已归零，totalText() 返回 "0 B"）。
-        this.cacheText = ImageCache.totalText();
-        this.clearing = false;
-        this.flashValues();
-        UiBus.toastOk('封面缓存已清理');
+        this.clearTimer = setTimeout(() => {
+          this.clearTimer = -1;
+          Api.clearCache();
+          // 清理后立即刷新占用显示（counters 已归零，totalText() 返回 "0 B"）。
+          this.cacheText = ImageCache.totalText();
+          this.clearing = false;
+          this.flashValues();
+          UiBus.toastOk('封面缓存已清理');
+        }, 16);
       }
     );
   }
@@ -450,6 +485,7 @@ export struct SettingsPage {
             .padding({ left: HgSpace.m, right: HgSpace.m })
             .backgroundColor(this.themeMode === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
             .borderRadius(HgRadius.chip)
+            .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
             .accessibilityText('主题')
             .onClick(() => {
               this.setTheme(option.key);
@@ -458,6 +494,34 @@ export struct SettingsPage {
       }
       .width('100%')
       .padding({ bottom: HgSpace.m })
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.bolt_fill'))
+        Column({ space: 2 }) {
+          Text('减少动态效果')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text('关闭页面切换、弹窗与骨架呼吸动画（省电 / 无障碍）')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(2)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.reduceMotion })
+          .selectedColor(HgColor.accent(this.dark))
+          .onChange((isOn: boolean) => {
+            this.reduceMotion = isOn;
+            AppStorage.setOrCreate<boolean>(K_REDUCE_MOTION, isOn);
+          })
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
     }
     .width('100%')
     .padding({ left: HgSpace.l, right: HgSpace.l })
@@ -545,6 +609,7 @@ export struct SettingsPage {
               .padding({ left: HgSpace.m, right: HgSpace.m })
               .backgroundColor(this.videoScale === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
               .borderRadius(HgRadius.chip)
+              .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
               .accessibilityText('画面比例')
               .onClick(() => {
                 this.setScale(option.key, option.label);
@@ -608,26 +673,28 @@ export struct SettingsPage {
         .strokeWidth(0.5)
         .color(HgColor.hairline(this.dark))
 
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.speaker_wave_2'))
-        Column({ space: 2 }) {
-          Text('线路')
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.lineHost)
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
+      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+        Row({ space: HgSpace.m }) {
+          this.RowIcon($r('sys.symbol.speaker_wave_2'))
+          Column({ space: 2 }) {
+            Text('线路')
+              .fontSize(HgFont.rowTitle)
+              .fontColor(HgColor.textPrimary(this.dark))
+            Text(this.lineHost)
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.textTertiary(this.dark))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          this.Chevron()
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        this.Chevron()
+        .width('100%')
+        .height(HgSize.listRowDouble)
+        .accessibilityText('线路')
+        .onClick(() => {
+          UiBus.openLines();
+        })
       }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-      .accessibilityText('线路')
-      .onClick(() => {
-        UiBus.openLines();
-      })
     }
     .width('100%')
     .padding({ left: HgSpace.l, right: HgSpace.l })
@@ -651,15 +718,28 @@ export struct SettingsPage {
           .maxLines(1)
           // 清理后数值轻淡入（只做透明度，简洁不夸张）。
           .opacity(this.valueOpacity)
-        Text(this.clearing ? '清理中…' : '清理')
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.accent(this.dark))
-          .height(HgSize.hitTarget)
-          .padding({ left: HgSpace.s })
+        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+          Row({ space: HgSpace.xs }) {
+            if (this.clearing) {
+              LoadingProgress()
+                .width(16)
+                .height(16)
+                .color(HgColor.accent(this.dark))
+            }
+            Text(this.clearing ? '清理中…' : '清理')
+              .fontSize(HgFont.caption)
+              .fontColor(HgColor.accent(this.dark))
+              .height(HgSize.hitTarget)
+              .padding({ left: HgSpace.s })
+              .opacity(this.clearing ? 0.6 : 1)
+          }
           .accessibilityText('封面缓存')
           .onClick(() => {
-            this.clearCache();
+            if (!this.clearing) {
+              this.clearCache();
+            }
           })
+        }
       }
       .width('100%')
       .height(HgSize.listRowDouble)
@@ -682,15 +762,17 @@ export struct SettingsPage {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        Text('清空历史')
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.danger(this.dark))
-          .height(HgSize.hitTarget)
-          .padding({ left: HgSpace.s })
-          .accessibilityText('清空历史')
-          .onClick(() => {
-            this.clearHistory();
-          })
+        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+          Text('清空历史')
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.danger(this.dark))
+            .height(HgSize.hitTarget)
+            .padding({ left: HgSpace.s })
+            .accessibilityText('清空历史')
+            .onClick(() => {
+              this.clearHistory();
+            })
+        }
       }
       .width('100%')
       .height(HgSize.listRowDouble)
@@ -713,15 +795,17 @@ export struct SettingsPage {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        Text('清空')
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.danger(this.dark))
-          .height(HgSize.hitTarget)
-          .padding({ left: HgSpace.s })
-          .accessibilityText('清空')
-          .onClick(() => {
-            this.clearSearchHistory();
-          })
+        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+          Text('清空')
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.danger(this.dark))
+            .height(HgSize.hitTarget)
+            .padding({ left: HgSpace.s })
+            .accessibilityText('清空')
+            .onClick(() => {
+              this.clearSearchHistory();
+            })
+        }
       }
       .width('100%')
       .height(HgSize.listRowDouble)
@@ -774,15 +858,17 @@ export struct SettingsPage {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        Text('管理')
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.accent(this.dark))
-          .height(HgSize.hitTarget)
-          .padding({ left: HgSpace.s })
-          .accessibilityText('管理')
-          .onClick(() => {
-            this.navStack.pushPathByName(ROUTE_REC_DATA, null);
-          })
+        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+          Text('管理')
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.accent(this.dark))
+            .height(HgSize.hitTarget)
+            .padding({ left: HgSpace.s })
+            .accessibilityText('管理')
+            .onClick(() => {
+              this.navStack.pushPathByName(ROUTE_REC_DATA, null);
+            })
+        }
       }
       .width('100%')
       .height(HgSize.listRowDouble)
@@ -804,15 +890,17 @@ export struct SettingsPage {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        Text('查看')
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.accent(this.dark))
-          .height(HgSize.hitTarget)
-          .padding({ left: HgSpace.s })
-          .accessibilityText('查看')
-          .onClick(() => {
-            this.navStack.pushPathByName(ROUTE_REC_HOW, null);
-          })
+        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+          Text('查看')
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.accent(this.dark))
+            .height(HgSize.hitTarget)
+            .padding({ left: HgSpace.s })
+            .accessibilityText('查看')
+            .onClick(() => {
+              this.navStack.pushPathByName(ROUTE_REC_HOW, null);
+            })
+        }
       }
       .width('100%')
       .height(HgSize.listRowDouble)
@@ -826,52 +914,64 @@ export struct SettingsPage {
   @Builder
   OtherGroup() {
     Column() {
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.arrow_clockwise'))
-        Column({ space: 2 }) {
-          Text('检查更新')
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.checking ? '正在检查…' : '当前 v' + Api.appVersion() + ' · 对比 GitHub Release')
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
+      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+        Row({ space: HgSpace.m }) {
+          this.RowIcon($r('sys.symbol.arrow_clockwise'))
+          Column({ space: 2 }) {
+            Text('检查更新')
+              .fontSize(HgFont.rowTitle)
+              .fontColor(HgColor.textPrimary(this.dark))
+            Text(this.checking ? '正在检查…' : '当前 v' + Api.appVersion() + ' · 对比 GitHub Release')
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.textTertiary(this.dark))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          if (this.checking) {
+            LoadingProgress()
+              .width(16)
+              .height(16)
+              .color(HgColor.accent(this.dark))
+          } else {
+            this.Chevron()
+          }
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        this.Chevron()
+        .width('100%')
+        .height(HgSize.listRowDouble)
+        .opacity(this.checking ? 0.6 : 1)
+        .accessibilityText('检查更新')
+        .onClick(() => {
+          this.checkUpdate();
+        })
       }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-      .accessibilityText('检查更新')
-      .onClick(() => {
-        this.checkUpdate();
-      })
 
       Divider()
         .width('100%')
         .strokeWidth(0.5)
         .color(HgColor.hairline(this.dark))
 
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.exclamationmark_triangle'))
-        Column({ space: 2 }) {
-          Text('崩溃日志')
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.crashCount > 0 ? this.crashCount + ' 条本地记录 · 点击复制' : '暂无记录 · 仅存本机')
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
+      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+        Row({ space: HgSpace.m }) {
+          this.RowIcon($r('sys.symbol.exclamationmark_triangle'))
+          Column({ space: 2 }) {
+            Text('崩溃日志')
+              .fontSize(HgFont.rowTitle)
+              .fontColor(HgColor.textPrimary(this.dark))
+            Text(this.crashCount > 0 ? this.crashCount + ' 条本地记录 · 点击复制' : '暂无记录 · 仅存本机')
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.textTertiary(this.dark))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          this.Chevron()
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        this.Chevron()
+        .width('100%')
+        .height(HgSize.listRowDouble)
+        .accessibilityText('崩溃日志')
+        .onClick(() => {
+          this.copyCrashLog();
+        })
       }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-      .accessibilityText('崩溃日志')
-      .onClick(() => {
-        this.copyCrashLog();
-      })
 
       Divider()
         .width('100%')
@@ -899,26 +999,28 @@ export struct SettingsPage {
         .strokeWidth(0.5)
         .color(HgColor.hairline(this.dark))
 
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.message'))
-        Column({ space: 2 }) {
-          Text('关于 HGhub')
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text('v' + Api.appVersion() + ' · PolyForm 非商业许可证')
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
+      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+        Row({ space: HgSpace.m }) {
+          this.RowIcon($r('sys.symbol.message'))
+          Column({ space: 2 }) {
+            Text('关于 HGhub')
+              .fontSize(HgFont.rowTitle)
+              .fontColor(HgColor.textPrimary(this.dark))
+            Text('v' + Api.appVersion() + ' · PolyForm 非商业许可证')
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.textTertiary(this.dark))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          this.Chevron()
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        this.Chevron()
+        .width('100%')
+        .height(HgSize.listRowDouble)
+        .accessibilityText('关于 HGhub')
+        .onClick(() => {
+          this.showAbout();
+        })
       }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-      .accessibilityText('v')
-      .onClick(() => {
-        this.showAbout();
-      })
     }
     .width('100%')
     .padding({ left: HgSpace.l, right: HgSpace.l })
@@ -928,105 +1030,119 @@ export struct SettingsPage {
 
   build() {
     NavDestination() {
-      Column() {
-        HgTopBar({
-          title: '设置',
-          dark: this.dark,
-          showBack: true,
-          onBack: () => {
-            this.navStack.pop();
-          }
-        })
+      Stack() {
         Column() {
-          List() {
-            ListItem() {
-              Column() {
-                this.GroupTitle('外观')
-                this.ThemeGroup()
-              }
-              .width('100%')
-              .alignItems(HorizontalAlign.Start)
+          HgTopBar({
+            title: '设置',
+            dark: this.dark,
+            showBack: true,
+            onBack: () => {
+              this.navStack.pop();
             }
-            .width('100%')
-
-            ListItem() {
-              Column() {
-                this.GroupTitle('播放')
-                this.PlayGroup()
-              }
-              .width('100%')
-              .alignItems(HorizontalAlign.Start)
-            }
-            .width('100%')
-
-            ListItem() {
-              Column() {
-                this.GroupTitle('网络')
-                this.NetworkGroup()
-              }
-              .width('100%')
-              .alignItems(HorizontalAlign.Start)
-            }
-            .width('100%')
-
-            ListItem() {
-              Column() {
-                this.GroupTitle('推荐')
-                this.RecGroup()
-              }
-              .width('100%')
-              .alignItems(HorizontalAlign.Start)
-            }
-            .width('100%')
-
-            ListItem() {
-              Column() {
-                this.GroupTitle('本地数据')
-                this.LocalGroup()
-              }
-              .width('100%')
-              .alignItems(HorizontalAlign.Start)
-            }
-            .width('100%')
-
-            ListItem() {
-              Column() {
-                this.GroupTitle('其他')
-                this.OtherGroup()
-              }
-              .width('100%')
-              .alignItems(HorizontalAlign.Start)
-            }
-            .width('100%')
-
-            ListItem() {
-              Text('HGhub ' + Api.appVersion() + ' · HarmonyOS NEXT 客户端 · 仅限非商业使用')
+          })
+          Column() {
+            List() {
+              ListItem() {
+                Column() {
+                  this.GroupTitle('外观')
+                  this.ThemeGroup()
+                }
                 .width('100%')
-                .fontSize(HgFont.micro)
-                .fontColor(HgColor.textTertiary(this.dark))
-                .textAlign(TextAlign.Center)
-                .padding({ top: HgSpace.xxl, bottom: HgSpace.xxl })
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+
+              ListItem() {
+                Column() {
+                  this.GroupTitle('播放')
+                  this.PlayGroup()
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+
+              ListItem() {
+                Column() {
+                  this.GroupTitle('网络')
+                  this.NetworkGroup()
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+
+              ListItem() {
+                Column() {
+                  this.GroupTitle('推荐')
+                  this.RecGroup()
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+
+              ListItem() {
+                Column() {
+                  this.GroupTitle('本地数据')
+                  this.LocalGroup()
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+
+              ListItem() {
+                Column() {
+                  this.GroupTitle('其他')
+                  this.OtherGroup()
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+
+              ListItem() {
+                Text('HGhub ' + Api.appVersion() + ' · HarmonyOS NEXT 客户端 · 仅限非商业使用')
+                  .width('100%')
+                  .fontSize(HgFont.micro)
+                  .fontColor(HgColor.textTertiary(this.dark))
+                  .textAlign(TextAlign.Center)
+                  .padding({ top: HgSpace.xxl, bottom: HgSpace.xxl })
+              }
+              .width('100%')
             }
             .width('100%')
+            .layoutWeight(1)
+            .scrollBar(BarState.Off)
+            .edgeEffect(EdgeEffect.Spring)
+            .cachedCount(4)
           }
-          .width('100%')
           .layoutWeight(1)
-          .scrollBar(BarState.Off)
-          .edgeEffect(EdgeEffect.Spring)
-          .cachedCount(4)
+          .width('100%')
+          .padding({ left: this.pagePad(), right: this.pagePad() })
         }
-        .layoutWeight(1)
         .width('100%')
-        .padding({ left: this.pagePad(), right: this.pagePad() })
-        // 首屏分组淡入（140ms，仅透明度）。
-        .opacity(this.entered ? 1 : 0)
+        .height('100%')
+        .padding({ bottom: this.bottomInset })
+        .backgroundColor(HgColor.canvas(this.dark))
+
+        // 主题切换遮罩：切换瞬间用旧主题 canvas 色盖满整页，180ms 淡出（只动透明度、不位移）。
+        if (this.themeOverlay > 0) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor(HgColor.canvas(this.overlayDark))
+            .opacity(this.themeOverlay)
+            .hitTestBehavior(HitTestMode.None)
+        }
       }
       .width('100%')
       .height('100%')
-      .padding({ bottom: this.bottomInset })
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    .systemTransition(NavigationSystemTransitionType.FADE)
     // 从推荐数据二级页面返回时刷新画像标签数（本页在栈中保留，aboutToAppear 不会重跑）。
     .onShown(() => {
       this.recTagCount = RecService.profileEntries().length;

@@ -154,6 +154,7 @@ export struct RecHowPage {
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    .systemTransition(NavigationSystemTransitionType.FADE)
     // 兜底铺满整页背景：页面转场/底部安全区内边距区不露出默认背景（深色下会像一条黑带）。
     .backgroundColor(HgColor.canvas(this.dark))
   }
