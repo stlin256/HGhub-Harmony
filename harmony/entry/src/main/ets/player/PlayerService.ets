@@ -49,6 +49,8 @@ export class PlayerService {
   onSeekDone: (ms: number) => void = () => {};
   /** 播放失败自动重试进度回调（attempt 从 1 开始，max 为最大重试次数）。 */
   onRetry: (attempt: number, max: number) => void = () => {};
+  /** 系统媒体会话就绪（可用于展示投播入口）。 */
+  onSessionReady: () => void = () => {};
   /** 视频原始尺寸变化（prepared/切集/切视频时回调）；页面据此计算 XComponent 展示矩形。 */
   onVideoSize: (width: number, height: number) => void = () => {};
 
@@ -138,6 +140,7 @@ export class PlayerService {
       await MediaSession.ensure();
       const title: string = this.videoId > 0 ? ('视频 ' + this.videoId) : 'HGhub';
       await MediaSession.setMetadata(title, 'HGhub', String(this.videoId) + ':' + this.ep);
+      this.onSessionReady();
     } catch (err) {
     }
   }
