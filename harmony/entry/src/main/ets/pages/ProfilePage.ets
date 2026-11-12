@@ -8,7 +8,7 @@ import {
   K_BOTTOM_INSET, K_DARK, K_FAVS, K_HISTORY, K_TOP_INSET, K_USER, K_NAV_W, UserPrefs
 } from '../state/UserPrefs';
 import { UiBus } from '../services/UiBus';
-import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS, ROUTE_SETTINGS } from '../state/Routes';
+import { PlayerParam, ROUTE_FOLLOW, ROUTE_PLAYER, ROUTE_RANKS, ROUTE_SETTINGS } from '../state/Routes';
 import { fmt, fmtTime } from '../utils/Format';
 
 const MAX_CARDS: number = 12;
@@ -626,6 +626,48 @@ export struct ProfilePage {
     return out;
   }
 
+  @Builder
+  FollowEntry() {
+    Row({ space: HgSpace.m }) {
+      Stack() {
+        Row()
+          .width(36)
+          .height(36)
+          .backgroundColor(HgColor.accentSoft(this.dark))
+          .borderRadius(18)
+        SymbolGlyph($r('sys.symbol.heart'))
+          .fontSize(HgFont.section)
+          .fontColor([HgColor.accent(this.dark)])
+      }
+      .width(36)
+      .height(36)
+
+      Column({ space: 2 }) {
+        Text('关注')
+          .fontSize(HgFont.rowTitle)
+          .fontColor(HgColor.textPrimary(this.dark))
+        Text('关注作者的最新作品')
+          .fontSize(HgFont.micro)
+          .fontColor(HgColor.textTertiary(this.dark))
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(HgIconSize.compact)
+        .fontColor([HgColor.textTertiary(this.dark)])
+    }
+    .width('100%')
+    .height(64)
+    .padding({ left: HgSpace.m, right: HgSpace.m })
+    .backgroundColor(HgColor.surface1(this.dark))
+    .borderRadius(HgRadius.group)
+    .onClick(() => {
+      this.navStack.pushPathByName(ROUTE_FOLLOW, null);
+    })
+    .accessibilityText('关注，查看关注作者的作品')
+  }
+
   build() {
     Column() {
       Row() {
@@ -658,6 +700,7 @@ export struct ProfilePage {
       Scroll() {
         Column({ space: HgSpace.l }) {
           this.ProfileCard()
+          this.FollowEntry()
           this.Segmented()
           // 收藏/历史切换、数量变化、清空历史：列表整体淡入淡出（140ms），不做位移。
           Column() {
