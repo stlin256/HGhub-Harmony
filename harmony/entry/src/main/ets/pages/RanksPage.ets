@@ -1,4 +1,5 @@
 import { Api } from '../services/Api';
+import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { RankItem, RankResult } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgTopBar } from '../components/HgCommon';
@@ -313,6 +314,29 @@ export struct RanksPage {
 
   aboutToAppear(): void {
     this.loading = true;
+    // 启动预热命中：先用缓存直接渲染三个榜，未命中的再后台并行请求（避免打开榜单先骨架）。
+    let missing: number = 0;
+    for (let i = 0; i < RANK_TABS.length; i++) {
+      const kind: string = RANK_TABS[i].key;
+      const res: RankResult | null = ScreenPrefetch.rank(kind);
+      if (res === null) {
+        missing++;
+        continue;
+      }
+      const items: RankItem[] = res.items !== undefined && res.items !== null ? res.items : [];
+      if (items.length === 0) {
+        // 空榜快照不算命中：必须回源，否则 loading 永远是 true 且骨架无重试路径。
+        missing++;
+        continue;
+      }
+      this.cache.set(kind, this.buildCache(items));
+    }
+    const current: RankCache | undefined = this.cache.get(this.kind);
+    if (current !== undefined) {
+      this.loading = false;
+      this.applyCache(current);
+    }
+    // 未命中的榜单必须补请求（preloadAll 内部会跳过已缓存榜，不会重复）。
     this.preloadAll();
   }
 
@@ -335,6 +359,10 @@ export struct RanksPage {
       }
     }
     for (let i = 0; i < order.length; i++) {
+      // 启动预取已命中的榜单不重复请求；刷新/换线路径会先清 cache 再进来，不受影响。
+      if (this.cache.has(order[i])) {
+        continue;
+      }
       this.preloadKind(seq, order[i]);
     }
   }

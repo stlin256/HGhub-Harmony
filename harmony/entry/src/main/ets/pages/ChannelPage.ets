@@ -1,4 +1,5 @@
 import { Api } from '../services/Api';
+import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { Paged, VideoCard } from '../models/Types';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
@@ -59,6 +60,21 @@ export struct ChannelPage {
   }
 
   aboutToAppear(): void {
+    // 启动预热命中该频道的首屏时直接渲染，避免进入频道先骨架。
+    const cached: Paged<VideoCard> | null = ScreenPrefetch.channel(this.params.cate);
+    if (cached !== null) {
+      const list: VideoCard[] = cached.items !== undefined && cached.items !== null ? cached.items : [];
+      if (list.length > 0) {
+        this.items = list.slice(0);
+        this.page = 1;
+        this.pages = cached.pagination !== undefined && cached.pagination.pages > 0 ? cached.pagination.pages : 1;
+        this.finished = this.page >= this.pages;
+        this.loading = false;
+        this.applySort();
+        this.fadeInFirstContent();
+        return;
+      }
+    }
     this.loadFirst();
   }
 
