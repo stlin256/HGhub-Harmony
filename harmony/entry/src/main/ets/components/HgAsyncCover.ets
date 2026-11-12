@@ -1,6 +1,7 @@
 import { image } from '@kit.ImageKit';
 import { ImageCache } from '../services/ImageCache';
-import { HgColor, HgDuration, HgRadius } from '../design/HgTokens';
+import { HgColor, HgRadius } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 
 /**
  * 封面组件：内存缓存命中同步显示 → 磁盘缓存（持久化）→ 下载密文 → AES 解密 → PixelMap。
@@ -73,7 +74,7 @@ export struct HgAsyncCover {
           .height('100%')
           .objectFit(this.fit)
           .opacity(this.ready ? 1 : 0)
-          .animation({ duration: HgDuration.skeletonFade, curve: Curve.FastOutSlowIn })
+          .animation({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve })
       } else if (this.failed) {
         Column() {
           SymbolGlyph($r('sys.symbol.house'))
@@ -84,6 +85,7 @@ export struct HgAsyncCover {
         .height('100%')
         .justifyContent(FlexAlign.Center)
         .backgroundColor(HgColor.surface2(this.dark))
+        .transition(HgMotion.fadeIn())
       } else {
         Column()
           .width('100%')

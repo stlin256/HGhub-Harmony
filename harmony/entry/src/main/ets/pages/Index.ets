@@ -13,6 +13,7 @@ import { Prefs } from '../services/Prefs';
 import { Api } from '../services/Api';
 import { ContinuationState, ContinuePayload } from '../services/ContinuationState';
 import { HgColor, HgFont, HgSize } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HomePage } from './HomePage';
 import { SearchPage } from './SearchPage';
 import { CategoryPage } from './CategoryPage';
@@ -69,6 +70,9 @@ struct Index {
   @State navEmpty: boolean = true;
   /** 播放页在平行视窗里点「全屏」时置 true：Navigation 临时切回 Stack 满窗显示。 */
   @StorageProp(K_FORCE_FULLSCREEN) @Watch('onForceFullscreenChanged') forceFullscreen: boolean = false;
+  /** 主题切换遮罩：用旧主题 canvas 色覆盖 180ms 淡出，遮住整页颜色硬切（避免深→浅闪白）。 */
+  @State themeOverlay: number = 0;
+  private lastDark: boolean = true;
   /** 服务卡片「继续观看」拉起：EntryAbility 写入最近一条历史，Index 消费后打开播放页。 */
   @StorageProp('hgFormContinueJson') @Watch('onFormContinue') formContinueJson: string = '';
   /** 平板适配提示每个版本只弹一次（本进程内也只检查一次）。 */
@@ -202,6 +206,16 @@ struct Index {
 
   private onDarkChanged(): void {
     WindowChrome.syncSystemBarColors(this.dark);
+    // 旧主题色遮罩 180ms 淡出：系统栏仍立即下发，页面颜色用遮罩过渡，避免整页闪白/闪黑。
+    const previous: boolean = this.lastDark;
+    this.lastDark = this.dark;
+    if (previous === this.dark) {
+      return;
+    }
+    this.themeOverlay = 1;
+    animateTo({ duration: HgMotion.ms(HgMotion.themeFade), curve: HgMotion.curve }, () => {
+      this.themeOverlay = 0;
+    });
   }
 
   private onForceFullscreenChanged(): void {
@@ -337,11 +351,13 @@ struct Index {
       SymbolGlyph(icon)
         .fontSize(20)
         .fontColor([this.itemColor(index)])
+        .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
       Text(title)
         .fontSize(10)
         .fontWeight(this.activeIndex === index ? HgFont.weightMedium : HgFont.weightRegular)
         .fontColor(this.itemColor(index))
         .margin({ top: 3 })
+        .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
     }
     .width('100%')
     .height(46)
@@ -437,7 +453,7 @@ struct Index {
           .tabBar(this.tabItem('我的', $r('sys.symbol.person'), 3))
         }
         .scrollable(false)
-        .animationDuration(240)
+        .animationDuration(HgMotion.standard)
         .barMode(BarMode.Fixed)
         .barOverlap(true)
         // 移除系统默认的底部渐变遮罩（否则列表下方会出现一条不透明黑带，搜索/瀑布流尤其明显）。
@@ -487,6 +503,16 @@ struct Index {
         .position({ x: this.navBarWidth(), y: 0 })
         .justifyContent(FlexAlign.Center)
         .hitTestBehavior(HitTestMode.None)
+      }
+
+      // 主题切换遮罩：旧主题 canvas 色 180ms 淡出（只遮视觉，不拦截交互）。
+      if (this.themeOverlay > 0) {
+        Column()
+          .width('100%')
+          .height('100%')
+          .backgroundColor(HgColor.canvas(this.lastDark))
+          .opacity(this.themeOverlay)
+          .hitTestBehavior(HitTestMode.None)
       }
     }
     .width('100%')
