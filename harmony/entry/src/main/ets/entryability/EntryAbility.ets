@@ -16,7 +16,7 @@ import { Prefs } from '../services/Prefs';
 import { Session } from '../services/Session';
 import { Lines } from '../services/Lines';
 import {
-  K_APP_ACTIVE, K_BOTTOM_INSET, K_CONTENT_W, K_LEFT_INSET, K_NAV_W, K_RIGHT_INSET, K_TOP_INSET,
+  K_APP_ACTIVE, K_BOTTOM_INSET, K_CONTENT_W, K_DARK, K_LEFT_INSET, K_NAV_W, K_RIGHT_INSET, K_TOP_INSET,
   K_WINDOW_H, K_WINDOW_W, UserPrefs
 } from '../state/UserPrefs';
 
@@ -47,6 +47,9 @@ export default class EntryAbility extends UIAbility {
       }
     }
     const systemDark: boolean = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    // 首帧主题：先按系统主题同步写入 K_DARK，避免浅色系统用户看到深色首帧后再闪白；
+    // Prefs 初始化完成后再由 UserPrefs.init 按用户设置校正。
+    AppStorage.setOrCreate<boolean>(K_DARK, systemDark);
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
     // 初始窗口尺寸（vp）：后续由 windowSizeChange 调平（旋转 / 分屏 / 折叠）。
     try {

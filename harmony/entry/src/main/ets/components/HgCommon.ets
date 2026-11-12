@@ -1,4 +1,5 @@
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { K_TOP_INSET } from '../state/UserPrefs';
 
 /** 二级页顶栏：返回 + 标题，沉浸到状态栏下方。 */
@@ -23,6 +24,7 @@ export struct HgTopBar {
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
           .accessibilityText('返回')
+          .hoverEffect(HoverEffect.Scale)
           .onClick(() => {
             this.onBack();
           })
@@ -82,6 +84,7 @@ export struct HgEmptyState {
           .borderRadius(HgRadius.chip)
           .padding({ left: HgSpace.xxl, right: HgSpace.xxl })
           .accessibilityText('重试')
+          .hoverEffect(HoverEffect.Scale)
           .onClick(() => {
             this.onAction();
           })
@@ -90,6 +93,7 @@ export struct HgEmptyState {
     .width('100%')
     .padding(HgSpace.xxl)
     .justifyContent(FlexAlign.Center)
+    .transition(HgMotion.fadeIn())
   }
 }
 
@@ -118,7 +122,7 @@ export struct HgSkeletonGrid {
   @Prop dark: boolean = true;
   @Prop count: number = 6;
   @Prop columns: number = 2;
-  @State pulse: number = 0.45;
+  @State pulse: number = 1;
 
   /** 依列数生成 columnsTemplate（支持手机 2 列 / 平板 3–4 列）。 */
   private template(): string {
@@ -131,7 +135,18 @@ export struct HgSkeletonGrid {
   }
 
   aboutToAppear(): void {
-    this.pulse = 1;
+    if (!HgMotion.skeletonAnimated()) {
+      return;
+    }
+    // 整个骨架容器统一一条呼吸动画（900ms alternate、0.88↔1.0），不再每张卡 3 条。
+    animateTo({
+      duration: HgMotion.skeletonPulseMs,
+      curve: Curve.EaseInOut,
+      iterations: -1,
+      playMode: PlayMode.Alternate
+    }, () => {
+      this.pulse = HgMotion.skeletonPulseMin;
+    });
   }
 
   build() {
@@ -146,23 +161,20 @@ export struct HgSkeletonGrid {
                 .backgroundColor(HgColor.skeletonBase(this.dark))
                 .borderRadius(HgRadius.row)
                 .opacity(this.pulse)
-                .animation({ duration: 900, curve: Curve.EaseInOut, iterations: -1, playMode: PlayMode.Alternate })
               Column()
                 .width('70%')
                 .height(HgFont.micro)
                 .backgroundColor(HgColor.skeletonBase(this.dark))
                 .borderRadius(4)
                 .margin({ top: HgSpace.s })
-                .opacity(this.pulse * 0.9)
-                .animation({ duration: 900, curve: Curve.EaseInOut, iterations: -1, playMode: PlayMode.Alternate })
+                .opacity(this.pulse * 0.92)
               Column()
                 .width('40%')
                 .height(HgFont.nano)
                 .backgroundColor(HgColor.skeletonBase(this.dark))
                 .borderRadius(4)
                 .margin({ top: HgSpace.xs })
-                .opacity(this.pulse * 0.8)
-                .animation({ duration: 900, curve: Curve.EaseInOut, iterations: -1, playMode: PlayMode.Alternate })
+                .opacity(this.pulse * 0.84)
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
@@ -197,6 +209,7 @@ export struct HgSectionHeader {
           .fontSize(HgFont.secondary)
           .fontColor(HgColor.textTertiary(this.dark))
           .accessibilityText('操作')
+          .hoverEffect(HoverEffect.Scale)
           .onClick(() => {
             this.onAction();
           })
@@ -224,6 +237,8 @@ export struct HgChip {
       .padding({ left: HgSpace.m, right: HgSpace.m })
       .backgroundColor(this.active ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
       .borderRadius(HgRadius.chip)
+      .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
+      .hoverEffect(HoverEffect.Scale)
       .onClick(() => {
         this.onTap();
       })
