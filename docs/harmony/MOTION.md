@@ -42,17 +42,20 @@
 - 切 Tab 保留各自滚动位置（已实现，禁止因重建列表把位置重置）。
 
 ### 3.3 骨架 → 内容
-- 几何同构（骨架与内容同列同高），只做 opacity 交叉：`skeletonFade` = `standard`；
+- 几何同构（骨架与内容同列同高），只做 opacity 交叉：骨架 exitFast 120ms 淡出 + 内容 standard 220ms 淡入；
+- 分支状态切换统一 `HgMotion.statusTransition()`（appear standard / disappear exitFast）；
 - 数据命中缓存时**不做淡入**（直接显示），避免「闪一下」；
+- 骨架呼吸统一 900ms alternate、透明度 0.88↔1.0（`skeletonPulseMs / skeletonPulseMin`），reduced 时静态；
 - 禁止骨架与内容同时可见叠加两层。
 
 ### 3.4 列表追加 / 分页 / 刷新
-- 追加：新条目 `fast` 淡入（140ms），已有条目不重排动画；
+- 整体替换/换一批：旧内容 `listSwapOut`(120ms) 淡出 → 替换数据 → 新内容 `listSwapIn`(220ms) 淡入；
+- 追加：仅新条目 `HgMotion.appendTransition()`（`fast` 140ms appear），已有条目不重排动画；禁止在 LazyForEach 项上挂共享 @State 驱动动画；
 - 刷新：旧内容淡出 `exitFast` → 新内容淡入 `standard`；
 - 切 TAG/换一批：列表淡出后替换再淡入，禁止整页骨架（缓存命中直接切）。
 
 ### 3.5 按压 / 点击反馈
-- 卡片、Chip、按钮：`pressScale` 0.96，按下 `instant`(80ms)，松开 `fast`(140ms)；
+- 卡片、Chip、按钮：`pressScale` 0.96，按下 `instant`(80ms)，松开 `fast`(140ms)，统一用 `HgMotion.pressMs(pressed)`；
 - 只作用于视觉容器，不改布局/热区；
 - 不叠加颜色渐变+缩放+阴影三种以上效果。
 
@@ -120,8 +123,17 @@ Stack().scale({ x: pressed ? HgMotion.pressScale : 1, y: pressed ? HgMotion.pres
 - [ ] 减少动态效果下可直达终态；
 - [ ] 无装饰性循环动画。
 
-## 7. 审计与整改计划（占位）
+## 7. 审计与整改计划
 
-分四区并行审计（浏览/我的设置/播放器/跨页面），结果与优先级整改清单由子代理报告汇总后补全到本节；
-整改顺序：P0（明显缺失/生硬）→ P1（不一致）→ P2（细节打磨），每个区域单独提交与真机验收。
+四区只读审计已完成（任务 task-12/13/14/15），完整报告与逐项清单见 [MOTION-AUDIT-20261113.md](MOTION-AUDIT-20261113.md)。
+
+统计：**P0 15 项 / P1 38 项 / P2 46 项**；系统性问题集中在「HgMotion 零接入、减少动效不可达、页面转场缺失、骨架/列表替换五套实现、按压覆盖不足、同类控件多套手感、启动主题闪深色」。
+
+整改波次：
+1. **W0 公共件**：HgPressable、HgSkeleton、HgDialog、HgListSwap、Index 统一页面转场、设置页「减少动态效果」+ 全局 `HgMotion.ms()` 迁移；先公共件后页面，避免五套实现再次出现。
+2. **W1 P0 15 项**：按浏览/我的设置/播放器/跨页面四区整改，每区单独提交 + 真机验收。
+3. **W2 P1 38 项**：时长统一、Segmented 去滑动胶囊、弹窗迁移、登录/设置 loading、播放器 chrome/Overlay/MoreMenu/侧栏/全屏分栏/PiP。
+4. **W3 P2 46 项**：token 迁移与裸数字清理、Footer/空态/按压细节、Hero 轮播 token、文档回写。
+
+标准口径以本文件第 2–5 节为准；DESIGN.md §2.9 旧表已标记 deprecated（保留历史参考）。
 
