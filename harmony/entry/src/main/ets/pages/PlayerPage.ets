@@ -15,6 +15,7 @@ import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } fr
 import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
 import { PlayerService } from '../player/PlayerService';
+import { PlayerSeekPolicy } from '../player/PlayerSeekPolicy';
 import { MediaPrefetch } from '../player/MediaPrefetch';
 import { PlaybackLog } from '../player/PlaybackLog';
 import { PlayerSeekBar } from '../components/player/PlayerSeekBar';
@@ -32,8 +33,6 @@ const TOP_SAFE_FALLBACK: number = HgSpace.xxl;
 /** 横屏视频「适应」时，视频中心所在屏幕高度比例（略高于正中心，给底部控件留空间）。 */
 const LANDSCAPE_CENTER_Y_RATIO: number = 0.42;
 const LONG_PRESS_MS: number = 380;
-/** 拖动到片尾该比例以上松手 → 视为「看完了」，自动续播下一集。 */
-const SEEK_END_RATIO: number = 0.95;
 const SEEK_FULL_WIDTH_SECONDS: number = 120;
 /** 滑动时视频层 Y 位移的方向系数：SwiperAnimationEvent.currentOffset 与页面位移同号时取 1。 */
 const VIDEO_DRAG_SIGN: number = 1;
@@ -2529,8 +2528,8 @@ export struct PlayerPage {
             this.dragging = false;
             // 拖到片尾：视为看完，直接续播下一集（末集复用 handleCompleted 记录完播信号）。
             // 只认「拖动」：轻点进度条右侧也会落在片尾附近，不应被当成看完。
-            if (moved && this.params.feedKind !== 'post' && this.durationMs > 0 &&
-              ms >= this.durationMs * SEEK_END_RATIO) {
+            if (PlayerSeekPolicy.isSeekToEnd(moved, ms, this.durationMs) &&
+              this.params.feedKind !== 'post') {
               this.positionMs = ms;
               this.handleCompleted();
               return;

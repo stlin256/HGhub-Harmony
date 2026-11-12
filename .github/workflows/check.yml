@@ -62,3 +62,56 @@ jobs:
             exit 1
           fi
           echo "no build artifacts"
+
+      - name: 检查文档相对链接
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          root = pathlib.Path(".")
+          link_re = re.compile(r'\[[^\]]*\]\(([^)]+)\)')
+          bad = []
+          for md in list(root.rglob("*.md")):
+              if ".git" in md.parts:
+                  continue
+              text = md.read_text(encoding="utf-8", errors="ignore")
+              for m in link_re.finditer(text):
+                  target = m.group(1).strip()
+                  if target.startswith(("http://", "https://", "#", "mailto:")):
+                      continue
+                  target = target.split("#")[0].strip()
+                  if not target:
+                      continue
+                  path = (md.parent / target).resolve()
+                  if not path.exists():
+                      bad.append(f"{md}: {target}")
+          if bad:
+              print("断链：")
+              print("\n".join(bad[:30]))
+              sys.exit(1)
+          print("docs links ok")
+          PY
+
+      - name: 检查代码规范（any / console / TODO）
+        run: |
+          fail=0
+          if grep -rn --include="*.ets" -E ":\s*any\b|<any>" harmony/entry/src/main/ets ; then
+            echo "发现 any 类型"; fail=1
+          fi
+          if grep -rn --include="*.ets" -E "console\.(log|warn|error)" harmony/entry/src/main/ets ; then
+            echo "发现 console 输出（应使用 hilog）"; fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "code conventions ok"
+
+      - name: 检查推荐资源体积
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -gt 3145728 ]; then
+              echo "$f 超过 3MB（$size bytes）"
+              fail=1
+            fi
+          done < <(find harmony/entry/src/main/resources/rawfile -type f 2>/dev/null)
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "resource size ok"
