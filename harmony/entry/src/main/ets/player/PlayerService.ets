@@ -8,16 +8,13 @@ import { UserPrefs } from '../state/UserPrefs';
 import { PlaybackLog } from './PlaybackLog';
 import { LocalProxy } from './LocalProxy';
 import { MediaPrefetch } from './MediaPrefetch';
+import { PlayerQuality } from './PlayerQuality';
 import { redactSensitive } from '../utils/Security';
 
 const HISTORY_INTERVAL_MS: number = 5000;
 const UI_INTERVAL_MS: number = 250;
 const PLAY_CACHE_TTL_MS: number = 8 * 60 * 1000;
 const NEAR_END_MS: number = 3000;
-/** 播放失败重试：分级退避（首次重试 0.5s，之后 1.5s / 3s）。 */
-const RETRY_DELAYS_MS: number[] = [500, 1500, 3000];
-/** 最大尝试次数（含首次）。 */
-const MAX_ATTEMPTS: number = 4;
 
 class PlayCacheEntry {
   info: PlaybackInfo;
@@ -233,33 +230,14 @@ export class PlayerService {
     return false;
   }
 
-  /** 该播放响应是否带 HEVC 高清源。 */
+  /** 该播放响应是否带 HEVC 高清源（委托 PlayerQuality，便于单测）。 */
   static hasHevc(info: PlaybackInfo | undefined): boolean {
-    if (info === undefined || info === null) {
-      return false;
-    }
-    const streams = info.streams;
-    if (streams === undefined || streams === null) {
-      return false;
-    }
-    const hevc: string | undefined = streams.hevc;
-    return hevc !== undefined && hevc !== null && hevc.length > 0;
+    return PlayerQuality.hasHevc(info);
   }
 
-  /** 按画质偏好取播放地址：优先 HEVC，无高清源或未开启时回退标准源。 */
+  /** 按画质偏好取播放地址（委托 PlayerQuality，便于单测）。 */
   static streamUrl(info: PlaybackInfo, preferHevc: boolean): string {
-    const streams = info.streams;
-    if (streams === undefined || streams === null) {
-      return '';
-    }
-    if (preferHevc) {
-      const hevc: string | undefined = streams.hevc;
-      if (hevc !== undefined && hevc !== null && hevc.length > 0) {
-        return hevc;
-      }
-    }
-    const main: string | undefined = streams.main;
-    return main === undefined || main === null ? '' : main;
+    return PlayerQuality.streamUrl(info, preferHevc);
   }
 
   /** 上游 CDN 鉴权头（x-cdn-auth / x-cdn-app 等）+ 基础请求头。 */
@@ -464,13 +442,13 @@ export class PlayerService {
    */
   private async retryOrFail(videoId: number, ep: number, startSec: number, autoPlay: boolean,
     serial: number, attempt: number, code: number, text: string, fromResolve: boolean): Promise<boolean> {
-    if (attempt + 1 >= MAX_ATTEMPTS || !PlayerService.isRetryable(code, text)) {
+    if (!PlayerQuality.canRetry(attempt) || !PlayerQuality.isRetryable(code, text)) {
       return false;
     }
-    const delay: number = PlayerService.retryDelay(attempt + 1);
+    const delay: number = PlayerQuality.retryDelay(attempt);
     PlaybackLog.warn('load.retry', 'attempt=' + (attempt + 1) + ' delay=' + delay +
       ' code=' + code + ' from=' + (fromResolve ? 'resolve' : 'open'));
-    this.onRetry(attempt + 1, MAX_ATTEMPTS - 1);
+    this.onRetry(attempt + 1, PlayerQuality.MAX_ATTEMPTS - 1);
     if (delay > 0) {
       await PlayerService.sleep(delay);
     }
@@ -481,28 +459,6 @@ export class PlayerService {
     this.dropCache(videoId, ep);
     await this.loadByApi(videoId, ep, startSec, autoPlay, true, serial, attempt + 1);
     return true;
-  }
-
-  /**
-   * 判断错误是否值得重试：网络类 / 服务端 5xx / 播放器 IO 错误可重试；
-   * 鉴权（401/403）、资源不存在（404）、无播放地址、5400102（状态不满足的瞬时操作错误）不重试。
-   */
-  private static isRetryable(code: number, message: string): boolean {
-    if (code === 5400103) {
-      return true;
-    }
-    const text: string = message.toLowerCase();
-    if (text.indexOf('http 5') >= 0) {
-      return true;
-    }
-    return text.indexOf('timeout') >= 0 || text.indexOf('超时') >= 0 ||
-      text.indexOf('网络') >= 0 || text.indexOf('connect') >= 0 ||
-      text.indexOf('network') >= 0;
-  }
-
-  private static retryDelay(attempt: number): number {
-    const index: number = Math.min(Math.max(0, attempt), RETRY_DELAYS_MS.length - 1);
-    return RETRY_DELAYS_MS[index];
   }
 
   private static sleep(ms: number): Promise<void> {
