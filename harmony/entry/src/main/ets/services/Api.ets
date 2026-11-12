@@ -10,7 +10,8 @@ import { UserPrefs } from '../state/UserPrefs';
 import { isSafeWebUrl, parseBoundedJson, parseWebUrl } from '../utils/Security';
 import {
   BootInfo, CommentPage, Detail, HotWord, LineMirrors, LineProbe, LoginResult, Paged, PlaybackInfo, PlayInfo, Post,
-  RankResult, SearchResult, Topic, TopicDetail, UpdateInfo, User, UserProfile, VideoCard
+  RankResult, SearchResult, Topic, TopicDetail, UpdateInfo, User, UserProfile, VideoCard,
+  VideoCategory, VideoCategoryList
 } from '../models/Types';
 
 /** /api/search/hot 的响应外壳。 */
@@ -98,6 +99,10 @@ export class Api {
   private static lineRetryAt: number = 0;
   /** 正在进行的换线（并发失败共享同一次探测）。 */
   private static lineSwitchInflight: Promise<boolean> | null = null;
+  /** 启动阶段标记：首个业务请求成功前为 true，期间失败走指数退避重试，不立刻把错误抛给页面。 */
+  private static startupPhase: boolean = true;
+  /** 启动阶段退避重试轮次（成功任意请求后清零）。 */
+  private static startupRetries: number = 0;
 
   /**
    * 当前安装包版本号：优先读系统 BundleInfo（AppScope/app.json5 的 versionName），
@@ -130,31 +135,93 @@ export class Api {
       return await Api.edgeOnce(method, path, body);
     } catch (err) {
       const message: string = Api.errMessage(err);
-      if (!Api.retryableNetworkError(message)) {
+      // 启动阶段把 HTTP 404 也视为线路问题（典型：首页能开但 /api/edge/request 不存在），
+      // 走换线 + 退避重试；正常阶段仍按原规则（404 不重试）。
+      if (!Api.retryableForStartup(message)) {
         throw Api.toError(err);
       }
       // 并发请求：别的请求已经把线路换掉了，直接用新线路重试一次。
       if (Lines.current() !== originBase) {
         hilog.info(API_LOG_DOMAIN, API_LOG_TAG, 'line already switched, retry %{public}s',
           Api.opName(path));
-        return await Api.edgeOnce(method, path, body);
+        try {
+          return await Api.edgeOnce(method, path, body);
+        } catch (retryErr) {
+          return await Api.startupFallback(retryErr, method, path, body);
+        }
       }
       const now: number = Date.now();
       if (Api.lineRetryAt > 0 && now - Api.lineRetryAt < LINE_RETRY_COOLDOWN_MS) {
-        throw Api.toError(err);
+        return await Api.startupFallback(err, method, path, body);
       }
       Api.lineRetryAt = now;
       const switched: boolean = await Api.requestLineSwitch();
       if (!switched || Lines.current() === originBase) {
-        throw Api.toError(err);
+        return await Api.startupFallback(err, method, path, body);
       }
       hilog.info(API_LOG_DOMAIN, API_LOG_TAG, 'line switched, retry %{public}s', Api.opName(path));
-      return await Api.edgeOnce(method, path, body);
+      try {
+        return await Api.edgeOnce(method, path, body);
+      } catch (retryErr) {
+        return await Api.startupFallback(retryErr, method, path, body);
+      }
     }
   }
 
+  /**
+   * 启动阶段容灾：第一个业务请求成功前，网络类失败按 600/1200/2400ms 指数退避重试，
+   * 第二轮起强制并行探测选线；全部失败才把错误抛给页面（页面再显示加载失败/重试）。
+   */
+  private static async startupFallback(lastErr: Object, method: string, path: string,
+    body: Object | null): Promise<Object | null> {
+    while (Api.startupPhase && Api.startupRetries < 3) {
+      Api.startupRetries++;
+      const waitMs: number = 600 * Math.pow(2, Api.startupRetries - 1);
+      hilog.info(API_LOG_DOMAIN, API_LOG_TAG, 'startup backoff attempt=%{public}d wait=%{public}dms op=%{public}s',
+        Api.startupRetries, waitMs, Api.opName(path));
+      await Api.sleep(waitMs);
+      if (Api.startupRetries >= 2) {
+        try {
+          await LineAuto.ensureBest(true);
+        } catch (err) {
+        }
+      }
+      try {
+        return await Api.edgeOnce(method, path, body);
+      } catch (retryErr) {
+        lastErr = retryErr;
+        if (!Api.retryableForStartup(Api.errMessage(retryErr))) {
+          break;
+        }
+      }
+    }
+    throw Api.toError(lastErr);
+  }
+
+  /** 启动阶段可重试判定：网络类错误 + HTTP 404（接口/线路不匹配）。 */
+  private static retryableForStartup(message: string): boolean {
+    if (Api.retryableNetworkError(message)) {
+      return true;
+    }
+    return Api.startupPhase && message.startsWith('HTTP 404');
+  }
+
+  private static sleep(ms: number): Promise<void> {
+    return new Promise<void>((resolve: () => void) => {
+      setTimeout(() => {
+        resolve();
+      }, ms);
+    });
+  }
+
   private static async edgeOnce(method: string, path: string, body: Object | null): Promise<Object | null> {
-    return await Net.edge(Lines.current(), method, path, body, Api.token());
+    const base: string = Lines.current();
+    const data = await Net.edge(base, method, path, body, Api.token());
+    // 业务请求成功：记录 last-good（下次启动优先使用）并结束启动容灾阶段。
+    LineAuto.markSuccess(base);
+    Api.startupPhase = false;
+    Api.startupRetries = 0;
+    return data;
   }
 
   /** 并发失败只触发一次 LineAuto.retryAfterFailure（结果共享）。 */
@@ -318,6 +385,17 @@ export class Api {
     const data = await Api.edge('GET',
       '/api/videos/category/' + q(cate) + '?page=' + page + '&size=' + size, null);
     return requireObject(data) as Paged<VideoCard>;
+  }
+
+  /** 站点频道列表（动态分类唯一来源；失败抛错，调用方回退本地已知列表）。 */
+  static async videoCategories(): Promise<VideoCategory[]> {
+    const data = await Api.edge('GET', '/api/site/categories/video', null);
+    const payload = requireObject(data) as VideoCategoryList;
+    const items: VideoCategory[] | undefined = payload.items;
+    if (items === undefined || items === null) {
+      return [];
+    }
+    return items;
   }
 
   static async rank(kind: string): Promise<RankResult> {

@@ -372,7 +372,8 @@ struct Index {
     .bindSheet($$this.lineVisible, this.LineBuilder(), {
       height: SheetSize.LARGE,
       dragBar: true,
-      showClose: true,
+      // 线路面板自带主题化关闭按钮：系统 close 颜色跟随系统主题，App 主题与系统不一致时不可见。
+      showClose: false,
       backgroundColor: HgColor.surface1(this.dark),
       onDisappear: () => {
         this.lineVisible = false;

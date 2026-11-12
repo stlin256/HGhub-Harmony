@@ -308,6 +308,20 @@ export interface LineItem {
   host?: string;
 }
 
+/** 站点频道（/api/site/categories/video）：动态分类的唯一来源。 */
+export interface VideoCategory {
+  id: number;
+  index: number;
+  name: string;
+  route: string;
+  sort: number;
+}
+
+/** /api/site/categories/video 的响应外壳。 */
+export interface VideoCategoryList {
+  items?: VideoCategory[];
+}
+
 export interface LineState {
   base: string;
   defaultLine: string;

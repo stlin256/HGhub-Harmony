@@ -9,24 +9,12 @@ import { HgListSource } from '../components/browse/HgListSource';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
+import { CateInfo, CategoryCatalog } from '../services/CategoryCatalog';
 import { K_LINE_BASE } from '../services/Lines';
 import { ImageCache } from '../services/ImageCache';
 import { K_APP_ACTIVE, K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
-
-interface HomeChannel {
-  cate: string;
-  name: string;
-}
-
-/** 4 个固定频道（名称从原 Web src/pages/Category.tsx 克隆）。 */
-const HOME_CHANNELS: HomeChannel[] = [
-  { cate: 'ai-duanju', name: 'AI成人短剧' },
-  { cate: 'ai-manju', name: 'AI成人漫剧' },
-  { cate: 'ai-huanlian', name: 'AI换脸' },
-  { cate: 'ai-mogai', name: 'AI魔改' }
-];
 
 const PAGE_SIZE: number = 14;
 const HERO_COUNT: number = 5;
@@ -348,6 +336,8 @@ export struct HomePage {
   @State finished: boolean = false;
   @State errorText: string = '';
   @State activeCate: string = '';
+  /** 动态频道 chips：先渲染 CategoryCatalog 本地已知列表，接口回来后合并刷新。 */
+  @State channels: CateInfo[] = CategoryCatalog.fallbackKnown();
   /** TAG 轻量切换态：推荐区行内 spinner，不重建 Header/Hero、不切整页骨架。 */
   @State switching: boolean = false;
   /** 卡片区透明度：切 TAG / 换一批的淡出→淡入只作用瀑布流，Header/Hero 保持清晰。 */
@@ -413,6 +403,7 @@ export struct HomePage {
     this.pageGone = false;
     this.reload();
     this.scheduleCatalogInject();
+    this.loadChannels();
   }
 
   aboutToDisappear(): void {
@@ -463,6 +454,45 @@ export struct HomePage {
       }
       // 池已不再是"只有 feed 前几页"：把池标记为可持续（finished 由后续 feed 进度决定）。
     }, CATALOG_INJECT_DELAY);
+  }
+
+  /**
+   * 动态频道 chips：先渲染 fallback，接口回来后更新（410/内容下线的频道已在 CategoryCatalog 过滤掉）。
+   * 失败静默保留 fallback；当前选中的频道被移除时回到「全部/为你推荐」。
+   */
+  private async loadChannels(): Promise<void> {
+    try {
+      const list: CateInfo[] = await CategoryCatalog.load();
+      if (this.pageGone || list.length === 0 || this.sameChannels(list)) {
+        return;
+      }
+      this.channels = list;
+      if (this.activeCate.length > 0 && !this.hasChannel(this.activeCate)) {
+        this.switchCate('');
+      }
+    } catch (err) {
+    }
+  }
+
+  private sameChannels(list: CateInfo[]): boolean {
+    if (list.length !== this.channels.length) {
+      return false;
+    }
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].route !== this.channels[i].route) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private hasChannel(route: string): boolean {
+    for (let i = 0; i < this.channels.length; i++) {
+      if (this.channels[i].route === route) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -1529,9 +1559,9 @@ export struct HomePage {
   }
 
   private activeCateName(): string {
-    for (let i = 0; i < HOME_CHANNELS.length; i++) {
-      if (HOME_CHANNELS[i].cate === this.activeCate) {
-        return HOME_CHANNELS[i].name;
+    for (let i = 0; i < this.channels.length; i++) {
+      if (this.channels[i].route === this.activeCate) {
+        return this.channels[i].name;
       }
     }
     return '为你推荐';
@@ -1549,16 +1579,16 @@ export struct HomePage {
             this.switchCate('');
           }
         })
-        ForEach(HOME_CHANNELS, (channel: HomeChannel) => {
+        ForEach(this.channels, (channel: CateInfo) => {
           HomeChip({
             label: channel.name,
-            active: this.activeCate === channel.cate,
+            active: this.activeCate === channel.route,
             dark: this.dark,
             onTap: () => {
-              this.switchCate(channel.cate);
+              this.switchCate(channel.route);
             }
           })
-        }, (channel: HomeChannel) => channel.cate)
+        }, (channel: CateInfo) => channel.route)
         HomeChip({
           label: '排行榜',
           active: false,

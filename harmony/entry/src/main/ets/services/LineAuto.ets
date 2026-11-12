@@ -1,6 +1,6 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { LineItem, LineProbe } from '../models/Types';
-import { Lines } from './Lines';
+import { Lines, PREF_LINE_LAST_GOOD } from './Lines';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
 
@@ -97,9 +97,81 @@ export class LineAuto {
     Lines.mirrors().catch(() => {
     });
     setTimeout(() => {
-      LineAuto.ensureBest(false).catch(() => {
+      // 启动容灾：不等"当前可用就返回"，而是并行探测全部候选质量，自动选最优（含 last-good 优先）。
+      LineAuto.ensureBestStartup().catch(() => {
       });
     }, INIT_DELAY_MS);
+  }
+
+  /**
+   * 记录一次「业务请求成功」的线路：持久化 line_last_good，下次启动直接优先使用。
+   * 只记端点，不改变当前线路/不清会话。
+   */
+  static markSuccess(base: string): void {
+    const normalized: string = Lines.normalize(base);
+    if (normalized.length === 0) {
+      return;
+    }
+    Prefs.putString(PREF_LINE_LAST_GOOD, normalized);
+  }
+
+  /**
+   * 启动探测（不阻塞首屏）：并行探测全部候选线路（偏好/当前/固定/缓存镜像，去重 ≤10），
+   * 选最快可用线路：
+   * - 当前线路不可用 → 切换；
+   * - 当前可用但比最优慢 300ms 以上 → 切换（手动选线 5 分钟冷却期内不打扰）；
+   * - 其它情况保持当前线路，只更新状态文案。
+   */
+  static async ensureBestStartup(): Promise<void> {
+    if (!LineAuto.enabled || LineAuto.checking) {
+      return;
+    }
+    LineAuto.checking = true;
+    LineAuto.status = '正在并行检测线路…';
+    const current: string = Lines.current();
+    try {
+      const list: string[] = LineAuto.candidates();
+      if (list.length === 0) {
+        return;
+      }
+      const results: ProbeResult[] = await Promise.all(list.map((url: string) => LineAuto.probeOne(url)));
+      let best: ProbeResult | null = null;
+      let currentResult: ProbeResult | null = null;
+      for (let i = 0; i < results.length; i++) {
+        const item: ProbeResult = results[i];
+        if (item.url === current) {
+          currentResult = item;
+        }
+        if (item.ok && (best === null || item.ms < best.ms)) {
+          best = item;
+        }
+      }
+      if (best === null) {
+        LineAuto.status = '未找到可用线路，可手动切换';
+        hilog.warn(LOG_DOMAIN, LOG_TAG, 'startup.probe.none');
+        return;
+      }
+      const currentOk: boolean = currentResult !== null && currentResult.ok;
+      const manualCooling: boolean = LineAuto.lastManualAt > 0 &&
+        Date.now() - LineAuto.lastManualAt < MANUAL_COOLDOWN_MS;
+      const slowerEnough: boolean = currentResult !== null &&
+        best.ms + 300 < (currentResult as ProbeResult).ms;
+      if (best.url !== current && (!currentOk || (!manualCooling && slowerEnough))) {
+        const changed: boolean = LineAuto.switchTo(best.url, current);
+        if (changed) {
+          LineAuto.status = '已自动选择最快线路（' + hostOf(best.url) + '）';
+        }
+      } else {
+        LineAuto.reportOk(current);
+      }
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'startup.probe done best=%{public}sms current=%{public}sms',
+        Math.round(best.ms), currentResult === null ? -1 : Math.round((currentResult as ProbeResult).ms));
+    } catch (err) {
+      LineAuto.status = '线路检测失败，可手动切换';
+      hilog.warn(LOG_DOMAIN, LOG_TAG, 'startup.probe.fail');
+    } finally {
+      LineAuto.checking = false;
+    }
   }
 
   /**

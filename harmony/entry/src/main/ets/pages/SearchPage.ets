@@ -1,5 +1,5 @@
 import { Api } from '../services/Api';
-import { HotWord, SearchResult, VideoCard } from '../models/Types';
+import { RankItem, RankResult, SearchResult, VideoCard } from '../models/Types';
 import { UserPrefs } from '../state/UserPrefs';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
@@ -11,13 +11,12 @@ import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
 
-/** 12 个热门题材（从原 Web src/pages/Search.tsx 克隆）。 */
-const HOT_TAGS: string[] = ['都市', '逆袭', '古风', '系统', '后宫', '校园',
-  '仙侠', '职场', '大男主', '御姐', '脑洞', '奇幻'];
+/** idle 热榜展示条数（前 10 条）。 */
+const HOT_RANK_SIZE: number = 10;
 
 const PAGE_SIZE: number = 18;
 
-/** 搜索：历史/热词发现态 + 结果瀑布流；防抖提交、触底分页、空/错误态齐全。 */
+/** 搜索：历史/热榜发现态 + 结果瀑布流；防抖提交、触底分页、空/错误态齐全。 */
 @Component
 export struct SearchPage {
   @Consume('hgNavStack') navStack: NavPathStack;
@@ -29,8 +28,12 @@ export struct SearchPage {
   @State keyword: string = '';
   @State submitted: string = '';
   @State hist: string[] = [];
-  /** 实时热搜（接口失败时为空，回退本地 HOT_TAGS）。 */
-  @State hotWords: HotWord[] = [];
+  /** 搜索框焦点：聚焦时隐藏自绘占位（显示光标，避免占位与光标/输入叠字）。 */
+  @State focused: boolean = false;
+  /** idle 热榜：/api/ranks/hot 前 10 条。 */
+  @State rankItems: RankItem[] = [];
+  @State rankLoading: boolean = false;
+  @State rankError: string = '';
   @State items: VideoCard[] = [];
   @State total: number = 0;
   @State hasData: boolean = false;
@@ -41,13 +44,15 @@ export struct SearchPage {
   @State refreshing: boolean = false;
   /** 结果列表透明度：已有结果时刷新/重试走"淡出→替换→淡入"。 */
   @State private listOpacity: number = 1;
-  /** 当前按下的历史/热门题材 chip（轻微缩放反馈）。 */
+  /** 当前按下的搜索历史 chip（轻微缩放反馈）。 */
   @State private pressedChip: string = '';
   private fadeTimer: number = -1;
   private source: HgListSource<VideoCard> = new HgListSource<VideoCard>();
   private page: number = 0;
   private pages: number = 1;
   private loadSeq: number = 0;
+  /** 页面已销毁：异步回调不再 setState。 */
+  private pageGone: boolean = false;
 
   /** 结果瀑布流列数：手机 2 列，平板/横屏 3–4 列（最多 5）。 */
   private flowColumns(): number {
@@ -59,7 +64,7 @@ export struct SearchPage {
     return HgResponsive.contentGutter(this.windowW);
   }
 
-  /** 发现态（搜索框/历史/热门题材）左右留白：宽屏时最大 760vp 居中。 */
+  /** 发现态（搜索框/历史/热榜）左右留白：宽屏时最大 760vp 居中。 */
   private formGutter(): number {
     return this.windowW > HgResponsive.FORM_MAX ? (this.windowW - HgResponsive.FORM_MAX) / 2 : 0;
   }
@@ -71,19 +76,84 @@ export struct SearchPage {
   }
 
   aboutToAppear(): void {
-    this.loadHotWords();
+    this.pageGone = false;
+    // 上次离开时被中断的热榜请求：回页后允许重新发起。
+    this.rankLoading = false;
+    this.loadHotRank();
     this.hist = UserPrefs.searchHist();
   }
 
-  /** 拉取实时热搜词；失败静默，界面回退本地 HOT_TAGS。 */
-  private async loadHotWords(): Promise<void> {
-    try {
-      const list: HotWord[] = await Api.hotSearch();
-      if (list.length > 0) {
-        this.hotWords = list;
-      }
-    } catch (err) {
+  /**
+   * 拉取热播榜前 10 条（idle 发现区）。
+   * 失败/为空只显示一行轻提示 + 重试，不阻塞搜索历史与搜索入口。
+   */
+  private async loadHotRank(): Promise<void> {
+    if (this.rankLoading) {
+      return;
     }
+    this.rankLoading = true;
+    this.rankError = '';
+    try {
+      const res: RankResult = await Api.rank('hot');
+      if (this.pageGone) {
+        return;
+      }
+      const items: RankItem[] = res.items !== undefined && res.items !== null ? res.items : [];
+      this.rankItems = items.length > HOT_RANK_SIZE ? items.slice(0, HOT_RANK_SIZE) : items;
+      this.rankError = '';
+    } catch (err) {
+      if (this.pageGone) {
+        return;
+      }
+      this.rankItems = [];
+      this.rankError = (err as Error).message;
+    } finally {
+      if (!this.pageGone) {
+        this.rankLoading = false;
+      }
+    }
+  }
+
+  /** 热榜行右侧：优先「指标 + 值」，无指标文案时退化为分类名。 */
+  private rankMetricText(item: RankItem): string {
+    const label: string = item.metric_label !== undefined && item.metric_label !== null ? item.metric_label : '';
+    if (label.length > 0) {
+      return label + ' ' + fmt(item.metric_value);
+    }
+    const cate: string = item.cate_name !== undefined && item.cate_name !== null ? item.cate_name : '';
+    return cate;
+  }
+
+  /** 热榜点击：以热榜列表（video_id 顺序）为播放上下文打开播放页。 */
+  private openRankAt(index: number): void {
+    if (index < 0 || index >= this.rankItems.length) {
+      return;
+    }
+    const ids: number[] = [];
+    let start: number = -1;
+    for (let i = 0; i < this.rankItems.length; i++) {
+      const id: number = this.rankItems[i].video_id;
+      if (id <= 0) {
+        continue;
+      }
+      if (i === index) {
+        start = ids.length;
+      }
+      ids.push(id);
+    }
+    if (start < 0) {
+      return;
+    }
+    const param: PlayerParam = {
+      videoIds: ids,
+      index: start,
+      title: '热榜',
+      source: 'rank',
+      feedKind: 'video',
+      startEp: 1,
+      startTime: 0
+    };
+    this.navStack.pushPathByName(ROUTE_PLAYER, param);
   }
 
   private submit(text: string): void {
@@ -119,7 +189,7 @@ export struct SearchPage {
     const kw = this.submitted;
     try {
       const res: SearchResult = await Api.search(kw, 1, PAGE_SIZE);
-      if (seq !== this.loadSeq) {
+      if (seq !== this.loadSeq || this.pageGone) {
         return;
       }
       const list: VideoCard[] = res.items !== undefined && res.items !== null ? res.items : [];
@@ -141,12 +211,12 @@ export struct SearchPage {
         apply();
       }
     } catch (err) {
-      if (seq === this.loadSeq) {
+      if (seq === this.loadSeq && !this.pageGone) {
         this.errorText = (err as Error).message;
         this.hasData = false;
       }
     } finally {
-      if (seq === this.loadSeq) {
+      if (seq === this.loadSeq && !this.pageGone) {
         this.loading = false;
         this.refreshing = false;
       }
@@ -162,7 +232,7 @@ export struct SearchPage {
     try {
       const next = this.page + 1;
       const res: SearchResult = await Api.search(this.submitted, next, PAGE_SIZE);
-      if (seq !== this.loadSeq) {
+      if (seq !== this.loadSeq || this.pageGone) {
         return;
       }
       const list: VideoCard[] = res.items !== undefined && res.items !== null ? res.items : [];
@@ -184,11 +254,11 @@ export struct SearchPage {
       this.finished = fresh.length === 0 || this.page >= this.pages;
       this.errorText = '';
     } catch (err) {
-      if (seq === this.loadSeq) {
+      if (seq === this.loadSeq && !this.pageGone) {
         this.errorText = (err as Error).message;
       }
     } finally {
-      if (seq === this.loadSeq) {
+      if (seq === this.loadSeq && !this.pageGone) {
         this.loadingMore = false;
       }
     }
@@ -224,6 +294,9 @@ export struct SearchPage {
     }
     this.fadeTimer = setTimeout(() => {
       this.fadeTimer = -1;
+      if (this.pageGone) {
+        return;
+      }
       if (seq !== this.loadSeq) {
         this.listOpacity = 1;
         return;
@@ -236,12 +309,15 @@ export struct SearchPage {
   }
 
   aboutToDisappear(): void {
+    this.pageGone = true;
+    this.rankLoading = false;
     if (this.fadeTimer >= 0) {
       clearTimeout(this.fadeTimer);
       this.fadeTimer = -1;
     }
   }
 
+  /** 清空搜索态回到 idle（热榜），并收起键盘：搜索结果右上角返回箭头调用。 */
   private clearInput(): void {
     this.keyword = '';
     this.submitted = '';
@@ -251,6 +327,9 @@ export struct SearchPage {
     this.errorText = '';
     this.loading = false;
     this.finished = false;
+    this.total = 0;
+    this.focused = false;
+    this.getUIContext().getFocusController().clearFocus();
   }
 
   private openAt(index: number): void {
@@ -273,28 +352,55 @@ export struct SearchPage {
     this.navStack.pushPathByName(ROUTE_PLAYER, param);
   }
 
+  /** 自绘占位是否显示：输入为空且未聚焦（聚焦后显示光标，避免占位与光标/输入叠字）。 */
+  private showPlaceholder(): boolean {
+    return this.keyword.length === 0 && !this.focused;
+  }
+
+  /**
+   * 搜索输入：TextInput + 自绘占位 Text 叠层。
+   * 不用内置 placeholder —— 不同机型内置 placeholder 的基线/内边距不一致，容易与左侧放大镜、
+   * 已输入文字错位；自绘占位与输入文本同字号、同左对齐（Stack 垂直居中），三者天然对齐。
+   */
   @Builder
   SearchInput() {
     Row({ space: HgSpace.s }) {
       SymbolGlyph($r('sys.symbol.magnifyingglass'))
         .fontSize(HgIconSize.compact)
         .fontColor([HgColor.textTertiary(this.dark)])
-      TextInput({ text: this.keyword, placeholder: '搜索短剧、作者、题材…' })
-        .layoutWeight(1)
-        .height(HgSize.control)
-        .padding({ left: 0, right: 0 })
-        .fontSize(HgFont.rowTitle)
-        .fontColor(HgColor.textPrimary(this.dark))
-        .placeholderColor(HgColor.textTertiary(this.dark))
-        .placeholderFont({ size: HgFont.rowTitle })
-        .caretColor(HgColor.accent(this.dark))
-        .enterKeyType(EnterKeyType.Search)
-        .onChange((value: string) => {
-          this.keyword = value;
-        })
-        .onSubmit((enterKey: EnterKeyType) => {
-          this.submit(this.keyword);
-        })
+      Stack({ alignContent: Alignment.Start }) {
+        TextInput({ text: this.keyword })
+          .width('100%')
+          .height('100%')
+          .padding({ left: 0, right: 0 })
+          .fontSize(HgFont.rowTitle)
+          .fontColor(HgColor.textPrimary(this.dark))
+          .caretColor(HgColor.accent(this.dark))
+          .enterKeyType(EnterKeyType.Search)
+          .onFocus(() => {
+            this.focused = true;
+          })
+          .onBlur(() => {
+            this.focused = false;
+          })
+          .onChange((value: string) => {
+            this.keyword = value;
+          })
+          .onSubmit((enterKey: EnterKeyType) => {
+            this.submit(this.keyword);
+          })
+        if (this.showPlaceholder()) {
+          Text('搜索短剧、作者、题材…')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .hitTestBehavior(HitTestMode.None)
+        }
+      }
+      .layoutWeight(1)
+      .height(HgSize.control)
+
       if (this.keyword.length > 0) {
         SymbolGlyph($r('sys.symbol.xmark'))
           .fontSize(HgIconSize.inline)
@@ -317,18 +423,22 @@ export struct SearchPage {
   SearchBar() {
     Row({ space: HgSpace.s }) {
       this.SearchInput()
-      Stack() {
-        SymbolGlyph($r('sys.symbol.bolt_fill'))
-          .fontSize(HgIconSize.control)
-          .fontColor([HgColor.onAccent(this.dark)])
+      // 右侧不再有「热门/闪电」入口；只有结果态出现返回箭头，清空搜索态回到热榜 idle。
+      if (this.submitted.length > 0) {
+        Stack() {
+          SymbolGlyph($r('sys.symbol.chevron_left'))
+            .fontSize(HgIconSize.control)
+            .fontColor([HgColor.textSecondary(this.dark)])
+        }
+        .width(HgSize.control)
+        .height(HgSize.control)
+        .borderRadius(HgSize.control / 2)
+        .backgroundColor(HgColor.surface3(this.dark))
+        .accessibilityText('返回热榜')
+        .onClick(() => {
+          this.clearInput();
+        })
       }
-      .width(HgSize.control)
-      .height(HgSize.control)
-      .borderRadius(HgSize.control / 2)
-      .backgroundColor(HgColor.accent(this.dark))
-      .onClick(() => {
-        this.navStack.pushPathByName(ROUTE_RANKS, null);
-      })
     }
     .width('100%')
     .padding({ left: HgSpace.pageInset + this.formGutter(), right: HgSpace.pageInset + this.formGutter() })
@@ -381,6 +491,36 @@ export struct SearchPage {
     .height(HgSize.hitTarget)
   }
 
+  /** 热榜行（44vp 行高）：序号 + 标题 + 指标/分类，点击以热榜顺序打开播放页。 */
+  @Builder
+  RankRow(item: RankItem, index: number) {
+    Row({ space: HgSpace.s }) {
+      Text(String(index + 1))
+        .width(20)
+        .textAlign(TextAlign.Center)
+        .fontSize(HgFont.caption)
+        .fontWeight(index < 3 ? HgFont.weightMedium : HgFont.weightRegular)
+        .fontColor(index < 3 ? HgColor.accent(this.dark) : HgColor.textTertiary(this.dark))
+      Text(item.title)
+        .fontSize(HgFont.secondary)
+        .fontColor(HgColor.textPrimary(this.dark))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+      Text(this.rankMetricText(item))
+        .fontSize(HgFont.micro)
+        .fontColor(HgColor.textTertiary(this.dark))
+        .maxLines(1)
+        .margin({ left: HgSpace.s })
+    }
+    .width('100%')
+    .height(44)
+    .accessibilityText('热榜第' + (index + 1) + '：' + item.title)
+    .onClick(() => {
+      this.openRankAt(index);
+    })
+  }
+
   @Builder
   IdleView() {
     Scroll() {
@@ -404,21 +544,20 @@ export struct SearchPage {
           .alignItems(HorizontalAlign.Start)
         }
 
-        Column() {
-          Row() {
+        Column({ space: HgSpace.xs }) {
+          Row({ space: HgSpace.xs }) {
             SymbolGlyph($r('sys.symbol.bolt_fill'))
               .fontSize(HgIconSize.compact)
               .fontColor([HgColor.accent(this.dark)])
-            Text('热门题材')
+            Text('热榜')
               .fontSize(HgFont.rowTitle)
               .fontWeight(HgFont.weightMedium)
               .fontColor(HgColor.textPrimary(this.dark))
-              .margin({ left: HgSpace.xs })
               .layoutWeight(1)
             Text('完整榜单 ›')
               .fontSize(HgFont.caption)
               .fontColor(HgColor.accent(this.dark))
-              .accessibilityText('完整榜单 ›')
+              .accessibilityText('完整榜单')
               .onClick(() => {
                 this.navStack.pushPathByName(ROUTE_RANKS, null);
               })
@@ -426,49 +565,43 @@ export struct SearchPage {
           .width('100%')
           .height(HgSize.hitTarget)
 
-          if (this.hotWords.length > 0) {
-            Column({ space: HgSpace.xs }) {
-              Text('实时热搜')
+          if (this.rankLoading) {
+            Row({ space: HgSpace.s }) {
+              LoadingProgress()
+                .width(14)
+                .height(14)
+                .color(HgColor.accent(this.dark))
+              Text('热榜加载中…')
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.textTertiary(this.dark))
-                .width('100%')
-              ForEach(this.hotWords.slice(0, 5), (word: HotWord, index: number) => {
-                Row({ space: HgSpace.s }) {
-                  Text(String(index + 1))
-                    .fontSize(HgFont.caption)
-                    .fontColor(index < 3 ? HgColor.accent(this.dark) : HgColor.textTertiary(this.dark))
-                    .width(18)
-                  Text(word.word)
-                    .fontSize(HgFont.secondary)
-                    .fontColor(HgColor.textPrimary(this.dark))
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .layoutWeight(1)
-                  Text(fmt(word.heat))
-                    .fontSize(HgFont.micro)
-                    .fontColor(HgColor.textTertiary(this.dark))
-                }
-                .width('100%')
-                .height(32)
-                .accessibilityText('实时热搜')
-                .onClick(() => {
-                  this.submit(word.word);
-                })
-                .accessibilityText('热搜第' + (index + 1) + '：' + word.word)
-              }, (word: HotWord) => 'hw-' + word.word)
             }
             .width('100%')
-            .alignItems(HorizontalAlign.Start)
+            .height(HgSize.hitTarget)
+          } else if (this.rankItems.length === 0) {
+            Row() {
+              Text(this.rankError.length > 0 ? '热榜加载失败' : '暂无热榜数据')
+                .fontSize(HgFont.caption)
+                .fontColor(HgColor.textTertiary(this.dark))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+              Text('重试')
+                .fontSize(HgFont.caption)
+                .fontColor(HgColor.accent(this.dark))
+                .height(HgSize.hitTarget)
+                .padding({ left: HgSpace.s })
+                .accessibilityText('重试热榜')
+                .onClick(() => {
+                  this.loadHotRank();
+                })
+            }
+            .width('100%')
+            .height(HgSize.hitTarget)
+          } else {
+            ForEach(this.rankItems, (item: RankItem, index: number) => {
+              this.RankRow(item, index)
+            }, (item: RankItem) => 'rank-' + item.video_id)
           }
-
-          Flex({ wrap: FlexWrap.Wrap }) {
-            ForEach(HOT_TAGS, (tag: string) => {
-              this.SmallChip(tag, () => {
-                this.submit(tag);
-              })
-            }, (tag: string) => 'hot-' + tag)
-          }
-          .width('100%')
         }
         .width('100%')
         .padding(HgSpace.l)
@@ -476,7 +609,7 @@ export struct SearchPage {
         .borderRadius(HgRadius.group)
         .alignItems(HorizontalAlign.Start)
 
-        Text('输入关键词后按回车搜索，也可以点上面的题材直接看片单。')
+        Text('输入关键词后按回车搜索；先看看热榜，或从搜索历史继续。')
           .width('100%')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))

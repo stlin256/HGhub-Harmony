@@ -14,11 +14,13 @@ import { Detail, Post, WatchProgress } from '../models/Types';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
-import { PlayerService } from '../player/PlayerService';
+import { PlayerService, SessionMeta } from '../player/PlayerService';
 import { PlayerSeekPolicy } from '../player/PlayerSeekPolicy';
 import { ContinuationState } from '../services/ContinuationState';
 import { PiPController } from '../player/PiPController';
-import { AVCastPicker, AVCastPickerColorMode } from '@kit.AVSessionKit';
+import {
+  AVCastPicker, AVCastPickerColorMode, AVCastPickerState, AVCastPickerStyle
+} from '@kit.AVSessionKit';
 import { MediaPrefetch } from '../player/MediaPrefetch';
 import { PlaybackLog } from '../player/PlaybackLog';
 import { PlayerSeekBar } from '../components/player/PlayerSeekBar';
@@ -135,7 +137,10 @@ export struct PlayerPage {
   /** 播放失败自动重试提示（空=未在重试）。 */
   @State retryText: string = '';
   /** 系统媒体会话就绪后展示投播入口。 */
-  @State castAvailable: boolean = false;
+  /** 投播入口默认可用（与其它 chrome 一起出现），会话未就绪时系统 picker 自行处理空态。 */
+  @State castAvailable: boolean = true;
+  /** 系统投播面板是否打开：打开期间禁止 chrome 自动隐藏，否则 picker 随 chrome 卸载而消失。 */
+  @State castPanelOpen: boolean = false;
   @State positionMs: number = 0;
   @State durationMs: number = 0;
   @State bufferedMs: number = 0;
@@ -300,6 +305,8 @@ export struct PlayerPage {
     this.muted = UserPrefs.muteOnStartup() ? true : UserPrefs.muted();
     this.service.setMuted(this.muted);
     this.bindService();
+    // 系统会话/投播面板的真实元数据：播放页提供剧名/封面/集数副标题。
+    this.service.setSessionMetaProvider((videoId: number): SessionMeta | null => this.sessionMetaFor(videoId));
     this.loadedBase = Lines.current();
     // 全屏播放页进入即隐藏状态栏；平行视窗右栏播放时保留系统状态栏（左栏列表可见，不应全屏）。
     if (!this.inSplitPane()) {
@@ -695,6 +702,8 @@ export struct PlayerPage {
     this.pendingQuality = null;
     this.hevcFallbackDone = false;
     this.service.load(id, ep, sec, true, force);
+    // 切集/换条后元数据里集数副标题也要跟着变。
+    this.service.refreshSessionMeta();
   }
 
   private async fetchDetail(id: number, serial: number): Promise<void> {
@@ -711,6 +720,21 @@ export struct PlayerPage {
       this.applyDetail(detail);
     } catch (err) {
     }
+  }
+
+  /** 当前播放内容的真实元数据（投播面板/锁屏卡片用）；videoId 与当前播放不一致时返回 null。 */
+  private sessionMetaFor(videoId: number): SessionMeta | null {
+    const id: number = this.playVideoId > 0 ? this.playVideoId : this.currentId();
+    if (videoId <= 0 || id !== videoId) {
+      return null;
+    }
+    let subtitle: string = '';
+    if (this.episodeCount > 1) {
+      subtitle = '第 ' + this.ep + ' 集 · 共 ' + this.episodeCount + ' 集';
+    } else if (this.ep > 1) {
+      subtitle = '第 ' + this.ep + ' 集';
+    }
+    return { title: this.title, cover: this.coverUrl, subtitle: subtitle };
   }
 
   private applyDetail(detail: Detail): void {
@@ -754,6 +778,8 @@ export struct PlayerPage {
       this.playVideoId = detail.id;
     }
     this.warmNextUp();
+    // 详情/封面就绪后刷新系统会话元数据（此前只有「视频 id」占位，投播面板无海报）。
+    this.service.refreshSessionMeta();
   }
 
   /** 把详情写入缓存，并同步对应页的最小展示信息（切页/相邻页占位直接复用）。 */
@@ -986,6 +1012,7 @@ export struct PlayerPage {
     if (post.video_id !== undefined && post.video_id !== null && post.video_id > 0) {
       this.playVideoId = post.video_id;
     }
+    this.service.refreshSessionMeta();
   }
 
   private prefetchNeighbors(): void {
@@ -1265,16 +1292,40 @@ export struct PlayerPage {
       clearTimeout(this.hideTimer);
       this.hideTimer = -1;
     }
-    if (!this.playing || this.destroyed || this.menuVisible || this.commentPanelVisible) {
+    if (!this.playing || this.destroyed || this.menuVisible || this.commentPanelVisible ||
+      this.castPanelOpen) {
       return;
     }
     this.hideTimer = setTimeout(() => {
       this.hideTimer = -1;
       if (!this.destroyed && this.playing && !this.locked && !this.dragging && !this.menuVisible &&
-        !this.commentPanelVisible) {
+        !this.commentPanelVisible && !this.castPanelOpen) {
         this.setChromeVisible(false);
       }
     }, CHROME_HIDE_MS);
+  }
+
+  /**
+   * 系统投播面板开合：打开期间保持 chrome 常驻（TopChrome 里有 AVCastPicker，
+   * 自动隐藏会把组件卸载，系统投播面板/预览会随之中断消失）。
+   */
+  private onCastPanelChanged(state: AVCastPickerState): void {
+    if (this.destroyed) {
+      return;
+    }
+    const open: boolean = state === AVCastPickerState.STATE_APPEARING;
+    this.castPanelOpen = open;
+    if (open) {
+      if (this.hideTimer >= 0) {
+        clearTimeout(this.hideTimer);
+        this.hideTimer = -1;
+      }
+      this.setChromeVisible(true);
+      PlaybackLog.info('ui.cast', 'picker appear');
+    } else {
+      PlaybackLog.info('ui.cast', 'picker disappear');
+      this.showChrome();
+    }
   }
 
   private toggleLock(): void {
@@ -1547,6 +1598,11 @@ export struct PlayerPage {
 
   private toggleChrome(): void {
     if (this.locked) {
+      return;
+    }
+    // 投播面板打开时不允许手动收起 chrome：TopChrome 卸载会连带关闭系统投播面板。
+    if (this.castPanelOpen) {
+      this.showChrome();
       return;
     }
     PlaybackLog.info('ui.chrome', this.chromeVisible ? 'hide' : 'show');
@@ -2420,7 +2476,14 @@ export struct PlayerPage {
               normalColor: HgColor.videoInk,
               activeColor: HgColor.accent(true),
               colorMode: AVCastPickerColorMode.AUTO,
-              sessionType: 'audio'
+              // 视频内容用 video 会话，投播面板才有视频预览与正确的设备语义。
+              sessionType: 'video',
+              // 面板式投播界面（比菜单式更适合视频投播预览）。
+              pickerStyle: AVCastPickerStyle.STYLE_PANEL,
+              // 面板开合回调：打开期间保活 chrome，避免 picker 随 TopChrome 卸载而消失。
+              onStateChange: (state: AVCastPickerState) => {
+                this.onCastPanelChanged(state);
+              }
             })
               .width(24)
               .height(24)
@@ -3311,8 +3374,10 @@ export struct PlayerPage {
   @Builder
   LineSheetBuilder() {
     LineSheet({
-      // 与全局线路面板一致的配色（跟随主题），播放页本身固定深色背景。
-      dark: UserPrefs.dark(),
+      // 播放页恒为深色：线路面板必须是深色主题，否则 App 浅色主题下会出现"深底浅字"不可读。
+      dark: true,
+      // 播放页共用同一个 bindSheet（选集/评论/详情/线路），系统白色关闭按钮统一由宿主提供。
+      showCloseButton: false,
       onClose: () => {
         this.sheetVisible = false;
       }

@@ -16,6 +16,11 @@ const RESPONSE_MAX_TEXT_BYTES: number = 4 * 1024 * 1024;
 /** 二进制响应上限（封面/截图；超出视为异常响应）。 */
 const RESPONSE_MAX_BINARY_BYTES: number = 8 * 1024 * 1024;
 
+/** /api/search/hot 探测响应的最小结构校验。 */
+interface HotSearchProbeData {
+  items?: Object[];
+}
+
 export class RawText {
   code: number;
   text: string;
@@ -351,6 +356,51 @@ export class Net {
     }
     const msg: string = env.msg !== undefined && env.msg !== null && env.msg.length > 0 ? env.msg : '接口返回失败';
     throw new Error(msg);
+  }
+
+  /**
+   * 线路「界面可用性」探测：真实调用 App 使用的边缘接口（POST {base}/api/edge/request，
+   * GET /api/search/hot），并校验信封 status===1 且 data.items 是数组。
+   * 只探测返回 true/false，不抛错；用于线路选择时排除"站点能开但 App 接口/结构已变"的线路。
+   */
+  static async probeApi(base: string, timeoutMs: number): Promise<boolean> {
+    if (parseHttpsUrl(base) === null) {
+      return false;
+    }
+    const url: string = base + '/api/edge/request';
+    const envelope: EdgeRequestBody = {
+      method: 'GET',
+      path: '/api/search/hot',
+      body: '',
+      content_type: ''
+    };
+    const headers: Record<string, string> = {
+      'User-Agent': USER_AGENT,
+      'Accept': 'application/json',
+      'Referer': base + '/',
+      'Content-Type': 'application/json'
+    };
+    try {
+      const raw = await Net.request(url, http.RequestMethod.POST, headers,
+        JSON.stringify(envelope), timeoutMs, false);
+      const response = raw as RawText;
+      if (response.code < 200 || response.code >= 300 || response.text.trim().length === 0) {
+        return false;
+      }
+      const parsed = JSON.parse(response.text) as Envelope;
+      if (parsed === null || parsed.status !== 1) {
+        return false;
+      }
+      const data = parsed.data as Object | null;
+      if (data === undefined || data === null) {
+        return false;
+      }
+      const payload = data as HotSearchProbeData;
+      const items: Object[] | undefined = payload.items;
+      return items !== undefined && items !== null && Array.isArray(items);
+    } catch (err) {
+      return false;
+    }
   }
 
   /** 拉取封面字节（短超时 + 最多 2 次；失败带诊断日志）。 */
