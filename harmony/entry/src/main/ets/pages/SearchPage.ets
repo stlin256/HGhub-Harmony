@@ -372,6 +372,9 @@ export struct SearchPage {
         TextInput({ text: this.keyword })
           .width('100%')
           .height('100%')
+          // 去掉 TextInput 自带的不透明底/圆角：否则会在灰色胶囊里再叠一层白底，视觉上像两个错位的搜索框。
+          .backgroundColor(Color.Transparent)
+          .borderRadius(0)
           .padding({ left: 0, right: 0 })
           .fontSize(HgFont.rowTitle)
           .fontColor(HgColor.textPrimary(this.dark))
