@@ -462,6 +462,21 @@ export struct PlayerPage {
       this.showChrome();
       this.syncKeepScreenOn();
     };
+    // 系统媒体会话（锁屏/控制中心）的上一首/下一首：优先切集，否则切相邻视频。
+    this.service.onSessionNext = () => {
+      if (this.episodeCount > 0 && this.ep < this.episodeCount) {
+        this.switchEpisode(this.ep + 1);
+      } else if (this.currentIndex + 1 < this.ids.length) {
+        this.goToIndex(this.currentIndex + 1);
+      }
+    };
+    this.service.onSessionPrevious = () => {
+      if (this.ep > 1) {
+        this.switchEpisode(this.ep - 1);
+      } else if (this.currentIndex > 0) {
+        this.goToIndex(this.currentIndex - 1);
+      }
+    };
     this.service.onRetry = (attempt: number, max: number) => {
       this.retryText = '正在重试（' + attempt + '/' + max + '）…';
     };
@@ -573,6 +588,20 @@ export struct PlayerPage {
       ep = 1;
     }
     return new StartPoint(ep, sec);
+  }
+
+  /** 切到指定下标（系统媒体会话的上一首/下一首用）：同步 Swiper 与播放器，越界忽略。 */
+  private goToIndex(target: number): void {
+    if (this.destroyed || target < 0 || target >= this.ids.length || target === this.currentIndex) {
+      return;
+    }
+    this.currentIndex = target;
+    this.posterDragY = 0;
+    this.openVideo(target, false);
+    try {
+      this.swiperController.changeIndex(target, false);
+    } catch (err) {
+    }
   }
 
   private openVideo(index: number, force: boolean): void {
