@@ -5,6 +5,7 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
+import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
 import { ROUTE_TOPIC, TopicParam } from '../state/Routes';
 
@@ -53,7 +54,7 @@ export struct TopicsPage {
   }
 
   private sideInset(): number {
-    return HgSpace.pageInset + this.gutter();
+    return HgGrid.sideInset(this.windowW);
   }
 
   private async loadFirst(): Promise<void> {
@@ -197,7 +198,7 @@ export struct TopicsPage {
               }
             }, (topic: Topic) => 'topic-' + topic.id)
           }
-          .columnsTemplate(this.columns() === 3 ? '1fr 1fr 1fr' : '1fr 1fr')
+          .columnsTemplate(HgGrid.template(this.columns()))
           .columnsGap(HgSpace.m)
           .rowsGap(HgSpace.l)
           .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m, bottom: this.bottomInset + HgSpace.l })

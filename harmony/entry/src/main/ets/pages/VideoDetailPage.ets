@@ -6,6 +6,7 @@ import { ROUTE_PLAYER, PlayerParam, VideoParam, ROUTE_USER, UserParam } from '..
 import { Detail, WatchProgress } from '../models/Types';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
+import { HgGrid } from '../design/HgGrid';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState } from '../components/HgCommon';
 import { EpisodeSheet } from '../components/player/EpisodeSheet';
@@ -68,12 +69,7 @@ export struct VideoDetailPage {
 
   /** 依列数生成 Grid columnsTemplate。 */
   private gridTemplate(count: number): string {
-    let out: string = '1fr';
-    const n: number = count < 1 ? 1 : count;
-    for (let i = 1; i < n; i++) {
-      out += ' 1fr';
-    }
-    return out;
+    return HgGrid.template(count);
   }
 
   /** 按列数/条目数计算选集网格高度：1 行 44，2 行 96（44*2+8）。 */

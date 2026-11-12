@@ -6,6 +6,7 @@ import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
+import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { PostParam, ROUTE_POST } from '../state/Routes';
 import { fmt } from '../utils/Format';
@@ -80,17 +81,12 @@ export struct PostsPage {
 
   /** 内容区左右 inset = pageInset + 宽屏 gutter（叠加）。 */
   private sideInset(): number {
-    return HgSpace.pageInset + this.gutter();
+    return HgGrid.sideInset(this.windowW);
   }
 
   /** WaterFlow 列模板：按当前列数生成 '1fr ...'（2/3/4 列均可）。 */
   private gridTemplate(): string {
-    const cols: number = this.columns();
-    let tpl: string = '1fr';
-    for (let i = 1; i < cols; i++) {
-      tpl = tpl + ' 1fr';
-    }
-    return tpl;
+    return HgGrid.template(this.columns());
   }
 
   /** 骨架卡片数：至少 3 行（手机保持既有 6 张），宽屏按两行铺满。 */
