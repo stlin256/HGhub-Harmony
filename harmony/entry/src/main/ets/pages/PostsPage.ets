@@ -254,6 +254,7 @@ export struct PostsPage {
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .padding(HgSpace.m)
+          .accessibilityText('加载失败，点击重试')
           .onClick(() => {
             this.loadMore();
           })

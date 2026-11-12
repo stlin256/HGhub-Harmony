@@ -22,6 +22,7 @@ export struct HgTopBar {
           .width(HgSize.hitTarget)
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
+          .accessibilityText('返回')
           .onClick(() => {
             this.onBack();
           })
@@ -80,6 +81,7 @@ export struct HgEmptyState {
           .backgroundColor(HgColor.accent(this.dark))
           .borderRadius(HgRadius.chip)
           .padding({ left: HgSpace.xxl, right: HgSpace.xxl })
+          .accessibilityText('重试')
           .onClick(() => {
             this.onAction();
           })
@@ -194,6 +196,7 @@ export struct HgSectionHeader {
         Text(this.actionText)
           .fontSize(HgFont.secondary)
           .fontColor(HgColor.textTertiary(this.dark))
+          .accessibilityText('操作')
           .onClick(() => {
             this.onAction();
           })

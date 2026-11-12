@@ -140,6 +140,7 @@ export struct DetailSheet {
             Text(this.expanded ? '收起' : '展开')
               .fontSize(HgFont.caption)
               .fontColor(HgColor.accent(this.dark))
+              .accessibilityText('展开或收起简介')
               .onClick(() => {
                 this.expanded = !this.expanded;
               })

@@ -66,6 +66,7 @@ export struct ConfirmDialog {
           .fontColor(HgColor.onSecondary(this.dark))
           .backgroundColor(HgColor.secondaryFill(this.dark))
           .borderRadius(HgRadius.chip)
+          .accessibilityText('取消')
           .onClick(() => {
             this.dismiss();
           })
@@ -77,6 +78,7 @@ export struct ConfirmDialog {
           .fontColor(this.copyOf().danger ? HgColor.onDanger(this.dark) : HgColor.onAccent(this.dark))
           .backgroundColor(this.copyOf().danger ? HgColor.danger(this.dark) : HgColor.accent(this.dark))
           .borderRadius(HgRadius.chip)
+          .accessibilityText('确定')
           .onClick(() => {
             this.dismiss();
             this.onConfirm();

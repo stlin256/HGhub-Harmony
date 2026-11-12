@@ -830,6 +830,7 @@ export struct RanksPage {
           .width('100%')
           .height(HgSize.hitTarget)
           .justifyContent(FlexAlign.Center)
+          .accessibilityText('加载失败，点击重试')
           .onClick(() => {
             this.retry();
           })

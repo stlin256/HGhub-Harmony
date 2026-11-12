@@ -59,6 +59,7 @@ export struct LoginSheet {
         Text(this.mode === 'login' ? '注册新账号' : '已有账号？登录')
           .fontSize(HgFont.secondary)
           .fontColor(HgColor.accent(this.dark))
+          .accessibilityText('切换登录/注册')
           .onClick(() => {
             this.mode = this.mode === 'login' ? 'register' : 'login';
             this.error = '';
@@ -119,6 +120,7 @@ export struct LoginSheet {
         .borderRadius(HgRadius.chip)
         .enabled(!this.busy)
         .margin({ top: HgSpace.xl })
+        .accessibilityText('提交')
         .onClick(() => {
           this.submit();
         })

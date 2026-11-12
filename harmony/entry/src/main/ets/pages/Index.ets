@@ -215,6 +215,7 @@ struct Index {
     .width('100%')
     .height(46)
     .justifyContent(FlexAlign.Center)
+    .accessibilityText(title + (this.activeIndex === index ? '，当前页' : ''))
     .onClick(() => {
       if (this.activeIndex === index) {
         return;

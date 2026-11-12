@@ -294,6 +294,7 @@ export struct PostDetailPage {
       .padding({ left: HgSpace.m, right: HgSpace.m })
       .backgroundColor(HgColor.surface2(this.dark))
       .borderRadius(HgRadius.chip)
+      .accessibilityText('点赞')
       .onClick(() => {
         this.toggleLike();
       })
@@ -417,6 +418,7 @@ export struct PostDetailPage {
             .fontColor(HgColor.accent(this.dark))
             .height(HgSize.hitTarget)
             .padding({ left: HgSpace.s })
+            .accessibilityText('重试')
             .onClick(() => {
               this.loadComments();
             })
@@ -441,6 +443,7 @@ export struct PostDetailPage {
             .fontSize(HgFont.caption)
             .fontColor(HgColor.accent(this.dark))
             .textAlign(TextAlign.Center)
+            .accessibilityText('还没有评论，来抢第一个沙发')
             .onClick(() => {
               this.loadMoreComments();
             })
