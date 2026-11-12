@@ -1,0 +1,64 @@
+name: Source checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验推荐资源 JSON 可解析
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path("harmony/entry/src/main/resources/rawfile")
+          bad = []
+          files = sorted(root.rglob("*.json"))
+          for p in files:
+              try:
+                  json.loads(p.read_text(encoding="utf-8"))
+              except Exception as exc:
+                  bad.append(f"{p}: {exc}")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print(f"JSON ok: {len(files)} files")
+          PY
+
+      - name: 检查超大文件（>8MB 不应入库）
+        run: |
+          find . -path ./.git -prune -o -type f -size +8M -print > /tmp/big.txt
+          if [ -s /tmp/big.txt ]; then
+            echo "以下文件超过 8MB，请改用 Release 或 LFS："
+            cat /tmp/big.txt
+            exit 1
+          fi
+          echo "no oversized files"
+
+      - name: 检查私钥与凭据
+        run: |
+          if grep -rIl --exclude-dir=.git --exclude-dir=.github \
+              -E 'BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY' . ; then
+            echo "发现私钥文件，禁止入库"
+            exit 1
+          fi
+          echo "no private keys"
+
+      - name: 检查构建产物未入库
+        run: |
+          if find . -path ./.git -prune -o -type d \( -name build -o -name oh_modules -o -name .hvigor \) -print | grep -q .; then
+            echo "发现构建产物目录，禁止入库"
+            exit 1
+          fi
+          echo "no build artifacts"
