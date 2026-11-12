@@ -22,12 +22,14 @@ import { PostDetailPage } from './PostDetailPage';
 import { VideoDetailPage } from './VideoDetailPage';
 import { TopicsPage } from './TopicsPage';
 import { TopicDetailPage } from './TopicDetailPage';
+import { UserPage } from './UserPage';
+import { FollowPage } from './FollowPage';
 import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
 import {
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
-  ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC,
-  PlayerParam, ChannelParam, PostParam, VideoParam, TopicParam
+  ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC, ROUTE_USER, ROUTE_FOLLOW,
+  PlayerParam, ChannelParam, PostParam, VideoParam, TopicParam, UserParam
 } from '../state/Routes';
 
 @Entry
@@ -229,6 +231,10 @@ struct Index {
       TopicsPage()
     } else if (name === ROUTE_TOPIC) {
       TopicDetailPage({ params: param as TopicParam })
+    } else if (name === ROUTE_USER) {
+      UserPage({ params: param as UserParam })
+    } else if (name === ROUTE_FOLLOW) {
+      FollowPage()
     }
   }
 

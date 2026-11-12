@@ -14,6 +14,9 @@ export const ROUTE_REC_HOW: string = 'recHow';
 /** 专题列表与专题详情。 */
 export const ROUTE_TOPICS: string = 'topics';
 export const ROUTE_TOPIC: string = 'topic';
+/** 用户主页与关注流。 */
+export const ROUTE_USER: string = 'user';
+export const ROUTE_FOLLOW: string = 'follow';
 
 export interface ChannelParam {
   cate: string;
@@ -31,6 +34,10 @@ export interface VideoParam {
 export interface TopicParam {
   slug: string;
   title: string;
+}
+
+export interface UserParam {
+  uid: number;
 }
 
 /** 播放页上下文：一个 id 列表 + 起点，对应 Web 版 store.tsx 的 FeedContext。 */
