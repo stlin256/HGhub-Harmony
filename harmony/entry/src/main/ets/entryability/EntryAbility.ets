@@ -6,6 +6,7 @@ import { AppContext } from '../services/AppContext';
 import { WindowChrome } from '../services/WindowChrome';
 import { Api } from '../services/Api';
 import { UserListPrefetch } from '../services/UserListPrefetch';
+import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { LineAuto } from '../services/LineAuto';
 import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
@@ -134,6 +135,8 @@ export default class EntryAbility extends UIAbility {
       this.setupWindow(windowStage);
       // 收藏/历史详情预取：延迟约 1.2s 后台预热（内部不阻塞），打开「我的」直接命中共享详情缓存。
       UserListPrefetch.warm();
+      // 页面级预热：排行榜/吃瓜/专题/热搜词/频道首屏，打开对应页面直接用缓存渲染，避免先骨架。
+      ScreenPrefetch.warm();
     });
   }
 
