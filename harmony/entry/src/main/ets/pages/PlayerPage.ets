@@ -266,6 +266,15 @@ export struct PlayerPage {
     return this.windowW > 0 && this.contentW > 0 && this.contentW + 2 < this.windowW;
   }
 
+  /** 播放页返回统一入口：全屏态先退全屏（与系统返回键一致），否则真正返回。 */
+  private handlePlayerBack(): void {
+    if (this.forceFullscreen) {
+      this.togglePaneFullscreen();
+      return;
+    }
+    this.navStack.pop();
+  }
+
   /** 平行视窗下显示「全屏/退出全屏」；全屏时按钮用于回到分栏。 */
   private canToggleFullscreen(): boolean {
     return this.inSplitPane() || this.forceFullscreen;
@@ -362,7 +371,7 @@ export struct PlayerPage {
       AppStorage.setOrCreate<boolean>(K_FORCE_FULLSCREEN, false);
     }
     WindowChrome.showStatusBar();
-    WindowChrome.syncSystemBarColors(UserPrefs.dark());
+    WindowChrome.syncSystemBarColors(UserPrefs.dark(), false);
     // 离开播放页恢复系统熄屏策略，避免整机一直常亮。
     WindowChrome.setKeepScreenOn(false);
     LineAuto.stopWatch();
@@ -389,7 +398,7 @@ export struct PlayerPage {
       WindowChrome.syncSystemBarColors(true, true);
     } else {
       WindowChrome.showStatusBar();
-      WindowChrome.syncSystemBarColors(UserPrefs.dark());
+      WindowChrome.syncSystemBarColors(UserPrefs.dark(), false);
     }
   }
 
@@ -1577,7 +1586,7 @@ export struct PlayerPage {
     const topRight: number = this.rightInset + HgSpace.l;
     if (py <= this.topSafePad() + hit + HgSpace.s) {
       if (px <= topLeft + hit) {
-        this.navStack.pop();
+        this.handlePlayerBack();
         return true;
       }
       if (px >= w - topRight - hit) {
@@ -2538,7 +2547,7 @@ export struct PlayerPage {
         .borderRadius(HgSize.hitTarget / 2)
         .backgroundColor(HgColor.videoChip)
         .onClick(() => {
-          this.navStack.pop();
+          this.handlePlayerBack();
         })
         .accessibilityText('返回')
 
@@ -3702,6 +3711,11 @@ export struct PlayerPage {
         return;
       }
       this.pageShown = true;
+      // 非分栏/全屏态确保面板不透明（避免旋转竞态下停留在 aboutToAppear 的初始 0 透明度）。
+      if (!this.inSplitPane() || this.forceFullscreen) {
+        this.paneOpacity = 1;
+        this.paneOffsetX = 0;
+      }
       this.syncPaneBars();
       if (this.inSplitPane() && !this.forceFullscreen) {
         if (!this.paneEntered) {
@@ -3728,7 +3742,7 @@ export struct PlayerPage {
     .onHidden(() => {
       this.pageShown = false;
       WindowChrome.showStatusBar();
-      WindowChrome.syncSystemBarColors(UserPrefs.dark());
+      WindowChrome.syncSystemBarColors(UserPrefs.dark(), false);
       WindowChrome.setKeepScreenOn(false);
       this.service.setActive(false);
       MediaPrefetch.pause();

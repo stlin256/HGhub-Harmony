@@ -64,9 +64,32 @@ export class WindowChrome {
    * API23/平板在深色主题下系统导航栏默认可能仍是白色，只设透明色并不能保证系统
    * 绘制出与页面一致的底色，这里直接下发具体 ARGB 色值。
    */
-  static syncSystemBarColors(dark: boolean, playerDark: boolean = false): void {
+  /** 当前是否播放页（恒黑导航栏）：作为目标状态保存，窗口/主题刷新不会把它覆盖回浅色。 */
+  private static playerDark: boolean = false;
+  /** 上次已下发的配色，重复调用（resize/avoidArea 抖动）直接跳过，避免状态栏闪烁。 */
+  private static lastBarDark: boolean = false;
+  private static lastBarPlayerDark: boolean = false;
+  private static barColorsSent: boolean = false;
+
+  /**
+   * 下发系统栏配色。
+   * @param playerDark 传入则更新目标状态（播放页 true/离开 false）；不传则沿用上次目标，
+   *                   这样 EntryAbility/Index 的主题刷新不会把播放页的纯黑导航栏回刷成页面色。
+   */
+  static syncSystemBarColors(dark: boolean, playerDark?: boolean): void {
+    if (playerDark !== undefined && playerDark !== null) {
+      WindowChrome.playerDark = playerDark;
+    }
+    const pd: boolean = WindowChrome.playerDark;
+    if (WindowChrome.barColorsSent && WindowChrome.lastBarDark === dark &&
+      WindowChrome.lastBarPlayerDark === pd) {
+      return;
+    }
+    WindowChrome.barColorsSent = true;
+    WindowChrome.lastBarDark = dark;
+    WindowChrome.lastBarPlayerDark = pd;
     WindowChrome.queue = WindowChrome.queue.then((): Promise<void> => {
-      return WindowChrome.syncColors(dark, playerDark);
+      return WindowChrome.syncColors(dark, pd);
     }).catch(() => {
     });
   }

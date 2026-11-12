@@ -165,13 +165,13 @@ struct Index {
       return;
     }
     this.tabletNoticeChecked = true;
-    const version: string = Api.appVersion();
-    if (Prefs.getString('tablet_notice_version', '') === version) {
-      return;
-    }
-    // 等首帧稳定后再开弹窗；版本记录放到「我知道了」关闭回调，open 失败时下次启动还会再提示。
+    // 等首帧稳定、Prefs 初始化完成后再读版本；版本记录放到「我知道了」关闭回调，open 失败时下次启动还会再提示。
     setTimeout(() => {
       try {
+        const version: string = Api.appVersion();
+        if (Prefs.getString('tablet_notice_version', '') === version) {
+          return;
+        }
         this.tabletDialog = new CustomDialogController({
           builder: TabletNoticeDialog({
             dark: this.dark,
@@ -227,19 +227,22 @@ struct Index {
       return;
     }
     this.navApplying = true;
-    // 回到根页面时复位全屏标记，保证下次打开内容页仍按平行视窗展示。
-    if (!hasContent && AppStorage.get<boolean>(K_FORCE_FULLSCREEN) === true) {
-      AppStorage.setOrCreate<boolean>(K_FORCE_FULLSCREEN, false);
+    try {
+      const wide: boolean = this.windowW >= HgResponsive.EXPANDED;
+      // 回根页面或窗口已窄到不可能是分栏时复位全屏标记，避免窄窗下返回键要按两次。
+      if ((!hasContent || !wide) && AppStorage.get<boolean>(K_FORCE_FULLSCREEN) === true) {
+        AppStorage.setOrCreate<boolean>(K_FORCE_FULLSCREEN, false);
+      }
+      const forceFull: boolean = AppStorage.get<boolean>(K_FORCE_FULLSCREEN) === true;
+      this.navEmpty = !hasContent;
+      this.navSplit = wide && hasContent && !forceFull;
+      const navW: number = this.navSplit ? this.navBarWidth() : this.windowW;
+      const contentW: number = this.navSplit ? Math.max(320, this.windowW - navW) : this.windowW;
+      AppStorage.setOrCreate<number>(K_NAV_W, navW);
+      AppStorage.setOrCreate<number>(K_CONTENT_W, contentW);
+    } finally {
+      this.navApplying = false;
     }
-    const wide: boolean = this.windowW >= HgResponsive.EXPANDED;
-    const forceFull: boolean = AppStorage.get<boolean>(K_FORCE_FULLSCREEN) === true;
-    this.navEmpty = !hasContent;
-    this.navSplit = wide && hasContent && !forceFull;
-    const navW: number = this.navSplit ? this.navBarWidth() : this.windowW;
-    const contentW: number = this.navSplit ? Math.max(320, this.windowW - navW) : this.windowW;
-    AppStorage.setOrCreate<number>(K_NAV_W, navW);
-    AppStorage.setOrCreate<number>(K_CONTENT_W, contentW);
-    this.navApplying = false;
   }
 
   onBackPress(): boolean {

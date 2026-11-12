@@ -10,17 +10,17 @@ export struct TabletNoticeDialog {
 
   build() {
     Column({ space: HgSpace.m }) {
-      Text('平板适配提示')
+      Text('平板 / 大屏适配提示')
         .width('100%')
         .fontSize(HgFont.pageTitle)
         .fontWeight(HgFont.weightBold)
         .fontColor(HgColor.textPrimary(this.dark))
-      Text('开发者没有平板设备，平板/大屏布局尚未实机验证，可能存在界面或交互问题。')
+      Text('开发者没有平板设备，平板 / 大屏 / PC 布局尚未实机验证，可能存在界面或交互问题。')
         .width('100%')
         .fontSize(HgFont.secondary)
         .fontColor(HgColor.textSecondary(this.dark))
         .lineHeight(HgFont.lineBody)
-      Text('如果遇到 bug，欢迎通过 GitHub Issue 反馈（README 有入口），帮助我们改进平板体验。')
+      Text('如果遇到 bug，欢迎通过 GitHub Issue 反馈（README 有入口），帮助我们改进大屏体验。')
         .width('100%')
         .fontSize(HgFont.secondary)
         .fontColor(HgColor.textTertiary(this.dark))
