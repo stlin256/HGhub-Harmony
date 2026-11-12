@@ -6,6 +6,7 @@ import {
 } from '../state/UserPrefs';
 import { HgResponsive } from '../design/HgResponsive';
 import { UiBus } from '../services/UiBus';
+import { ContinuationState, ContinuePayload } from '../services/ContinuationState';
 import { HgColor, HgFont, HgSize } from '../design/HgTokens';
 import { HomePage } from './HomePage';
 import { SearchPage } from './SearchPage';
@@ -56,6 +57,23 @@ struct Index {
 
   aboutToAppear(): void {
     hilog.info(0x0000, 'HGBoot', 'app init build=cover-debug-2');
+    // 应用接续：目标设备收到播放上下文后，直接打开播放页对应位置（只消费一次）。
+    const cont: ContinuePayload | undefined = ContinuationState.take();
+    if (cont !== undefined && cont.videoId > 0) {
+      const ids: number[] = cont.ids !== undefined && cont.ids !== null && cont.ids.length > 0 ?
+        cont.ids : [cont.videoId];
+      const param: PlayerParam = {
+        videoIds: ids,
+        index: cont.index >= 0 && cont.index < ids.length ? cont.index : 0,
+        title: cont.title,
+        source: cont.source,
+        feedKind: cont.feedKind,
+        startEp: cont.ep > 0 ? cont.ep : 1,
+        startTime: cont.positionMs > 0 ? cont.positionMs / 1000 : 0
+      };
+      this.navStack.pushPathByName(ROUTE_PLAYER, param);
+      hilog.info(0x0000, 'HGBoot', 'continuation resumed id=' + cont.videoId);
+    }
     hilog.info(0x0000, 'HGBoot', 'HdsTabs floating bar ready');
     UiBus.openLogin = () => {
       // 本 App 不再支持账号登录：任何登录入口统一提示，避免弹空表单。
