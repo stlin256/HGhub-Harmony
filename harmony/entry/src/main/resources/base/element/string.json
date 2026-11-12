@@ -1,7 +1,32 @@
 {
   "string": [
-    { "name": "module_desc", "value": "HGhub HarmonyOS 客户端" },
-    { "name": "EntryAbility_desc", "value": "HGhub 主入口" },
-    { "name": "EntryAbility_label", "value": "HGhub" }
+    {
+      "name": "module_desc",
+      "value": "HGhub HarmonyOS 客户端"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "HGhub 主入口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "HGhub"
+    },
+    {
+      "name": "EntryFormAbility_desc",
+      "value": "HGhub 卡片入口"
+    },
+    {
+      "name": "EntryFormAbility_label",
+      "value": "HGhub 卡片"
+    },
+    {
+      "name": "widget_display_name",
+      "value": "HGhub 卡片"
+    },
+    {
+      "name": "widget_desc",
+      "value": "展示最近观看进度"
+    }
   ]
 }
