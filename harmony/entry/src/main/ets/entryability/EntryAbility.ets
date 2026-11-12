@@ -6,6 +6,7 @@ import { AppContext } from '../services/AppContext';
 import { Api } from '../services/Api';
 import { LineAuto } from '../services/LineAuto';
 import { CrashGuard } from '../services/CrashGuard';
+import { PerfMark } from '../utils/PerfMark';
 import { RecService } from '../recommend/RecService';
 import { Prefs } from '../services/Prefs';
 import { Session } from '../services/Session';
@@ -21,6 +22,7 @@ const TAG = 'HGhub';
 export default class EntryAbility extends UIAbility {
   private density: number = 3.5;
   onCreate(): void {
+    PerfMark.start('startup');
     AppContext.init(this.context);
     const systemDark: boolean = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
@@ -96,6 +98,8 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, TAG, 'Main page loaded');
+      // 启动耗时：onCreate → 首帧加载完成（本地记录，不上报）。
+      PerfMark.recordStartup(PerfMark.end('startup'));
       this.setupKeyboardAvoidMode(windowStage);
       this.setupWindow(windowStage);
     });
