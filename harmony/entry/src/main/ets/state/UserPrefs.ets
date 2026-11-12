@@ -40,6 +40,8 @@ export const K_TOP_INSET = 'hgTopInset';
 export const K_BOTTOM_INSET = 'hgBottomInset';
 export const K_APP_ACTIVE = 'hgAppActive';
 export const K_SYSTEM_DARK = 'hgSystemDark';
+/** 平行视窗下用户主动点「全屏」：临时关闭分栏，让播放页/内容页占满整窗（离开播放页自动复位）。 */
+export const K_FORCE_FULLSCREEN = 'hgForceFullscreen';
 
 const HISTORY_MAX: number = 80;
 const SEARCH_HIST_MAX: number = 12;
