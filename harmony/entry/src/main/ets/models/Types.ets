@@ -42,6 +42,50 @@ export interface Pagination {
   total: number;
 }
 
+/** 专题（上游 /api/topics）。 */
+export interface Topic {
+  id: number;
+  title: string;
+  slug: string;
+  cover: string;
+  intro: string;
+  video_count: number;
+}
+
+/** 专题详情（上游 /api/topics/{slug}）。 */
+export interface TopicDetail {
+  topic: Topic;
+  videos: Paged<VideoCard>;
+  related: Topic[];
+}
+
+/** 热搜词（上游 /api/search/hot）。 */
+export interface HotWord {
+  heat: number;
+  word: string;
+}
+
+/** 用户统计（上游 /api/users/{uid}.counts）。 */
+export interface UserCounts {
+  video: number;
+  post: number;
+  collect: number;
+  follower: number;
+  following: number;
+  like: number;
+}
+
+/** 用户资料（上游 /api/users/{uid}）。 */
+export interface UserProfile {
+  id: number;
+  nickname: string;
+  username: string;
+  avatar: string;
+  desc: string;
+  sign: string;
+  counts: UserCounts;
+}
+
 export interface Paged<T> {
   items: T[];
   pagination: Pagination;
