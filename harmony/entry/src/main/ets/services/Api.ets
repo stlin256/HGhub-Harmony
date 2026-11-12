@@ -9,9 +9,14 @@ import { LineAuto } from './LineAuto';
 import { UserPrefs } from '../state/UserPrefs';
 import { isSafeWebUrl, parseBoundedJson, parseWebUrl } from '../utils/Security';
 import {
-  BootInfo, CommentPage, Detail, LineMirrors, LineProbe, LoginResult, Paged, PlaybackInfo, PlayInfo, Post,
-  RankResult, SearchResult, UpdateInfo, User, VideoCard
+  BootInfo, CommentPage, Detail, HotWord, LineMirrors, LineProbe, LoginResult, Paged, PlaybackInfo, PlayInfo, Post,
+  RankResult, SearchResult, Topic, TopicDetail, UpdateInfo, User, UserProfile, VideoCard
 } from '../models/Types';
+
+/** /api/search/hot 的响应外壳。 */
+interface HotSearchPayload {
+  items?: HotWord[];
+}
 
 interface EmptyRequest {
 }
@@ -324,10 +329,74 @@ export class Api {
     return requireObject(data) as RankResult;
   }
 
-  static async search(keyword: string, page: number, size: number): Promise<SearchResult> {
-    const data = await Api.edge('GET',
-      '/api/search?q=' + q(keyword) + '&page=' + page + '&size=' + size, null);
+  /**
+   * 搜索。
+   * @param kind 'video'（短剧，默认）或 'post'（吃瓜帖）
+   */
+  static async search(keyword: string, page: number, size: number,
+    kind: string = 'video'): Promise<SearchResult> {
+    let path = '/api/search?q=' + q(keyword) + '&page=' + page + '&size=' + size;
+    if (kind === 'post') {
+      path = path + '&type=post';
+    }
+    const data = await Api.edge('GET', path, null);
     return requireObject(data) as SearchResult;
+  }
+
+  /* ── 专题 / 热搜 / 用户 / 关注流 ───────────────────── */
+
+  /** 专题列表。 */
+  static async topics(page: number, size: number): Promise<Paged<Topic>> {
+    const data = await Api.edge('GET', '/api/topics?page=' + page + '&size=' + size, null);
+    return requireObject(data) as Paged<Topic>;
+  }
+
+  /** 专题详情（含前 20 条视频与相关专题）。 */
+  static async topic(slug: string): Promise<TopicDetail> {
+    const data = await Api.edge('GET', '/api/topics/' + q(slug), null);
+    return requireObject(data) as TopicDetail;
+  }
+
+  /** 专题视频分页。 */
+  static async topicVideos(id: number, page: number, size: number): Promise<Paged<VideoCard>> {
+    const data = await Api.edge('GET',
+      '/api/videos?topic_id=' + id + '&page=' + page + '&size=' + size, null);
+    return requireObject(data) as Paged<VideoCard>;
+  }
+
+  /** 实时热搜词（失败返回空数组，调用方回退本地常量）。 */
+  static async hotSearch(): Promise<HotWord[]> {
+    try {
+      const data = await Api.edge('GET', '/api/search/hot', null);
+      const payload = requireObject(data) as HotSearchPayload;
+      const items: HotWord[] | undefined = payload.items;
+      if (items === undefined || items === null) {
+        return [];
+      }
+      return items;
+    } catch (err) {
+      return [];
+    }
+  }
+
+  /** 关注流（需登录；游客调用返回普通 feed）。 */
+  static async followFeed(page: number, size: number): Promise<Paged<VideoCard>> {
+    const data = await Api.edge('GET',
+      '/api/videos?type=follow&page=' + page + '&size=' + size, null);
+    return requireObject(data) as Paged<VideoCard>;
+  }
+
+  /** 用户资料。 */
+  static async user(uid: number): Promise<UserProfile> {
+    const data = await Api.edge('GET', '/api/users/' + uid, null);
+    return requireObject(data) as UserProfile;
+  }
+
+  /** 用户作品分页（上游按 user_id 过滤）。 */
+  static async userVideos(uid: number, page: number, size: number): Promise<Paged<VideoCard>> {
+    const data = await Api.edge('GET',
+      '/api/videos?user_id=' + uid + '&page=' + page + '&size=' + size, null);
+    return requireObject(data) as Paged<VideoCard>;
   }
 
   static async posts(page: number, size: number): Promise<Paged<Post>> {
