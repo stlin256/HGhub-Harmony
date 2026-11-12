@@ -14,6 +14,11 @@ import { fmt, fmtTime } from '../utils/Format';
 
 const MAX_CARDS: number = 12;
 const FETCH_CONCURRENCY: number = 4;
+/** 切 Tab 过渡：旧列表淡出 / 新列表淡入时长（任务指定 110ms / 170ms；HgTokens 无对应档位）。 */
+const SWITCH_FADE_OUT_MS: number = 110;
+const SWITCH_FADE_IN_MS: number = 170;
+/** 换数据后等一帧再对齐滚动位置（此时列表透明度仍很低，校正不可见）。 */
+const SCROLL_RESTORE_DELAY_MS: number = 32;
 
 /** 我的：资料卡 + 收藏/历史双 Tab（本地数据 + 详情 N+1 并发拉取，失败跳过）+ 设置入口。 */
 @Component
@@ -28,6 +33,8 @@ export struct ProfilePage {
   @StorageProp(K_FAVS) @Watch('onStoreChanged') favsJson: string = '[]';
   @StorageProp(K_HISTORY) @Watch('onStoreChanged') historyJson: string = '[]';
   @State tab: string = 'fav';
+  /** 当前列表内容实际所属 Tab（过渡期间 tab 先切、列表后换，旧列表按旧 Tab 语义渲染，避免角标闪烁）。 */
+  @State private displayTab: string = 'fav';
   @State cards: Detail[] = [];
   @State cardsLoading: boolean = false;
   @State cardError: string = '';
@@ -50,6 +57,17 @@ export struct ProfilePage {
   private warmSeen: number[] = [];
   /** 组件是否已挂载：异步回包后不再对已卸载的页面 setState。 */
   private active: boolean = false;
+  /** 页面滚动控制器：收藏/历史各自记录滚动位置，切 Tab 后无动画恢复，避免回顶。 */
+  private scroller: Scroller = new Scroller();
+  /** 收藏 / 历史各自上次的滚动偏移（vp）。 */
+  private favScrollY: number = 0;
+  private historyScrollY: number = 0;
+  /** 切 Tab 过渡定时器（与 cardsFadeTimer 分开，互不打断）。 */
+  private switchTimer: number = -1;
+  /** 无缓存切 Tab：目标 Tab 数据就绪后再交叉淡入（期间保留旧列表，禁止骨架闪）。 */
+  private swapPending: boolean = false;
+  /** 淡出窗口内 loadCards 暂不回写 cards，等过渡节点统一换数据，避免硬切。 */
+  private transitioning: boolean = false;
 
   /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
   private contentGutter(): number {
@@ -99,11 +117,10 @@ export struct ProfilePage {
   }
 
   aboutToDisappear(): void {
+    this.saveScrollOffset();
     this.active = false;
-    if (this.cardsFadeTimer >= 0) {
-      clearTimeout(this.cardsFadeTimer);
-      this.cardsFadeTimer = -1;
-    }
+    this.clearSwitchTimer();
+    this.clearFadeTimer();
   }
 
   onUserChanged(): void {
@@ -166,8 +183,9 @@ export struct ProfilePage {
     }
   }
 
-  private tabIds(): number[] {
-    if (this.tab === 'fav') {
+  /** 指定 Tab 的视频 id 列表（收藏在前，历史按最近观看）。 */
+  private idsForTab(tab: string): number[] {
+    if (tab === 'fav') {
       return UserPrefs.favs();
     }
     const ids: number[] = [];
@@ -175,6 +193,22 @@ export struct ProfilePage {
       ids.push(this.historyList[i].id);
     }
     return ids;
+  }
+
+  private tabIds(): number[] {
+    return this.idsForTab(this.tab);
+  }
+
+  /** 同步取目标 id 的缓存详情（Api 共享详情缓存；顺序不变、缺失跳过，Detail 对象直接复用）。 */
+  private cachedCards(ids: number[]): Detail[] {
+    const out: Detail[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      const hit: Detail | null = Api.peekVideo(ids[i]);
+      if (hit !== null) {
+        out.push(hit);
+      }
+    }
+    return out;
   }
 
   /** 卡片详情统一走 Api 的共享详情缓存（避免与详情页重复请求）。 */
@@ -213,6 +247,107 @@ export struct ProfilePage {
     return out;
   }
 
+  /** 无缓存切 Tab 的数据就绪钩子：首批卡片可用时启动交叉淡入（只触发一次）。 */
+  private beginSwapAfterData(target: number[]): void {
+    if (this.transitioning) {
+      return;
+    }
+    this.swapPending = false;
+    const tab: string = this.tab;
+    this.startCrossFade(() => {
+      this.displayTab = tab;
+      this.cards = this.mergeCards(target);
+      this.cardsLoading = false;
+      this.restoreScroll(tab);
+    });
+  }
+
+  /**
+   * 交叉淡入换数据：旧列表淡出 110ms → swap 换数据 → 新列表淡入 170ms。
+   * 淡出窗口内 loadCards 不回写 cards（transitioning=true），保证换数据只发生在透明度最低点。
+   */
+  private startCrossFade(swap: () => void): void {
+    this.clearSwitchTimer();
+    this.clearFadeTimer();
+    this.transitioning = true;
+    animateTo({ duration: SWITCH_FADE_OUT_MS, curve: Curve.FastOutSlowIn }, () => {
+      this.cardsFade = 0;
+    });
+    this.switchTimer = setTimeout(() => {
+      this.switchTimer = -1;
+      this.transitioning = false;
+      try {
+        swap();
+      } catch (err) {
+      }
+      // 无论换数据是否异常都要淡回可见，避免列表停留在透明态。
+      animateTo({ duration: SWITCH_FADE_IN_MS, curve: Curve.FastOutSlowIn }, () => {
+        this.cardsFade = 1;
+      });
+    }, SWITCH_FADE_OUT_MS);
+  }
+
+  /** 取消未完成的列表淡入定时器（避免与切 Tab 过渡互相打断）。 */
+  private clearFadeTimer(): void {
+    if (this.cardsFadeTimer >= 0) {
+      clearTimeout(this.cardsFadeTimer);
+      this.cardsFadeTimer = -1;
+    }
+  }
+
+  /** 取消未完成的切 Tab 过渡（再次切换 / 页面卸载）。 */
+  private clearSwitchTimer(): void {
+    if (this.switchTimer >= 0) {
+      clearTimeout(this.switchTimer);
+      this.switchTimer = -1;
+    }
+    this.transitioning = false;
+    this.swapPending = false;
+  }
+
+  /** 记录当前展示 Tab 的滚动偏移（滚动 / 切 Tab / 页面卸载时调用）。 */
+  private saveScrollOffset(): void {
+    try {
+      const y: number = this.scroller.currentOffset().yOffset;
+      if (this.displayTab === 'fav') {
+        this.favScrollY = y;
+      } else {
+        this.historyScrollY = y;
+      }
+    } catch (err) {
+    }
+  }
+
+  /** 恢复目标 Tab 上次的滚动位置：换数据后先对齐一次（列表接近透明），下一帧再校正一次。 */
+  private restoreScroll(tab: string): void {
+    const y: number = tab === 'fav' ? this.favScrollY : this.historyScrollY;
+    this.scrollToY(y);
+    if (y > 0) {
+      setTimeout(() => {
+        if (this.active && this.displayTab === tab) {
+          this.scrollToY(y);
+        }
+      }, SCROLL_RESTORE_DELAY_MS);
+    }
+  }
+
+  /** 无动画滚动到指定纵向偏移（超出内容高度时由 Scroll 自动钳制，不会跳顶）。 */
+  private scrollToY(y: number): void {
+    try {
+      this.scroller.scrollTo({ xOffset: 0, yOffset: y, animation: false });
+    } catch (err) {
+    }
+  }
+
+  /** 网格 tile 稳定 key：有卡片用视频 id（跨 Tab 复用组件，避免封面重载），空格用行列占位。 */
+  private tileKey(rowIndex: number, column: number): string {
+    const index: number = rowIndex * this.gridCols() + column;
+    if (index < this.cards.length) {
+      return 'tile-' + this.cards[index].id;
+    }
+    return 'blank-' + rowIndex + '-' + column + '-' + this.gridCols();
+  }
+
   private async loadCards(): Promise<void> {
     const seq = ++this.loadSeq;
     if (!this.active) {
@@ -221,6 +356,14 @@ export struct ProfilePage {
     const ids: number[] = this.tabIds();
     const target: number[] = ids.slice(0, MAX_CARDS);
     if (target.length === 0) {
+      if (this.swapPending) {
+        // 目标 Tab 为空：交叉淡入到空态，不硬切、不闪骨架。
+        this.beginSwapAfterData(target);
+        return;
+      }
+      if (this.transitioning) {
+        return;
+      }
       this.cards = [];
       this.cardsLoading = false;
       this.cardError = '';
@@ -232,11 +375,17 @@ export struct ProfilePage {
     // 命中即 cardsLoading=false 并直接淡入，不再先空白/骨架等网络。
     const shown: Detail[] = this.mergeCards(target);
     if (shown.length > 0) {
-      this.cards = shown;
-      this.cardsLoading = false;
-      this.scheduleCardsFadeIn();
-    } else {
-      this.cardsLoading = true;
+      if (this.swapPending) {
+        // 无缓存切 Tab 的首批数据：走交叉淡入，不直接换数据。
+        this.beginSwapAfterData(target);
+      } else if (!this.transitioning) {
+        this.cards = shown;
+        this.cardsLoading = false;
+        this.scheduleCardsFadeIn();
+      }
+    } else if (!this.swapPending) {
+      // 有旧列表时保持展示（不闪骨架）；空列表才进入骨架态。
+      this.cardsLoading = this.cards.length === 0;
     }
     const missing: number[] = this.missingIds(target);
     if (missing.length === 0) {
@@ -256,16 +405,22 @@ export struct ProfilePage {
         // 每批补齐后按 target 顺序增量更新：已展示卡片继续保留，不清空、不闪骨架。
         const merged: Detail[] = this.mergeCards(target);
         if (merged.length > 0) {
-          this.cards = merged;
-          this.cardsLoading = false;
+          if (this.swapPending) {
+            this.beginSwapAfterData(target);
+          } else if (!this.transitioning) {
+            this.cards = merged;
+            this.cardsLoading = false;
+          }
         }
         index += FETCH_CONCURRENCY;
       }
       if (seq !== this.loadSeq || !this.active) {
         return;
       }
-      this.cards = this.mergeCards(target);
-      this.cardError = '';
+      if (!this.transitioning && !this.swapPending) {
+        this.cards = this.mergeCards(target);
+        this.cardError = '';
+      }
     } catch (err) {
       if (seq === this.loadSeq && this.active) {
         this.cardError = (err as Error).message;
@@ -273,13 +428,19 @@ export struct ProfilePage {
     } finally {
       if (seq === this.loadSeq && this.active) {
         this.cardsLoading = false;
-        this.scheduleCardsFadeIn();
+        if (!this.transitioning && !this.swapPending) {
+          this.scheduleCardsFadeIn();
+        }
       }
     }
   }
 
   /** 数据落定后把列表透明度从 0 淡回 1（140ms），与切 Tab/清空历史的淡出配对。 */
   private scheduleCardsFadeIn(): void {
+    if (this.cardsFade >= 1) {
+      // 已可见：无需再淡入，也避免打断切 Tab 的 170ms 淡入动画。
+      return;
+    }
     if (this.cardsFadeTimer >= 0) {
       clearTimeout(this.cardsFadeTimer);
     }
@@ -291,16 +452,42 @@ export struct ProfilePage {
     }, 40);
   }
 
+  /**
+   * 切 Tab：不清空列表（避免内容高度骤变导致跳顶/骨架闪、封面重载）。
+   * 有缓存：旧列表淡出 110ms → 换数据 → 新列表淡入 170ms；
+   * 无缓存：保留旧列表展示，loadCards 数据就绪后再交叉淡入（禁止骨架闪）。
+   */
   private switchTab(tab: string): void {
     if (this.tab === tab) {
       return;
     }
-    // 分段切换：旧列表 140ms 淡出 → 换数据 → 新列表淡入（交叉淡入观感）。
-    this.cardsFade = 0;
+    // 先记住当前 Tab 的滚动位置，稍后恢复目标 Tab 自己的位置。
+    this.saveScrollOffset();
+    this.clearSwitchTimer();
+    this.clearFadeTimer();
+    // 取消旧 Tab 的在途加载，防止过期批次回写。
+    this.loadSeq++;
     this.tab = tab;
-    this.cards = [];
-    this.warmSeen = this.tabIds().slice(0, MAX_CARDS);
-    this.loadCards();
+    const target: number[] = this.idsForTab(tab).slice(0, MAX_CARDS);
+    this.warmSeen = target;
+    const cached: Detail[] = this.cachedCards(target);
+    if (cached.length > 0) {
+      // 目标 Tab 有缓存：立即过渡换数据，缺失详情由 loadCards 后台补齐（merge 保留已展示卡片）。
+      this.cardsLoading = false;
+      this.startCrossFade(() => {
+        this.displayTab = tab;
+        // 换数据时按缓存重算（过渡期间后台补齐的详情不会丢）。
+        this.cards = this.mergeCards(target);
+        this.cardsLoading = false;
+        this.restoreScroll(tab);
+      });
+      this.loadCards();
+    } else {
+      // 目标 Tab 无缓存：保留旧列表/空态继续展示（禁止骨架闪），数据就绪后再交叉淡入。
+      this.swapPending = true;
+      this.cardsLoading = false;
+      this.loadCards();
+    }
   }
 
   private progressLabel(id: number): string {
@@ -333,11 +520,11 @@ export struct ProfilePage {
     for (let i = 0; i < this.cards.length; i++) {
       ids.push(this.cards[i].id);
     }
-    const progress = this.tab === 'history' ? this.progressOf(item.id) : undefined;
+    const progress = this.displayTab === 'history' ? this.progressOf(item.id) : undefined;
     const param: PlayerParam = {
       videoIds: ids,
       index: index,
-      title: this.tab === 'fav' ? '我的收藏' : '观看历史',
+      title: this.displayTab === 'fav' ? '我的收藏' : '观看历史',
       source: 'profile',
       feedKind: 'video',
       startEp: progress !== undefined ? progress.ep : 1,
@@ -575,7 +762,7 @@ export struct ProfilePage {
         .height('55%')
         .linearGradient({ angle: 180, colors: [['#00000000', 0.0], ['#CC000000', 1.0]] })
       Column({ space: HgSpace.xs }) {
-        if (this.tab === 'history' && this.progressLabel(item.id).length > 0) {
+        if (this.displayTab === 'history' && this.progressLabel(item.id).length > 0) {
           Row({ space: 2 }) {
             Text(this.progressLabel(item.id))
               .fontSize(HgFont.nano)
@@ -623,7 +810,7 @@ export struct ProfilePage {
           Column()
             .layoutWeight(1)
         }
-      }, (column: number) => 'col-' + rowIndex + '-' + column + '-' + this.gridCols())
+      }, (column: number) => this.tileKey(rowIndex, column))
     }
     .width('100%')
     .alignItems(VerticalAlign.Top)
@@ -652,10 +839,10 @@ export struct ProfilePage {
       Column() {
         HgEmptyState({
           dark: this.dark,
-          title: this.tab === 'fav' ? '还没有收藏' : '还没有观看记录',
-          description: this.tab === 'fav' ? '在剧集页点收藏，之后就能在这里找到' : '看过的剧集会出现在这里',
+          title: this.displayTab === 'fav' ? '还没有收藏' : '还没有观看记录',
+          description: this.displayTab === 'fav' ? '在剧集页点收藏，之后就能在这里找到' : '看过的剧集会出现在这里',
           actionText: '去逛逛',
-          glyph: this.tab === 'fav' ? $r('sys.symbol.star') : $r('sys.symbol.play_fill'),
+          glyph: this.displayTab === 'fav' ? $r('sys.symbol.star') : $r('sys.symbol.play_fill'),
           onAction: () => {
             this.navStack.pushPathByName(ROUTE_RANKS, null);
           }
@@ -667,8 +854,8 @@ export struct ProfilePage {
       Column({ space: HgSpace.s }) {
         ForEach(this.rowIndexes(), (rowIndex: number) => {
           this.CardRow(rowIndex)
-        }, (rowIndex: number) => 'row-' + rowIndex + '-' + this.tab + '-' + this.gridCols())
-        if (this.tab === 'history') {
+        }, (rowIndex: number) => 'row-' + rowIndex + '-' + this.gridCols())
+        if (this.displayTab === 'history') {
           Text('清空观看历史')
             .width('100%')
             .height(HgSize.secondaryAction)
@@ -771,12 +958,12 @@ export struct ProfilePage {
         bottom: HgSpace.s
       })
 
-      Scroll() {
+      Scroll(this.scroller) {
         Column({ space: HgSpace.l }) {
           this.ProfileCard()
           this.FollowEntry()
           this.Segmented()
-          // 收藏/历史切换、数量变化、清空历史：列表整体淡入淡出（140ms），不做位移。
+          // 切 Tab 用 110/170ms 交叉淡入淡出；数量变化/清空历史仍用 140ms 淡入淡出，不做位移。
           Column() {
             this.CardsArea()
           }
@@ -801,6 +988,10 @@ export struct ProfilePage {
       .align(Alignment.Top)
       .scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring)
+      // 记录收藏/历史各自的滚动位置（onScroll 已废弃，用 onDidScroll + currentOffset 读绝对值）。
+      .onDidScroll((xOffset: number, yOffset: number) => {
+        this.saveScrollOffset();
+      })
     }
     .width('100%')
     .height('100%')
