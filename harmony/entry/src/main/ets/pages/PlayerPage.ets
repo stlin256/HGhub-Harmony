@@ -39,6 +39,10 @@ const TOP_SAFE_FALLBACK: number = HgSpace.xxl;
 const LANDSCAPE_CENTER_Y_RATIO: number = 0.42;
 const LONG_PRESS_MS: number = 380;
 const SEEK_FULL_WIDTH_SECONDS: number = 120;
+/** seek 加载态兜底时长（ms）：seekDone 未回调时也要恢复按钮，避免一直卡在加载圈。 */
+const SEEK_LOADING_MS: number = 2000;
+/** seek 后 onState('playing') 兜底清除的宽限（ms）：避免 play() 恢复早于 seekDone 时闪出暂停图标。 */
+const SEEK_PLAYING_GRACE_MS: number = 600;
 /** 滑动时视频层 Y 位移的方向系数：SwiperAnimationEvent.currentOffset 与页面位移同号时取 1。 */
 const VIDEO_DRAG_SIGN: number = 1;
 /** 宽屏评论侧栏宽度（vp）与最小宽度。 */
@@ -146,6 +150,8 @@ export struct PlayerPage {
   @State bufferedMs: number = 0;
   @State dragging: boolean = false;
   @State dragMs: number = 0;
+  /** seek 进行中（进度条拖动/手势横滑/等待 seekDone）：中央浮层与底部播放按钮显示加载圈，不显示播放/暂停图标。 */
+  @State seeking: boolean = false;
 
   /* ── 控制状态 ─────────────────────────────────────── */
   @State chromeVisible: boolean = true;
@@ -246,6 +252,10 @@ export struct PlayerPage {
   private seekBaseMs: number = 0;
   private boostLock: boolean = false;
   private seekWasPlaying: boolean = false;
+  /** seek 加载态兜底定时器（seekDone 未回调时 2s 后自动清除，避免一直卡加载圈）。 */
+  private seekClearTimer: number = -1;
+  /** 本次 seek 进入加载态的时间：onState('playing') 兜底清除时判断是否已过宽限期。 */
+  private seekStartedAt: number = 0;
 
   /** 当前播放页是否在平行视窗右栏内（非全屏）：左栏列表仍可见时，播放页不应隐藏状态栏/按全屏安全区布局。 */
   private inSplitPane(): boolean {
@@ -427,6 +437,14 @@ export struct PlayerPage {
     };
     this.service.onState = (state: string) => {
       this.playing = state === 'playing';
+      // seek 加载态兜底：新视频就绪/播放结束/播放错误立即清除；恢复播放则等过宽限期再清（正常由 onSeekDone 清除），
+      // 避免 play() 先于 seekDone 时中央/底部按钮提前闪出播放/暂停图标。
+      if (state === 'prepared' || state === 'completed' || state === 'error') {
+        this.stopSeeking();
+      } else if (state === 'playing' && this.seeking &&
+        Date.now() - this.seekStartedAt >= SEEK_PLAYING_GRACE_MS) {
+        this.stopSeeking();
+      }
       if (state === 'playing') {
         this.scheduleHideChrome();
         LineAuto.startWatch();
@@ -501,6 +519,8 @@ export struct PlayerPage {
     };
     this.service.onSeekDone = (ms: number) => {
       this.positionMs = ms;
+      // seek 完成（手势/进度条共用结束点）：恢复中央浮层与底部按钮的播放/暂停图标。
+      this.stopSeeking();
     };
     // 视频原始尺寸 → 重算 XComponent 展示矩形（横屏垂直位置 42%、竖屏 contain/cover 切换）。
     // 尺寸归零（切换视频/集数瞬间）直接复位不播动画，拿到真实尺寸后再平滑过渡。
@@ -562,6 +582,10 @@ export struct PlayerPage {
     if (this.bufferingTimer >= 0) {
       clearTimeout(this.bufferingTimer);
       this.bufferingTimer = -1;
+    }
+    if (this.seekClearTimer >= 0) {
+      clearTimeout(this.seekClearTimer);
+      this.seekClearTimer = -1;
     }
     if (this.tapTimer >= 0) {
       clearTimeout(this.tapTimer);
@@ -1451,6 +1475,8 @@ export struct PlayerPage {
       this.cancelLongPress();
       if (this.gestureMode === 1) {
         this.dragging = false;
+        // 松手才真正跳转：保持加载态直到 seekDone（2s 兜底），恢复播放不提前闪出暂停图标。
+        this.startSeeking();
         this.service.seekTo(this.dragMs);
         this.positionMs = this.dragMs;
         if (this.seekWasPlaying) {
@@ -1620,12 +1646,47 @@ export struct PlayerPage {
   private lastTapAt: number = 0;
 
   private beginSeekPreview(): void {
+    // 拖动/横滑一开始就进入加载态：中央「继续播放」与底部播放/暂停按钮都不显示，直到 seek 完成。
+    this.startSeeking();
     this.seekBaseMs = this.positionMs;
     this.dragMs = this.positionMs;
     this.dragging = true;
     this.seekWasPlaying = this.playing;
     if (this.seekWasPlaying) {
       this.service.pause();
+    }
+  }
+
+  /**
+   * 进入 seek 加载态：中央浮层与底部播放按钮改为 LoadingProgress，避免跳转期间显示播放/暂停图标。
+   * seekDone 未回调时由兜底定时器清除，防止一直卡在加载圈。
+   */
+  private startSeeking(): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.seeking = true;
+    this.seekStartedAt = Date.now();
+    if (this.seekClearTimer >= 0) {
+      clearTimeout(this.seekClearTimer);
+    }
+    this.seekClearTimer = setTimeout(() => {
+      this.seekClearTimer = -1;
+      if (this.destroyed) {
+        return;
+      }
+      this.seeking = false;
+    }, SEEK_LOADING_MS);
+  }
+
+  /** 退出 seek 加载态并清掉兜底定时器（seekDone/取消/就绪/错误共用）。 */
+  private stopSeeking(): void {
+    if (this.seekClearTimer >= 0) {
+      clearTimeout(this.seekClearTimer);
+      this.seekClearTimer = -1;
+    }
+    if (this.seeking) {
+      this.seeking = false;
     }
   }
 
@@ -1673,7 +1734,7 @@ export struct PlayerPage {
   /** 暂停态「继续播放」按钮是否可见（与 OverlayLayer 内的显示条件保持一致）。 */
   private pausedPlayVisible(): boolean {
     return !this.playing && !this.loading && !this.buffering && !this.starting &&
-      this.errorText.length === 0 && !this.ended && !this.dragging;
+      this.errorText.length === 0 && !this.ended && !this.dragging && !this.seeking;
   }
 
   /**
@@ -1681,7 +1742,8 @@ export struct PlayerPage {
    * 暂停态的「继续播放」也要能点；加载/缓冲/拖拽提示保持穿透，不拦手势。
    */
   private overlayInteractive(): boolean {
-    return this.errorText.length > 0 || this.ended || this.pausedPlayVisible();
+    // seek 跳转中不拦截手势：加载态只做视觉提示，避免挡住视频手势/上下滑切条。
+    return !this.seeking && (this.errorText.length > 0 || this.ended || this.pausedPlayVisible());
   }
 
   /** 点浮层空白处：暂停态整层恢复播放；错误/结束态只让按钮生效，避免误触。 */
@@ -2682,10 +2744,13 @@ export struct PlayerPage {
             // 只认「拖动」：轻点进度条右侧也会落在片尾附近，不应被当成看完。
             if (PlayerSeekPolicy.isSeekToEnd(moved, ms, this.durationMs) &&
               this.params.feedKind !== 'post') {
+              this.stopSeeking();
               this.positionMs = ms;
               this.handleCompleted();
               return;
             }
+            // 松手才真正跳转：保持加载态直到 seekDone（2s 兜底），恢复播放不提前闪出暂停图标。
+            this.startSeeking();
             this.service.seekTo(ms);
             this.positionMs = ms;
             if (this.seekWasPlaying) {
@@ -2696,6 +2761,7 @@ export struct PlayerPage {
           onSeekCancel: () => {
             // 拖动被系统打断：不 seek，只把拖动浮层与「拖动前暂停」的状态恢复，避免卡在暂停/浮层常驻。
             this.dragging = false;
+            this.stopSeeking();
             if (this.seekWasPlaying) {
               this.service.play();
             }
@@ -2709,9 +2775,17 @@ export struct PlayerPage {
 
         Row({ space: HgSpace.s }) {
           Stack() {
-            SymbolGlyph(this.playing ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
-              .fontSize(HgIconSize.player)
-              .fontColor([HgColor.videoInk])
+            if (this.seeking || this.buffering || this.loading) {
+              // seek 跳转/缓冲/加载中：播放暂停图标改为加载圈，避免出现「正在加载却显示暂停按钮」的违和状态。
+              LoadingProgress()
+                .width(24)
+                .height(24)
+                .color(HgColor.videoInk)
+            } else {
+              SymbolGlyph(this.playing ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
+                .fontSize(HgIconSize.player)
+                .fontColor([HgColor.videoInk])
+            }
           }
           .width(HgSize.hitTarget)
           .height(HgSize.hitTarget)
@@ -2720,7 +2794,8 @@ export struct PlayerPage {
           .onClick(() => {
             this.togglePlay();
           })
-          .accessibilityText(this.playing ? '暂停' : '播放')
+          .accessibilityText(this.seeking || this.buffering || this.loading ? '正在加载' :
+            (this.playing ? '暂停' : '播放'))
 
           Stack() {
             SymbolGlyph(this.muted ? $r('sys.symbol.speaker_slash') : $r('sys.symbol.speaker_wave_2'))
@@ -2836,7 +2911,23 @@ export struct PlayerPage {
         .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.FastOutSlowIn }))
       }
 
-      if (this.buffering && !this.loading && this.errorText.length === 0) {
+      // seek 跳转中：中央显示加载圈（拖动预览时由下方目标时间浮层表达，避免两层叠在一起）。
+      if (this.seeking && !this.dragging && !this.loading && this.errorText.length === 0) {
+        Column({ space: HgSpace.xs }) {
+          LoadingProgress()
+            .width(32)
+            .height(32)
+            .color(HgColor.videoInk)
+          Text('正在跳转…')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.videoInk2)
+            .maxLines(1)
+        }
+        .alignItems(HorizontalAlign.Center)
+        .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.FastOutSlowIn }))
+      }
+
+      if (this.buffering && !this.loading && !this.seeking && this.errorText.length === 0) {
         Column({ space: HgSpace.xs }) {
           LoadingProgress()
             .width(32)
