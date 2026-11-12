@@ -136,3 +136,11 @@ SearchBar: [图标 + 输入框(自绘占位)] [结果态：返回箭头；idle�
 
 ### 审查
 - 无平板设备：由子代理对平板分栏/导航栏/提示做静态审查，Lead 修复审查问题后再提交。
+
+## 8. 平板改造静态审查记录（无平板设备）
+
+由子代理 tablet-reviewer 只读审查，两轮：
+1) 首轮发现 P0：EntryAbility.updateWindowSize 在 K_WINDOW_W 的 @Watch 同步写入正确栏宽后，又用整窗宽覆盖 K_NAV_W/K_CONTENT_W → 分栏态旋转/resize 布局错乱。另有 P1：播放页分栏 topSafePad 只有 12vp、navStack.clear 后可能卡分栏、平板弹窗宽 86% 过大、旋转跨断点状态栏不重算、全屏下返回直接退出。
+2) 修复后复核：11 项修复全部落实，无新增阻塞；补充 N1-N8（全屏导航栏被回刷、左上返回不一致、窄窗全屏残留、重入缺 try/finally、onShown 透明度、系统栏调用去重、版本读取时机、2in1 文案），已全部修复。
+
+已知系统限制：setWindowSystemBarProperties 在非全屏/非最大化窗口（悬浮窗、系统分屏）不生效，此类窗口下导航栏配色可能仍由系统决定。
