@@ -1,0 +1,20 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "HGhub HarmonyOS 客户端" },
+    { "name": "EntryAbility_desc", "value": "HGhub 主入口" },
+    { "name": "EntryAbility_label", "value": "HGhub" },
+    { "name": "settings_title", "value": "设置" },
+    { "name": "settings_play", "value": "播放" },
+    { "name": "settings_prefer_hevc", "value": "优先高清（HEVC）" },
+    { "name": "settings_prefer_hevc_desc", "value": "有高清源时优先播放，更清晰但更耗流量" },
+    { "name": "settings_network", "value": "网络" },
+    { "name": "settings_other", "value": "其他" },
+    { "name": "settings_crash_log", "value": "崩溃日志" },
+    { "name": "settings_crash_log_empty", "value": "暂无记录 · 仅存本机" },
+    { "name": "settings_crash_log_count", "value": "%d 条本地记录 · 点击复制" },
+    { "name": "tab_home", "value": "首页" },
+    { "name": "tab_search", "value": "搜索" },
+    { "name": "tab_category", "value": "分类" },
+    { "name": "tab_profile", "value": "我的" }
+  ]
+}

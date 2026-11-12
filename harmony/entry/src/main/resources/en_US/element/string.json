@@ -1,0 +1,20 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "HGhub HarmonyOS client" },
+    { "name": "EntryAbility_desc", "value": "HGhub main entry" },
+    { "name": "EntryAbility_label", "value": "HGhub" },
+    { "name": "settings_title", "value": "Settings" },
+    { "name": "settings_play", "value": "Playback" },
+    { "name": "settings_prefer_hevc", "value": "Prefer HD (HEVC)" },
+    { "name": "settings_prefer_hevc_desc", "value": "Play HEVC source when available; sharper but uses more data" },
+    { "name": "settings_network", "value": "Network" },
+    { "name": "settings_other", "value": "Other" },
+    { "name": "settings_crash_log", "value": "Crash log" },
+    { "name": "settings_crash_log_empty", "value": "No records · stored on device only" },
+    { "name": "settings_crash_log_count", "value": "%d local records · tap to copy" },
+    { "name": "tab_home", "value": "Home" },
+    { "name": "tab_search", "value": "Search" },
+    { "name": "tab_category", "value": "Category" },
+    { "name": "tab_profile", "value": "Me" }
+  ]
+}
