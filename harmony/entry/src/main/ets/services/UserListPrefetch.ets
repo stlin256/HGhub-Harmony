@@ -38,6 +38,7 @@ export class UserListPrefetch {
       UserListPrefetch.timer = -1;
       UserListPrefetch.prefetch(UserListPrefetch.localIds()).then(() => {
         UserListPrefetch.backfillLatestHistory();
+        UserListPrefetch.backfillFavoritesMeta();
       }).catch(() => {
       });
     }, WARM_DELAY_MS);
@@ -111,6 +112,26 @@ export class UserListPrefetch {
       }
       UserPrefs.addHistory(last.id, last.ep, last.t, last.dur, detailTitle, detailCover);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'backfill history meta id=%{public}d', last.id);
+    } catch (err) {
+    }
+  }
+
+  /** 旧收藏没有 title/cover：用预热拿到的详情补齐前 4 条，供「收藏影视架」卡片展示。 */
+  private static backfillFavoritesMeta(): void {
+    try {
+      const favs: number[] = UserPrefs.favs();
+      for (let i = 0; i < favs.length && i < 4; i++) {
+        const id: number = favs[i];
+        const detail: Detail | null = Api.peekVideo(id);
+        if (detail === null) {
+          continue;
+        }
+        const title: string = detail.title !== undefined && detail.title !== null ? detail.title : '';
+        const cover: string = detail.cover !== undefined && detail.cover !== null ? detail.cover : '';
+        if (title.length > 0 || cover.length > 0) {
+          UserPrefs.setFavMeta(id, title, cover);
+        }
+      }
     } catch (err) {
     }
   }

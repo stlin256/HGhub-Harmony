@@ -1290,7 +1290,7 @@ export struct PlayerPage {
       // 未登录：收藏只落本地（UserPrefs.toggleFav），不弹登录、不调 Api，计数本地 ±1。
       this.faved = next;
       this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
-      UserPrefs.toggleFav(id);
+      UserPrefs.toggleFav(id, this.title, this.coverUrl);
       RecService.recordFavorite(id, next);
       this.haptic(next ? 18 : 10);
       this.showChrome();
@@ -1300,7 +1300,7 @@ export struct PlayerPage {
     const previousCount = this.collectCount;
     this.faved = next;
     this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
-    UserPrefs.toggleFav(id);
+    UserPrefs.toggleFav(id, this.title, this.coverUrl);
     RecService.recordFavorite(id, next);
     this.haptic(next ? 18 : 10);
     this.showChrome();
@@ -1314,7 +1314,7 @@ export struct PlayerPage {
       }
       this.faved = !next;
       this.collectCount = previousCount;
-      UserPrefs.toggleFav(id);
+      UserPrefs.toggleFav(id, this.title, this.coverUrl);
       UiBus.toast('操作失败，请稍后重试');
     });
   }

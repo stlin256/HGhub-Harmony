@@ -45,6 +45,13 @@ export const K_SYSTEM_DARK = 'hgSystemDark';
 /** 平行视窗下用户主动点「全屏」：临时关闭分栏，让播放页/内容页占满整窗（离开播放页自动复位）。 */
 export const K_FORCE_FULLSCREEN = 'hgForceFullscreen';
 
+/** 收藏元数据（服务卡片展示用）：id + 剧名/封面。 */
+interface FavMetaEntry {
+  id: number;
+  title: string;
+  cover: string;
+}
+
 const HISTORY_MAX: number = 80;
 const SEARCH_HIST_MAX: number = 12;
 
@@ -310,7 +317,7 @@ export class UserPrefs {
     return on;
   }
 
-  static toggleFav(id: number): boolean {
+  static toggleFav(id: number, title: string = '', cover: string = ''): boolean {
     const list = UserPrefs.favs();
     const at = list.indexOf(id);
     let on = false;
@@ -323,7 +330,50 @@ export class UserPrefs {
     const raw = JSON.stringify(list);
     Prefs.putString('favs', raw);
     AppStorage.setOrCreate<string>(K_FAVS, raw);
+    if (on) {
+      UserPrefs.setFavMeta(id, title, cover);
+    } else {
+      UserPrefs.removeFavMeta(id);
+    }
     return on;
+  }
+
+  /** 收藏元数据（服务卡片影视架展示封面用，不含业务状态）。 */
+  static setFavMeta(id: number, title: string, cover: string): void {
+    if (id <= 0) {
+      return;
+    }
+    try {
+      const raw: string = Prefs.getString('fav_meta', '[]');
+      const list = JSON.parse(raw) as FavMetaEntry[];
+      const out: FavMetaEntry[] = [];
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].id !== id) {
+          out.push(list[i]);
+        }
+      }
+      if (title.length > 0 || cover.length > 0) {
+        const entry: FavMetaEntry = { id: id, title: title, cover: cover };
+        out.unshift(entry);
+      }
+      Prefs.putString('fav_meta', JSON.stringify(out.slice(0, 200)));
+    } catch (err) {
+    }
+  }
+
+  static removeFavMeta(id: number): void {
+    try {
+      const raw: string = Prefs.getString('fav_meta', '[]');
+      const list = JSON.parse(raw) as FavMetaEntry[];
+      const out: FavMetaEntry[] = [];
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].id !== id) {
+          out.push(list[i]);
+        }
+      }
+      Prefs.putString('fav_meta', JSON.stringify(out));
+    } catch (err) {
+    }
   }
 
   static follows(): number[] {

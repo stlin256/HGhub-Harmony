@@ -83,6 +83,14 @@
     {
       "name": "widget_desc",
       "value": "展示最近观看进度"
+    },
+    {
+      "name": "widget_favorites_display_name",
+      "value": "我的收藏"
+    },
+    {
+      "name": "widget_favorites_desc",
+      "value": "收藏的短剧影视架"
     }
   ]
 }

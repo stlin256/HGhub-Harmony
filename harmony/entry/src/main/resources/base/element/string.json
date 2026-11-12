@@ -33,6 +33,14 @@
       "value": "展示最近观看进度"
     },
     {
+      "name": "widget_favorites_display_name",
+      "value": "Favorites"
+    },
+    {
+      "name": "widget_favorites_desc",
+      "value": "My favorites shelf"
+    },
+    {
       "name": "settings_title",
       "value": "设置"
     },
