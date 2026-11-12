@@ -3,6 +3,9 @@ import { Comment, CommentPage } from '../../models/Types';
 import { UserPrefs } from '../../state/UserPrefs';
 import { UiBus } from '../../services/UiBus';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../../design/HgTokens';
+import { HgMotion } from '../../design/HgMotion';
+import { HgPressable } from '../HgPressable';
+import { HgSkeletonBlock } from '../HgSkeletonBlock';
 
 const PAGE_SIZE: number = 20;
 
@@ -259,17 +262,20 @@ export struct CommentsSheet {
             .width(HgFont.section)
             .height(HgFont.section)
             .color(HgColor.onAccent(this.dark))
+            .transition(HgMotion.fadeIn(HgMotion.fast))
         } else {
           SymbolGlyph($r('sys.symbol.arrowshape_turn_up_right'))
             .fontSize(HgFont.section)
             .fontColor([this.draft.trim().length > 0 ? HgColor.onAccent(this.dark)
               : HgColor.textTertiary(this.dark)])
+            .transition(HgMotion.fadeIn(HgMotion.fast))
         }
       }
       .width(HgSize.control)
       .height(HgSize.control)
       .backgroundColor(this.draft.trim().length > 0 ? HgColor.accent(this.dark)
         : HgColor.surface3(this.dark))
+      .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
       .onClick(() => {
         this.send();
       })
@@ -293,19 +299,21 @@ export struct CommentsSheet {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         if (this.sidebar) {
           Blank()
-          Stack() {
-            SymbolGlyph($r('sys.symbol.xmark'))
-              .fontSize(HgIconSize.control)
-              .fontColor([HgColor.textSecondary(this.dark)])
+          HgPressable({ dark: this.dark, noTap: true }) {
+            Stack() {
+              SymbolGlyph($r('sys.symbol.xmark'))
+                .fontSize(HgIconSize.control)
+                .fontColor([HgColor.textSecondary(this.dark)])
+            }
+            .width(HgSize.hitTarget)
+            .height(HgSize.hitTarget)
+            .borderRadius(HgSize.hitTarget / 2)
+            .backgroundColor(HgColor.surface3(this.dark))
+            .onClick(() => {
+              this.onClose();
+            })
+            .accessibilityText('关闭评论')
           }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .borderRadius(HgSize.hitTarget / 2)
-          .backgroundColor(HgColor.surface3(this.dark))
-          .onClick(() => {
-            this.onClose();
-          })
-          .accessibilityText('关闭评论')
         }
       }
       .width('100%')
@@ -315,22 +323,11 @@ export struct CommentsSheet {
         Column({ space: HgSpace.m }) {
           ForEach([0, 1, 2, 3, 4], (index: number) => {
             Row({ space: HgSpace.m }) {
-              Row()
-                .width(32)
-                .height(32)
-                .backgroundColor(HgColor.skeletonBase(this.dark))
-                .borderRadius(16)
+              // 统一骨架块：900ms alternate 0.88↔1 低对比呼吸，减少动态效果时静态。
+              HgSkeletonBlock({ dark: this.dark, blockWidth: 32, blockHeight: 32, radius: 16 })
               Column({ space: HgSpace.s }) {
-                Row()
-                  .width('40%')
-                  .height(HgFont.caption)
-                  .backgroundColor(HgColor.skeletonBase(this.dark))
-                  .borderRadius(4)
-                Row()
-                  .width('86%')
-                  .height(HgFont.body)
-                  .backgroundColor(HgColor.skeletonBase(this.dark))
-                  .borderRadius(4)
+                HgSkeletonBlock({ dark: this.dark, blockWidth: '40%', blockHeight: HgFont.caption, radius: 4 })
+                HgSkeletonBlock({ dark: this.dark, blockWidth: '86%', blockHeight: HgFont.body, radius: 4 })
               }
               .layoutWeight(1)
               .alignItems(HorizontalAlign.Start)
@@ -341,6 +338,7 @@ export struct CommentsSheet {
         .width('100%')
         .layoutWeight(1)
         .padding({ top: HgSpace.m })
+        .transition(HgMotion.statusTransition())
       } else if (this.failed) {
         Column({ space: HgSpace.m }) {
           Text('评论加载失败')
@@ -359,6 +357,7 @@ export struct CommentsSheet {
         .width('100%')
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
+        .transition(HgMotion.statusTransition())
       } else if (this.items.length === 0) {
         Column({ space: HgSpace.s }) {
           Text('还没有评论，来抢第一个沙发')
@@ -372,12 +371,15 @@ export struct CommentsSheet {
         .width('100%')
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
+        .transition(HgMotion.statusTransition())
       } else {
         List({ scroller: this.scroller }) {
           ForEach(this.items, (comment: Comment) => {
             ListItem() {
               this.CommentRow(comment)
             }
+            // 仅新增条目 fast 140ms 淡入，已有条目不重排动画（§3.4）。
+            .transition(HgMotion.appendTransition())
           }, (comment: Comment) => String(comment.id))
 
           ListItem() {
@@ -392,11 +394,13 @@ export struct CommentsSheet {
                     .fontSize(HgFont.micro)
                     .fontColor(HgColor.textTertiary(this.dark))
                 }
+                .transition(HgMotion.statusTransition())
               } else if (this.page < this.pages) {
                 // 无限滚动：滚动临近底部会自动请求下一页，这里只做轻提示（点击仍可作为兜底）。
                 Text('上滑自动加载更多')
                   .fontSize(HgFont.micro)
                   .fontColor(HgColor.textTertiary(this.dark))
+                  .transition(HgMotion.statusTransition())
                   .onClick(() => {
                     this.loadMore();
                   })
@@ -404,6 +408,7 @@ export struct CommentsSheet {
                 Text('— 到底啦 —')
                   .fontSize(HgFont.micro)
                   .fontColor(HgColor.textTertiary(this.dark))
+                  .transition(HgMotion.statusTransition())
               }
             }
             .width('100%')
@@ -424,6 +429,7 @@ export struct CommentsSheet {
         .onReachEnd(() => {
           this.loadMore();
         })
+        .transition(HgMotion.statusTransition())
       }
 
       this.InputBar()

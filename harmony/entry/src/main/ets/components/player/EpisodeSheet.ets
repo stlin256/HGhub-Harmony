@@ -32,7 +32,8 @@ export struct EpisodeSheet {
     if (this.current > 1) {
       setTimeout(() => {
         try {
-          this.scroller.scrollToIndex(this.current - 1, true, ScrollAlign.CENTER);
+          // DESIGN §4.9：打开即到位，不做平滑滚动（避免与系统 Sheet 入场动画叠加成两段运动）。
+          this.scroller.scrollToIndex(this.current - 1, false, ScrollAlign.CENTER);
         } catch (err) {
         }
       }, 80);
