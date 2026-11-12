@@ -4,6 +4,7 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgVideoGridCard } from '../components/HgVideoGridCard';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
@@ -196,6 +197,7 @@ export struct TopicDetailPage {
           }
           .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m })
           .layoutWeight(1)
+          .transition(HgMotion.statusTransition())
         } else if (this.errorText.length > 0) {
           Column() {
             HgEmptyState({
@@ -210,6 +212,7 @@ export struct TopicDetailPage {
           }
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
+          .transition(HgMotion.statusTransition())
         } else {
           List() {
             ListItem() {
@@ -223,6 +226,7 @@ export struct TopicDetailPage {
                   GridItem() {
                     this.VideoCardItem(item)
                   }
+                  .transition(HgMotion.appendTransition())
                 }, (item: VideoCard) => 'tv-' + item.id)
               }
               .columnsTemplate(this.gridTemplate())
@@ -236,6 +240,7 @@ export struct TopicDetailPage {
           .onReachEnd(() => {
             this.loadMore();
           })
+          .transition(HgMotion.statusTransition())
         }
       }
       .width('100%')
@@ -243,5 +248,6 @@ export struct TopicDetailPage {
       .backgroundColor(HgColor.pageBackground(this.dark))
     }
     .hideTitleBar(true)
+    .systemTransition(NavigationSystemTransitionType.FADE)
   }
 }

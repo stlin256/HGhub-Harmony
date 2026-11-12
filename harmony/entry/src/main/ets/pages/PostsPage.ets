@@ -3,8 +3,10 @@ import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { Paged, Post } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
+import { HgPressable } from '../components/HgPressable';
 import { HgListSource } from '../components/browse/HgListSource';
-import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
@@ -27,10 +29,9 @@ export struct PostsPage {
   @State finished: boolean = false;
   @State errorText: string = '';
   @State refreshing: boolean = false;
-  /** 触底追加批次淡入：index >= fadeFromIndex 的新条目从 appendedOpacity 0 → 1。 */
-  @State private appendedOpacity: number = 1;
-  @State private fadeFromIndex: number = 0;
-  private appendFadeTimer: number = -1;
+  /** 下拉刷新/整表替换的 listSwap 透明度（淡出 120 → 替换 → 淡入 220）。 */
+  @State private listOpacity: number = 1;
+  private swapTimer: number = -1;
   private source: HgListSource<Post> = new HgListSource<Post>();
   private page: number = 0;
   private pages: number = 1;
@@ -63,10 +64,34 @@ export struct PostsPage {
   }
 
   aboutToDisappear(): void {
-    if (this.appendFadeTimer >= 0) {
-      clearTimeout(this.appendFadeTimer);
-      this.appendFadeTimer = -1;
+    if (this.swapTimer >= 0) {
+      clearTimeout(this.swapTimer);
+      this.swapTimer = -1;
     }
+  }
+
+  /** 整表替换：先 120ms 淡出旧内容 → 应用新数据 → 220ms 淡入；销毁/降级时收敛终态。 */
+  private swapList(apply: () => void): void {
+    if (this.swapTimer >= 0) {
+      clearTimeout(this.swapTimer);
+      this.swapTimer = -1;
+    }
+    if (HgMotion.reduced()) {
+      apply();
+      this.listOpacity = 1;
+      return;
+    }
+    const outMs: number = HgMotion.ms(HgMotion.listSwapOut);
+    animateTo({ duration: outMs, curve: HgMotion.curve }, () => {
+      this.listOpacity = 0;
+    });
+    this.swapTimer = setTimeout(() => {
+      this.swapTimer = -1;
+      apply();
+      animateTo({ duration: HgMotion.ms(HgMotion.listSwapIn), curve: HgMotion.curve }, () => {
+        this.listOpacity = 1;
+      });
+    }, outMs);
   }
 
   /** 列数：手机 2 列；≥600vp 3 列，≥840vp 4 列（上限 4）。 */
@@ -105,18 +130,20 @@ export struct PostsPage {
         return;
       }
       const list: Post[] = res.items !== undefined && res.items !== null ? res.items : [];
-      // 首屏/刷新：整表重建后不保留追加淡入状态（列表整体由 branch transition 淡入）。
-      if (this.appendFadeTimer >= 0) {
-        clearTimeout(this.appendFadeTimer);
-        this.appendFadeTimer = -1;
+      const pages: number = res.pagination !== undefined && res.pagination.pages > 0 ? res.pagination.pages : 1;
+      const applyList = (): void => {
+        this.source.resetAll(list);
+        this.hasData = list.length > 0;
+        this.page = 1;
+        this.pages = pages;
+        this.finished = list.length === 0 || this.page >= pages;
+      };
+      // 首次/骨架 → 内容由分支 statusTransition 交叉淡入；刷新（已有内容）走 listSwap。
+      if (this.hasData) {
+        this.swapList(applyList);
+      } else {
+        applyList();
       }
-      this.fadeFromIndex = 0;
-      this.appendedOpacity = 1;
-      this.source.resetAll(list);
-      this.hasData = list.length > 0;
-      this.page = 1;
-      this.pages = res.pagination !== undefined && res.pagination.pages > 0 ? res.pagination.pages : 1;
-      this.finished = list.length === 0 || this.page >= this.pages;
     } catch (err) {
       if (seq === this.loadSeq) {
         this.errorText = (err as Error).message;
@@ -156,20 +183,8 @@ export struct PostsPage {
           fresh.push(list[i]);
         }
       }
-      // 触底追加：只让新加入的这批条目 0 → 1 淡入（140ms），已展示的旧条目保持不动。
-      if (fresh.length > 0) {
-        this.fadeFromIndex = this.source.totalCount();
-        this.appendedOpacity = 0;
-        if (this.appendFadeTimer >= 0) {
-          clearTimeout(this.appendFadeTimer);
-        }
-        this.appendFadeTimer = setTimeout(() => {
-          this.appendFadeTimer = -1;
-          animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
-            this.appendedOpacity = 1;
-          });
-        }, 40);
-      }
+      // 触底追加：新条目由 FlowItem 的 appear transition（appendTransition 140ms）淡入，
+      // 已展示的旧条目保持不动（审计 A P0-3：不再用 LazyForEach 项内共享 opacity）。
       this.source.append(fresh);
       this.page = next;
       this.pages = res.pagination !== undefined && res.pagination.pages > 0 ? res.pagination.pages : next;
@@ -201,14 +216,20 @@ export struct PostsPage {
 
   @Builder
   PostCard(item: Post) {
-    Stack({ alignContent: Alignment.BottomStart }) {
-      HgAsyncCover({
-        url: item.cover,
-        dark: this.dark,
-        radius: 0,
-        coverWidth: '100%',
-        coverHeight: '100%'
-      })
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.openPost(item);
+      }
+    }) {
+      Stack({ alignContent: Alignment.BottomStart }) {
+        HgAsyncCover({
+          url: item.cover,
+          dark: this.dark,
+          radius: 0,
+          coverWidth: '100%',
+          coverHeight: '100%'
+        })
       Column()
         .width('100%')
         .height('100%')
@@ -235,13 +256,11 @@ export struct PostsPage {
       .alignItems(HorizontalAlign.Start)
       .padding(HgSpace.s)
     }
-    .width('100%')
-    .aspectRatio(0.75)
-    .borderRadius(HgRadius.row)
-    .clip(true)
-    .onClick(() => {
-      this.openPost(item);
-    })
+      .width('100%')
+      .aspectRatio(0.75)
+      .borderRadius(HgRadius.row)
+      .clip(true)
+    }
   }
 
   @Builder
@@ -265,19 +284,24 @@ export struct PostsPage {
   FooterView() {
     Row() {
       if (this.loadingMore) {
-        LoadingProgress()
-          .width(18)
-          .height(18)
-          .color(HgColor.accent(this.dark))
-        Text('加载中…')
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.textTertiary(this.dark))
-          .margin({ left: HgSpace.s })
+        Row() {
+          LoadingProgress()
+            .width(18)
+            .height(18)
+            .color(HgColor.accent(this.dark))
+          Text('加载中…')
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .margin({ left: HgSpace.s })
+        }
+        .transition(HgMotion.fadeIn(HgMotion.fast))
       } else if (this.errorText.length > 0) {
         Text('加载失败，点击重试')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .padding(HgSpace.m)
+          .hoverEffect(HoverEffect.Scale)
+          .transition(HgMotion.fadeIn(HgMotion.fast))
           .accessibilityText('加载失败，点击重试')
           .onClick(() => {
             this.loadMore();
@@ -286,6 +310,7 @@ export struct PostsPage {
         Text('— 已经到底啦 —')
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
+          .transition(HgMotion.fadeIn(HgMotion.fast))
       }
     }
     .width('100%')
@@ -312,7 +337,7 @@ export struct PostsPage {
           }
           .layoutWeight(1)
           .width('100%')
-          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+          .transition(HgMotion.statusTransition())
         } else if (!this.hasData && this.errorText.length > 0) {
           Column() {
             HgEmptyState({
@@ -330,7 +355,7 @@ export struct PostsPage {
           .width('100%')
           .justifyContent(FlexAlign.Center)
           .padding(HgSpace.xxl)
-          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+          .transition(HgMotion.statusTransition())
         } else if (!this.hasData) {
           Column() {
             HgEmptyState({
@@ -344,7 +369,7 @@ export struct PostsPage {
           .width('100%')
           .justifyContent(FlexAlign.Center)
           .padding(HgSpace.xxl)
-          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+          .transition(HgMotion.statusTransition())
         } else {
           Column() {
             Refresh({ refreshing: this.refreshing }) {
@@ -354,8 +379,8 @@ export struct PostsPage {
                     this.PostCard(item)
                   }
                   .width('100%')
-                  // 触底追加的批次：新条目从 0 → 1 淡入；已展示条目恒为 1。
-                  .opacity(index >= this.fadeFromIndex ? this.appendedOpacity : 1)
+                  // 触底追加的新条目：appear 时 fast 淡入（只作用于新增项）。
+                  .transition(HgMotion.appendTransition())
                 }, (item: Post) => 'post-' + item.id)
               }
               .columnsTemplate(this.gridTemplate())
@@ -382,7 +407,8 @@ export struct PostsPage {
           }
           .layoutWeight(1)
           .width('100%')
-          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+          .opacity(this.listOpacity)
+          .transition(HgMotion.statusTransition())
         }
       }
       .width('100%')
@@ -391,5 +417,7 @@ export struct PostsPage {
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    // 页面转场由 Index 统一口径改为淡入淡出（去掉系统默认右滑横移），页面不自绘转场。
+    .systemTransition(NavigationSystemTransitionType.FADE)
   }
 }

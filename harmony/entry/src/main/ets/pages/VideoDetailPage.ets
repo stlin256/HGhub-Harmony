@@ -4,11 +4,13 @@ import { UiBus } from '../services/UiBus';
 import { K_BOTTOM_INSET, K_TOP_INSET, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
 import { ROUTE_PLAYER, PlayerParam, VideoParam, ROUTE_USER, UserParam } from '../state/Routes';
 import { Detail, WatchProgress } from '../models/Types';
-import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState } from '../components/HgCommon';
+import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
 import { EpisodeSheet } from '../components/player/EpisodeSheet';
 import { fmt, fmtTime } from '../utils/Format';
 
@@ -51,9 +53,9 @@ export struct VideoDetailPage {
   @State showEpisodes: boolean = false;
   @State progressEp: number = 1;
   @State progressSec: number = 0;
-  /** 详情内容淡入透明度：首屏（含缓存秒开）轻微 fade，骨架→内容不硬切。 */
-  @State private contentFade: number = 1;
-  private contentFadeTimer: number = -1;
+  /** 简介展开/收起：maxLines 不能补间，用 exitFast 淡出 → 切换行数 → standard 淡入 做过渡。 */
+  @State private descFade: number = 1;
+  private descFadeTimer: number = -1;
 
   private destroyed: boolean = false;
 
@@ -85,27 +87,37 @@ export struct VideoDetailPage {
 
   aboutToDisappear(): void {
     this.destroyed = true;
-    if (this.contentFadeTimer >= 0) {
-      clearTimeout(this.contentFadeTimer);
-      this.contentFadeTimer = -1;
+    if (this.descFadeTimer >= 0) {
+      clearTimeout(this.descFadeTimer);
+      this.descFadeTimer = -1;
     }
   }
 
-  /** 详情内容出现时从 62% 透明度 190ms 淡入（有缓存秒开时也保留一次很轻的 fade）。 */
-  private fadeInContent(): void {
-    this.contentFade = 0.62;
-    if (this.contentFadeTimer >= 0) {
-      clearTimeout(this.contentFadeTimer);
+  /** 展开/收起：先 exitFast 淡出 → 切换行数 → standard 淡入（收敛到终态，不卡透明）。 */
+  private toggleDescExpanded(): void {
+    if (HgMotion.reduced()) {
+      this.descExpanded = !this.descExpanded;
+      this.descFade = 1;
+      return;
     }
-    this.contentFadeTimer = setTimeout(() => {
-      this.contentFadeTimer = -1;
+    if (this.descFadeTimer >= 0) {
+      clearTimeout(this.descFadeTimer);
+      this.descFadeTimer = -1;
+    }
+    animateTo({ duration: HgMotion.ms(HgMotion.exitFast), curve: HgMotion.curve }, () => {
+      this.descFade = 0;
+    });
+    const outMs: number = HgMotion.ms(HgMotion.exitFast);
+    this.descFadeTimer = setTimeout(() => {
+      this.descFadeTimer = -1;
       if (this.destroyed) {
         return;
       }
-      animateTo({ duration: HgDuration.overlay, curve: Curve.FastOutSlowIn }, () => {
-        this.contentFade = 1;
+      this.descExpanded = !this.descExpanded;
+      animateTo({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve }, () => {
+        this.descFade = 1;
       });
-    }, 40);
+    }, outMs);
   }
 
   /**
@@ -116,10 +128,10 @@ export struct VideoDetailPage {
     const cached: Detail | null = Api.peekVideo(this.params.id);
     if (cached !== null) {
       // 缓存命中：点赞/收藏以本地状态为准（缓存里的 interaction 可能已过期）。
+      // MOTION 3.3：命中缓存直接显示，不做淡入（避免"闪一下"）。
       this.applyDetail(cached, false);
       this.loading = false;
       this.errorText = '';
-      this.fadeInContent();
       this.refreshSilently();
       return;
     }
@@ -130,9 +142,9 @@ export struct VideoDetailPage {
       if (this.destroyed) {
         return;
       }
+      // 首载骨架 → 内容由分支 statusTransition（standard 220）交叉淡入。
       this.applyDetail(detail, true);
       this.loading = false;
-      this.fadeInContent();
     } catch (err) {
       if (this.destroyed) {
         return;
@@ -466,7 +478,7 @@ export struct VideoDetailPage {
         .fontColor(this.episodeCellTextColor(ep))
         .width('100%')
         .textAlign(TextAlign.Center)
-        .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
+        .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
       if (ep < this.progressEp) {
         Row()
           .width('100%')
@@ -478,8 +490,8 @@ export struct VideoDetailPage {
     .height(HgSize.episodeCell)
     .backgroundColor(this.episodeCellColor(ep))
     .borderRadius(HgRadius.control)
-    // 当前集切换（进度写回/选中态变化）时底色与文字色的 140ms 过渡。
-    .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
+    // 当前集切换（进度写回/选中态变化）时底色与文字色的 fast(140ms) 过渡。
+    .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
     .onClick(() => {
       this.playEpisode(ep);
     })
@@ -591,12 +603,14 @@ export struct VideoDetailPage {
         .width('100%')
         .maxLines(this.descExpanded ? 1000 : 4)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .opacity(this.descFade)
       if (this.description.length > 60) {
         Text(this.descExpanded ? '收起' : '展开')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
+          .hoverEffect(HoverEffect.Scale)
           .onClick(() => {
-            this.descExpanded = !this.descExpanded;
+            this.toggleDescExpanded();
           })
       }
     }
@@ -608,39 +622,21 @@ export struct VideoDetailPage {
   SkeletonPage() {
     Scroll() {
       Column() {
-        Row()
-          .width('100%')
-          .height(260)
-          .backgroundColor(HgColor.skeletonBase(this.dark))
+        HgSkeletonBlock({ dark: this.dark, blockWidth: '100%', blockHeight: 260, radius: 0 })
         Column({ space: HgSpace.m }) {
-          Row()
-            .width('70%')
-            .height(24)
-            .backgroundColor(HgColor.skeletonBase(this.dark))
-            .borderRadius(6)
-          Row()
-            .width('46%')
-            .height(14)
-            .backgroundColor(HgColor.skeletonBase(this.dark))
-            .borderRadius(6)
-          Row()
-            .width('84%')
-            .height(14)
-            .backgroundColor(HgColor.skeletonBase(this.dark))
-            .borderRadius(6)
-          Row()
-            .width('100%')
-            .height(60)
-            .backgroundColor(HgColor.skeletonBase(this.dark))
-            .borderRadius(HgRadius.group)
+          HgSkeletonBlock({ dark: this.dark, blockWidth: '70%', blockHeight: 24, radius: 6 })
+          HgSkeletonBlock({ dark: this.dark, blockWidth: '46%', blockHeight: 14, radius: 6 })
+          HgSkeletonBlock({ dark: this.dark, blockWidth: '84%', blockHeight: 14, radius: 6 })
+          HgSkeletonBlock({ dark: this.dark, blockWidth: '100%', blockHeight: 60, radius: HgRadius.group })
           Grid() {
             ForEach([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], (index: number) => {
               GridItem() {
-                Row()
-                  .width('100%')
-                  .height(HgSize.episodeCell)
-                  .backgroundColor(HgColor.skeletonBase(this.dark))
-                  .borderRadius(HgRadius.control)
+                HgSkeletonBlock({
+                  dark: this.dark,
+                  blockWidth: '100%',
+                  blockHeight: HgSize.episodeCell,
+                  radius: HgRadius.control
+                })
               }
             }, (index: number) => index.toString())
           }
@@ -661,6 +657,7 @@ export struct VideoDetailPage {
     .height('100%')
     .align(Alignment.Top)
     .scrollBar(BarState.Off)
+    .transition(HgMotion.statusTransition())
   }
 
   @Builder
@@ -672,6 +669,7 @@ export struct VideoDetailPage {
             SymbolGlyph(this.faved ? $r('sys.symbol.star_fill') : $r('sys.symbol.star'))
               .fontSize(HgIconSize.emphasis)
               .fontColor([this.faved ? HgColor.star(this.dark) : HgColor.textSecondary(this.dark)])
+              .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
             Text('收藏')
               .fontSize(HgFont.nano)
               .fontColor(HgColor.textSecondary(this.dark))
@@ -686,6 +684,7 @@ export struct VideoDetailPage {
             SymbolGlyph(this.liked ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
               .fontSize(HgIconSize.emphasis)
               .fontColor([this.liked ? HgColor.like(this.dark) : HgColor.textSecondary(this.dark)])
+              .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
             Text('点赞')
               .fontSize(HgFont.nano)
               .fontColor(HgColor.textSecondary(this.dark))
@@ -753,6 +752,7 @@ export struct VideoDetailPage {
           .width('100%')
           .height('100%')
           .justifyContent(FlexAlign.Center)
+          .transition(HgMotion.statusTransition())
         } else {
           Scroll() {
             Column() {
@@ -806,8 +806,8 @@ export struct VideoDetailPage {
           .align(Alignment.Top)
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
-          // 首屏封面/信息淡入（见 fadeInContent）。
-          .opacity(this.contentFade)
+          // 首载：骨架 → 内容交叉淡入（standard 220）；缓存命中直接显示不淡入。
+          .transition(HgMotion.statusTransition())
 
           this.BottomBar()
         }
@@ -828,6 +828,8 @@ export struct VideoDetailPage {
       })
     }
     .hideTitleBar(true)
+    // 页面转场由 Index 统一口径改为淡入淡出（去掉系统默认右滑横移），页面不自绘转场。
+    .systemTransition(NavigationSystemTransitionType.FADE)
     .backgroundColor(HgColor.canvas(this.dark))
     .onShown(() => {
       this.refreshProgress();

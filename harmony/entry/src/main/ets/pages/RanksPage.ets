@@ -3,8 +3,11 @@ import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { RankItem, RankResult } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgTopBar } from '../components/HgCommon';
+import { HgPressable } from '../components/HgPressable';
+import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
 import { HgListSource } from '../components/browse/HgListSource';
-import { HgColor, HgDuration, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_LINE_BASE } from '../services/Lines';
 import { K_BOTTOM_INSET, K_DARK, K_WINDOW_H, K_CONTENT_W } from '../state/UserPrefs';
@@ -66,17 +69,23 @@ struct RankPodiumBig {
   }
 
   build() {
-    Column({ space: HgSpace.s }) {
-      Stack({ alignContent: Alignment.TopStart }) {
-        HgAsyncCover({
-          url: this.cover,
-          dark: this.dark,
-          radius: 0,
-          coverWidth: '100%',
-          coverHeight: '100%',
-          decodeWidth: 480,
-          decodeHeight: 640
-        })
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.onOpen();
+      }
+    }) {
+      Column({ space: HgSpace.s }) {
+        Stack({ alignContent: Alignment.TopStart }) {
+          HgAsyncCover({
+            url: this.cover,
+            dark: this.dark,
+            radius: 0,
+            coverWidth: '100%',
+            coverHeight: '100%',
+            decodeWidth: 480,
+            decodeHeight: 640
+          })
         Column()
           .width('100%')
           .height('100%')
@@ -99,11 +108,9 @@ struct RankPodiumBig {
         .maxLines(2)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
-    .width(120)
-    .alignItems(HorizontalAlign.Start)
-    .onClick(() => {
-      this.onOpen();
-    })
+      .width(120)
+      .alignItems(HorizontalAlign.Start)
+    }
   }
 }
 
@@ -133,8 +140,14 @@ struct RankPodiumSmall {
   }
 
   build() {
-    Row({ space: HgSpace.s }) {
-      this.RankBadge()
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.onOpen();
+      }
+    }) {
+      Row({ space: HgSpace.s }) {
+        this.RankBadge()
       HgAsyncCover({
         url: this.cover,
         dark: this.dark,
@@ -160,11 +173,9 @@ struct RankPodiumSmall {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
-    .height(76)
-    .onClick(() => {
-      this.onOpen();
-    })
+      .width('100%')
+      .height(76)
+    }
   }
 }
 
@@ -203,11 +214,17 @@ struct RankRowCard {
   }
 
   build() {
-    Row({ space: HgSpace.m }) {
-      Column() {
-        this.RankBadge()
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.onOpen();
       }
-      .width(28)
+    }) {
+      Row({ space: HgSpace.m }) {
+        Column() {
+          this.RankBadge()
+        }
+        .width(28)
 
       HgAsyncCover({
         url: this.cover,
@@ -263,15 +280,13 @@ struct RankRowCard {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
-    .height(84)
-    .padding({ left: HgSpace.m, right: HgSpace.m })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.row)
-    .margin({ bottom: HgSpace.s })
-    .onClick(() => {
-      this.onOpen();
-    })
+      .width('100%')
+      .height(84)
+      .padding({ left: HgSpace.m, right: HgSpace.m })
+      .backgroundColor(HgColor.surface1(this.dark))
+      .borderRadius(HgRadius.row)
+      .margin({ bottom: HgSpace.s })
+    }
   }
 }
 
@@ -295,9 +310,7 @@ export struct RanksPage {
   @State errorText: string = '';
   @State refreshing: boolean = false;
   @State topRows: RankRowView[] = [];
-  /** 分段控件实测宽度（vp）：用于计算滑动胶囊的宽度/偏移。 */
-  @State segWidth: number = 0;
-  /** 切榜时旧内容淡出→新内容淡入的透明度。 */
+  /** 切榜/刷新时旧内容淡出 → 替换 → 新内容淡入的透明度（listSwap）。 */
   @State listOpacity: number = 1;
   private restRows: RankRowView[] = [];
   private source: HgListSource<RankRowView> = new HgListSource<RankRowView>();
@@ -505,10 +518,8 @@ export struct RanksPage {
     }
     const cached: RankCache | undefined = this.cache.get(key);
     this.errorText = '';
-    // 选中胶囊滑动 / 文字颜色过渡（190ms，EaseOut），由 animateTo 统一驱动。
-    animateTo({ duration: HgDuration.overlay, curve: Curve.EaseOut }, () => {
-      this.kind = key;
-    });
+    // 选中态颜色/字重由 Segmented 的 fast(140ms) 属性过渡承担，这里只做即时状态切换。
+    this.kind = key;
     if (cached !== undefined) {
       this.loading = false;
       this.switching = false;
@@ -532,59 +543,40 @@ export struct RanksPage {
     this.fetchKind(key);
   }
 
-  /** 数据替换：切榜走「旧内容淡出 → 换数据 → 新内容淡入」；首屏/下拉刷新改为 140ms 轻淡入。 */
+  /**
+   * 数据替换：切榜/刷新走 listSwap（淡出 120 → 替换 → 淡入 220）；
+   * 首屏骨架 → 榜单直接落数据，由分支 statusTransition 交叉淡入（缓存命中不淡入）。
+   */
   private applyKindData(cached: RankCache): void {
-    if (this.topRows.length > 0 && !this.refreshing) {
-      this.transitionTo(cached);
-      return;
-    }
     const hadRows: boolean = this.topRows.length > 0 || this.restRows.length > 0;
-    this.transitionSeq++;
     if (!hadRows) {
-      // 首屏骨架 → 榜单：先以 0 透明度占位，数据落地后 140ms 淡入；骨架分支同帧移除，
-      // 不叠加两个布局节点，避免列表与骨架在过渡期互相挤压。
-      this.listOpacity = 0;
+      this.transitionSeq++;
       this.applyCache(cached);
-      this.scheduleListFadeIn();
       return;
     }
-    this.applyCache(cached);
-    if (this.refreshing) {
-      // 下拉刷新完成：整表替换后 140ms 轻淡入（从 0.7 回升，避免整块硬切闪动）。
-      this.listOpacity = 0.7;
-      this.scheduleListFadeIn();
-      return;
-    }
-    this.listOpacity = 1;
+    this.transitionTo(cached, !this.refreshing);
   }
 
-  /** 下一帧起把列表透明度 140ms 过渡到 1（首屏 0→1、下拉刷新 0.7→1）。 */
-  private scheduleListFadeIn(): void {
-    setTimeout(() => {
-      if (this.pageGone) {
-        return;
-      }
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
-        this.listOpacity = 1;
-      });
-    }, 16);
-  }
-
-  private transitionTo(cached: RankCache): void {
+  private transitionTo(cached: RankCache, scrollTop: boolean): void {
     const seq = ++this.transitionSeq;
-    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
+    const outMs: number = HgMotion.ms(HgMotion.listSwapOut);
+    animateTo({ duration: outMs, curve: HgMotion.curve }, () => {
       this.listOpacity = 0;
     });
     setTimeout(() => {
       if (this.pageGone || seq !== this.transitionSeq) {
+        // 被打断/已销毁：收敛终态，不留透明中间态。
+        this.listOpacity = 1;
         return;
       }
       this.applyCache(cached);
-      this.scrollToTop();
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      if (scrollTop) {
+        this.scrollToTop();
+      }
+      animateTo({ duration: HgMotion.ms(HgMotion.listSwapIn), curve: HgMotion.curve }, () => {
         this.listOpacity = 1;
       });
-    }, HgDuration.microExit);
+    }, outMs);
   }
 
   /** 切榜后回到顶部（此时列表还是旧数据，用 jump 不带动画避免抖动）。 */
@@ -655,70 +647,41 @@ export struct RanksPage {
     return HgSpace.pageInset + HgResponsive.contentGutter(this.windowW);
   }
 
-  /** 当前选中的榜在 Segmented 里的下标（用于计算胶囊指示器偏移）。 */
-  private kindIndex(): number {
-    for (let i = 0; i < RANK_TABS.length; i++) {
-      if (RANK_TABS[i].key === this.kind) {
-        return i;
-      }
-    }
-    return 0;
-  }
-
-  private indicatorWidth(): number {
-    const inner: number = this.segWidth - 6;
-    if (inner <= 0) {
-      return 0;
-    }
-    return inner / RANK_TABS.length;
-  }
-
-  private indicatorX(): number {
-    return 3 + this.kindIndex() * this.indicatorWidth();
-  }
-
-  /** 分段控件：滑动的胶囊指示器（animateTo 驱动 position/width），选中文字色同步过渡。 */
+  /**
+   * 分段控件：按 MOTION/DESIGN 定稿，只做选中背景+文字色 fast(140ms) 过渡，
+   * 不滑动胶囊指示器（避免"网页 Tab"观感），点击即时切换。
+   */
   @Builder
   Segmented() {
-    Stack({ alignContent: Alignment.TopStart }) {
-      if (this.segWidth > 0) {
-        Column()
-          .width(this.indicatorWidth())
-          .height(30)
-          .backgroundColor(HgColor.surface1(this.dark))
-          .borderRadius(HgRadius.chip)
-          .position({ x: this.indicatorX(), y: 3 })
-          // 属性动画兜底：即使 animateTo 上下文失效，位置/宽度变化也按 190ms EaseOut 滑动。
-          .animation({ duration: HgDuration.overlay, curve: Curve.EaseOut })
-      }
-      Row() {
-        ForEach(RANK_TABS, (tab: RankTab) => {
-          Text(tab.label)
-            .fontSize(HgFont.secondary)
-            .fontWeight(this.kind === tab.key ? HgFont.weightMedium : HgFont.weightRegular)
-            .fontColor(this.kind === tab.key ? HgColor.textPrimary(this.dark) : HgColor.textSecondary(this.dark))
-            .textAlign(TextAlign.Center)
-            .layoutWeight(1)
-            .height(30)
-            .onClick(() => {
+    Row() {
+      ForEach(RANK_TABS, (tab: RankTab) => {
+        Column() {
+          HgPressable({
+            dark: this.dark,
+            onTap: () => {
               this.switchKind(tab.key);
-            })
-        }, (tab: RankTab) => tab.key)
-      }
-      .width('100%')
-      .height(36)
-      .padding(3)
+            }
+          }) {
+            Text(tab.label)
+              .fontSize(HgFont.secondary)
+              .fontWeight(this.kind === tab.key ? HgFont.weightMedium : HgFont.weightRegular)
+              .fontColor(this.kind === tab.key ? HgColor.textPrimary(this.dark) : HgColor.textSecondary(this.dark))
+              .textAlign(TextAlign.Center)
+              .width('100%')
+              .height(30)
+              .borderRadius(HgRadius.chip)
+              .backgroundColor(this.kind === tab.key ? HgColor.surface1(this.dark) : Color.Transparent)
+              .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
+          }
+        }
+        .layoutWeight(1)
+      }, (tab: RankTab) => tab.key)
     }
     .width('100%')
     .height(36)
+    .padding(3)
     .backgroundColor(HgColor.surface3(this.dark))
     .borderRadius(18)
-    .onAreaChange((oldValue: Area, newValue: Area) => {
-      const width = parseFloat(String(newValue.width));
-      if (!isNaN(width) && width > 0 && Math.abs(width - this.segWidth) > 0.5) {
-        this.segWidth = width;
-      }
-    })
   }
 
   @Builder
@@ -779,27 +742,11 @@ export struct RanksPage {
     Column({ space: HgSpace.s }) {
       ForEach([0, 1, 2, 3, 4, 5], (index: number) => {
         Row({ space: HgSpace.m }) {
-          Column()
-            .width(28)
-            .height(28)
-            .backgroundColor(HgColor.skeletonBase(this.dark))
-            .borderRadius(14)
-          Column()
-            .width(56)
-            .height(74)
-            .backgroundColor(HgColor.skeletonBase(this.dark))
-            .borderRadius(HgRadius.inline)
+          HgSkeletonBlock({ dark: this.dark, blockWidth: 28, blockHeight: 28, radius: 14 })
+          HgSkeletonBlock({ dark: this.dark, blockWidth: 56, blockHeight: 74, radius: HgRadius.inline })
           Column({ space: HgSpace.s }) {
-            Column()
-              .width('80%')
-              .height(HgFont.body)
-              .backgroundColor(HgColor.skeletonBase(this.dark))
-              .borderRadius(4)
-            Column()
-              .width('50%')
-              .height(HgFont.micro)
-              .backgroundColor(HgColor.skeletonBase(this.dark))
-              .borderRadius(4)
+            HgSkeletonBlock({ dark: this.dark, blockWidth: '80%', blockHeight: HgFont.body, radius: 4 })
+            HgSkeletonBlock({ dark: this.dark, blockWidth: '50%', blockHeight: HgFont.micro, radius: 4 })
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
@@ -858,6 +805,7 @@ export struct RanksPage {
           .width('100%')
           .height(HgSize.hitTarget)
           .justifyContent(FlexAlign.Center)
+          .hoverEffect(HoverEffect.Scale)
           .accessibilityText('加载失败，点击重试')
           .onClick(() => {
             this.retry();
@@ -876,6 +824,7 @@ export struct RanksPage {
           .width('100%')
           .align(Alignment.Top)
           .scrollBar(BarState.Off)
+          .transition(HgMotion.statusTransition())
         } else if (this.topRows.length === 0) {
           Column() {
             HgEmptyState({
@@ -893,6 +842,7 @@ export struct RanksPage {
           .width('100%')
           .justifyContent(FlexAlign.Center)
           .padding(HgSpace.xxl)
+          .transition(HgMotion.statusTransition())
         } else {
           Refresh({ refreshing: this.refreshing }) {
             List({ scroller: this.scroller }) {
@@ -915,6 +865,7 @@ export struct RanksPage {
                     }
                   })
                 }
+                .transition(HgMotion.appendTransition())
               }, (row: RankRowView) => row.key)
               ListItem() {
                 Row() {
@@ -933,7 +884,7 @@ export struct RanksPage {
             .edgeEffect(EdgeEffect.Spring)
             .cachedCount(4)
             .padding({ left: this.pagePad(), right: this.pagePad() })
-            // 切榜过渡：旧内容淡出 → 换数据 → 新内容淡入（120/140ms），避免硬切。
+            // 切榜/刷新：listSwap 淡出 120 → 换数据 → 淡入 220（HgMotion.listSwapOut/In）。
             .opacity(this.listOpacity)
           }
           .layoutWeight(1)
@@ -942,6 +893,7 @@ export struct RanksPage {
           .onRefreshing(() => {
             this.refresh();
           })
+          .transition(HgMotion.statusTransition())
         }
       }
       .width('100%')
@@ -950,6 +902,8 @@ export struct RanksPage {
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    // 页面转场由 Index 统一口径改为淡入淡出（去掉系统默认右滑横移），页面不自绘转场。
+    .systemTransition(NavigationSystemTransitionType.FADE)
     // 兜底铺满整页背景：页面转场/底部安全区内边距区不露出默认背景（深色下会像一条黑带）。
     .backgroundColor(HgColor.canvas(this.dark))
   }

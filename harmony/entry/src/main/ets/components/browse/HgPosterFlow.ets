@@ -3,6 +3,7 @@ import { HgPosterCard } from '../HgPosterCard';
 import { HgEmptyState, HgSkeletonGrid } from '../HgCommon';
 import { HgListSource } from './HgListSource';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../../design/HgTokens';
+import { HgMotion } from '../../design/HgMotion';
 import { ImageCache } from '../../services/ImageCache';
 
 /** 预取窗口：数据落地/分页追加后对 source 末尾若干张封面做后台预热。 */
@@ -199,19 +200,24 @@ export struct HgPosterFlow {
   FooterPill() {
     Row() {
       if (this.loadingMore) {
-        LoadingProgress()
-          .width(HgSize.hitTarget / 2)
-          .height(HgSize.hitTarget / 2)
-          .color(HgColor.accent(this.dark))
-        Text('加载中…')
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.textTertiary(this.dark))
-          .margin({ left: HgSpace.s })
+        Row() {
+          LoadingProgress()
+            .width(HgSize.hitTarget / 2)
+            .height(HgSize.hitTarget / 2)
+            .color(HgColor.accent(this.dark))
+          Text('加载中…')
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .margin({ left: HgSpace.s })
+        }
+        .transition(HgMotion.fadeIn(HgMotion.fast))
       } else if (this.errorText.length > 0) {
         Text('加载失败，点击重试')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .padding({ left: HgSpace.s, right: HgSpace.s })
+          .hoverEffect(HoverEffect.Scale)
+          .transition(HgMotion.fadeIn(HgMotion.fast))
           .onClick(() => {
             this.onLoadMore();
           })
@@ -219,6 +225,7 @@ export struct HgPosterFlow {
         Text('— 已经到底啦 —')
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
+          .transition(HgMotion.fadeIn(HgMotion.fast))
       }
     }
     .height(34)
@@ -227,6 +234,8 @@ export struct HgPosterFlow {
     .borderRadius(HgRadius.chip)
     // 胶囊本身浮在列表之上；bottomPadding 让它避开悬浮底栏，仍能被看见。
     .margin({ bottom: HgSpace.s + this.bottomPadding })
+    // 出现/消失统一 statusTransition，避免「加载中/到底」胶囊硬闪现。
+    .transition(HgMotion.statusTransition())
   }
 
   build() {
@@ -251,6 +260,7 @@ export struct HgPosterFlow {
             .layoutWeight(1)
             .align(Alignment.Top)
             .scrollBar(BarState.Off)
+            .transition(HgMotion.statusTransition())
           } else if (this.errorText.length > 0) {
             Column() {
               HgEmptyState({
@@ -268,6 +278,7 @@ export struct HgPosterFlow {
             .layoutWeight(1)
             .justifyContent(FlexAlign.Center)
             .padding(HgSpace.xxl)
+            .transition(HgMotion.statusTransition())
           } else {
             Column() {
               HgEmptyState({
@@ -281,12 +292,13 @@ export struct HgPosterFlow {
             .layoutWeight(1)
             .justifyContent(FlexAlign.Center)
             .padding(HgSpace.xxl)
+            .transition(HgMotion.statusTransition())
           }
         } else {
-          // 与 HomePage 已验证的沉浸结构对齐：根 Column 的 layoutWeight(1) 子节点直接就是 Refresh。
-          // 旧结构在 Row/Column 与 Refresh 之间多套了一层 layoutWeight + 百分比高度链，
-          // 视口高度依赖多层百分比解析，存在提前结束、露出 canvas 黑带的风险；这里压平成 100% + layoutWeight。
-          Refresh({ refreshing: this.refreshing }) {
+          // 列表分支：骨架/空态/错误 → 列表切换统一 statusTransition（standard 淡入 / exitFast 淡出）。
+          // 沉浸结构保持：Refresh 是 Column 的唯一 layoutWeight(1) 子节点，铺满到窗口底部。
+          Column() {
+            Refresh({ refreshing: this.refreshing }) {
             WaterFlow() {
             LazyForEach(this.source, (item: VideoCard, index: number) => {
               FlowItem() {
@@ -303,6 +315,8 @@ export struct HgPosterFlow {
                 })
               }
               .width('100%')
+              // 分页追加的新条目：appear 时 fast 淡入（只作用于新增项，已有项不重排）。
+              .transition(HgMotion.appendTransition())
             }, (item: VideoCard) => item.id.toString())
           }
             .columnsTemplate(this.gridTemplate())
@@ -341,6 +355,10 @@ export struct HgPosterFlow {
           .onRefreshing(() => {
             this.onRefresh();
           })
+          }
+          .layoutWeight(1)
+          .width('100%')
+          .transition(HgMotion.statusTransition())
         }
       }
       .width('100%')

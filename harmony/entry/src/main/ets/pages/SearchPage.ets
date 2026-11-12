@@ -6,7 +6,9 @@ import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
 import { RecService } from '../recommend/RecService';
 import { HgEmptyState, HgSkeletonGrid } from '../components/HgCommon';
-import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgPressable } from '../components/HgPressable';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
@@ -45,8 +47,6 @@ export struct SearchPage {
   @State refreshing: boolean = false;
   /** 结果列表透明度：已有结果时刷新/重试走"淡出→替换→淡入"。 */
   @State private listOpacity: number = 1;
-  /** 当前按下的搜索历史 chip（轻微缩放反馈）。 */
-  @State private pressedChip: string = '';
   private fadeTimer: number = -1;
   private source: HgListSource<VideoCard> = new HgListSource<VideoCard>();
   private page: number = 0;
@@ -294,7 +294,8 @@ export struct SearchPage {
    * seq 守护：淡出期间用户又发起新搜索时，这次回调直接丢弃，避免旧响应覆盖新结果。
    */
   private fadeSwap(seq: number, apply: () => void): void {
-    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
+    const outMs: number = HgMotion.ms(HgMotion.listSwapOut);
+    animateTo({ duration: outMs, curve: HgMotion.curve }, () => {
       this.listOpacity = 0;
     });
     if (this.fadeTimer >= 0) {
@@ -310,10 +311,10 @@ export struct SearchPage {
         return;
       }
       apply();
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      animateTo({ duration: HgMotion.ms(HgMotion.listSwapIn), curve: HgMotion.curve }, () => {
         this.listOpacity = 1;
       });
-    }, HgDuration.microExit);
+    }, outMs);
   }
 
   aboutToDisappear(): void {
@@ -457,28 +458,19 @@ export struct SearchPage {
 
   @Builder
   SmallChip(label: string, action: () => void) {
-    Text(label)
-      .fontSize(HgFont.secondary)
-      .fontColor(HgColor.textSecondary(this.dark))
-      .height(32)
-      .padding({ left: HgSpace.m, right: HgSpace.m })
-      .backgroundColor(HgColor.surface3(this.dark))
-      .borderRadius(HgRadius.chip)
-      .margin({ right: HgSpace.s, bottom: HgSpace.s })
-      // 点击/按下的轻微缩放反馈（90ms），只作用于视觉容器，不改热区与布局。
-      .scale({
-        x: this.pressedChip === label ? 0.94 : 1,
-        y: this.pressedChip === label ? 0.94 : 1
-      })
-      .animation({ duration: HgDuration.press, curve: Curve.FastOutSlowIn })
-      .onTouch((event: TouchEvent) => {
-        if (event.type === TouchType.Down) {
-          this.pressedChip = label;
-        } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-          this.pressedChip = '';
-        }
-      })
-      .onClick(action)
+    HgPressable({
+      dark: this.dark,
+      onTap: action
+    }) {
+      Text(label)
+        .fontSize(HgFont.secondary)
+        .fontColor(HgColor.textSecondary(this.dark))
+        .height(32)
+        .padding({ left: HgSpace.m, right: HgSpace.m })
+        .backgroundColor(HgColor.surface3(this.dark))
+        .borderRadius(HgRadius.chip)
+        .margin({ right: HgSpace.s, bottom: HgSpace.s })
+    }
   }
 
   @Builder
@@ -495,6 +487,7 @@ export struct SearchPage {
           .fontColor(HgColor.accent(this.dark))
           .height(HgSize.hitTarget)
           .padding({ left: HgSpace.s })
+          .hoverEffect(HoverEffect.Scale)
           .onClick(action)
       }
     }
@@ -505,31 +498,36 @@ export struct SearchPage {
   /** 热榜行（44vp 行高）：序号 + 标题 + 指标/分类，点击以热榜顺序打开播放页。 */
   @Builder
   RankRow(item: RankItem, index: number) {
-    Row({ space: HgSpace.s }) {
-      Text(String(index + 1))
-        .width(20)
-        .textAlign(TextAlign.Center)
-        .fontSize(HgFont.caption)
-        .fontWeight(index < 3 ? HgFont.weightMedium : HgFont.weightRegular)
-        .fontColor(index < 3 ? HgColor.accent(this.dark) : HgColor.textTertiary(this.dark))
-      Text(item.title)
-        .fontSize(HgFont.secondary)
-        .fontColor(HgColor.textPrimary(this.dark))
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .layoutWeight(1)
-      Text(this.rankMetricText(item))
-        .fontSize(HgFont.micro)
-        .fontColor(HgColor.textTertiary(this.dark))
-        .maxLines(1)
-        .margin({ left: HgSpace.s })
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.openRankAt(index);
+      }
+    }) {
+      Row({ space: HgSpace.s }) {
+        Text(String(index + 1))
+          .width(20)
+          .textAlign(TextAlign.Center)
+          .fontSize(HgFont.caption)
+          .fontWeight(index < 3 ? HgFont.weightMedium : HgFont.weightRegular)
+          .fontColor(index < 3 ? HgColor.accent(this.dark) : HgColor.textTertiary(this.dark))
+        Text(item.title)
+          .fontSize(HgFont.secondary)
+          .fontColor(HgColor.textPrimary(this.dark))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        Text(this.rankMetricText(item))
+          .fontSize(HgFont.micro)
+          .fontColor(HgColor.textTertiary(this.dark))
+          .maxLines(1)
+          .margin({ left: HgSpace.s })
+      }
+      .width('100%')
+      .height(44)
+      .accessibilityText('热榜第' + (index + 1) + '：' + item.title)
+      .transition(HgMotion.appendTransition())
     }
-    .width('100%')
-    .height(44)
-    .accessibilityText('热榜第' + (index + 1) + '：' + item.title)
-    .onClick(() => {
-      this.openRankAt(index);
-    })
   }
 
   @Builder
@@ -568,6 +566,7 @@ export struct SearchPage {
             Text('完整榜单 ›')
               .fontSize(HgFont.caption)
               .fontColor(HgColor.accent(this.dark))
+              .hoverEffect(HoverEffect.Scale)
               .accessibilityText('完整榜单')
               .onClick(() => {
                 this.navStack.pushPathByName(ROUTE_RANKS, null);
@@ -588,6 +587,7 @@ export struct SearchPage {
             }
             .width('100%')
             .height(HgSize.hitTarget)
+            .transition(HgMotion.fadeIn(HgMotion.fast))
           } else if (this.rankItems.length === 0) {
             Row() {
               Text(this.rankError.length > 0 ? '热榜加载失败' : '暂无热榜数据')
@@ -601,6 +601,7 @@ export struct SearchPage {
                 .fontColor(HgColor.accent(this.dark))
                 .height(HgSize.hitTarget)
                 .padding({ left: HgSpace.s })
+                .hoverEffect(HoverEffect.Scale)
                 .accessibilityText('重试热榜')
                 .onClick(() => {
                   this.loadHotRank();
@@ -608,6 +609,7 @@ export struct SearchPage {
             }
             .width('100%')
             .height(HgSize.hitTarget)
+            .transition(HgMotion.fadeIn(HgMotion.fast))
           } else {
             ForEach(this.rankItems, (item: RankItem, index: number) => {
               this.RankRow(item, index)
@@ -698,14 +700,14 @@ export struct SearchPage {
         }
         .layoutWeight(1)
         .width('100%')
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       } else if (this.loading && !this.hasData) {
         Column() {
           this.SkeletonView()
         }
         .layoutWeight(1)
         .width('100%')
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       } else if (!this.hasData && this.errorText.length > 0) {
         Column() {
           HgEmptyState({
@@ -723,7 +725,7 @@ export struct SearchPage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
         .padding(HgSpace.xxl)
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       } else if (!this.hasData) {
         Column() {
           HgEmptyState({
@@ -741,7 +743,7 @@ export struct SearchPage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
         .padding(HgSpace.xxl)
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       } else {
         // idle→骨架→结果的交叉淡入由 branch transition 统一承担（140ms，无位移）。
         Column() {
@@ -784,7 +786,7 @@ export struct SearchPage {
         }
         .layoutWeight(1)
         .width('100%')
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       }
     }
     .width('100%')

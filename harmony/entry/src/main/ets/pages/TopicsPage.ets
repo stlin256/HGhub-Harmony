@@ -3,7 +3,9 @@ import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { Paged, Topic } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
+import { HgPressable } from '../components/HgPressable';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
@@ -117,9 +119,15 @@ export struct TopicsPage {
 
   @Builder
   TopicCard(topic: Topic) {
-    Column({ space: HgSpace.xs }) {
-      Stack({ alignContent: Alignment.BottomStart }) {
-        HgAsyncCover({
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.open(topic);
+      }
+    }) {
+      Column({ space: HgSpace.xs }) {
+        Stack({ alignContent: Alignment.BottomStart }) {
+          HgAsyncCover({
           url: topic.cover,
           dark: this.dark,
           radius: HgRadius.card,
@@ -145,12 +153,10 @@ export struct TopicsPage {
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .width('100%')
     }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .onClick(() => {
-      this.open(topic);
-    })
-    .accessibilityText(topic.title + '，' + topic.video_count + ' 部')
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .accessibilityText(topic.title + '，' + topic.video_count + ' 部')
+    }
   }
 
   build() {
@@ -170,6 +176,7 @@ export struct TopicsPage {
           }
           .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m })
           .layoutWeight(1)
+          .transition(HgMotion.statusTransition())
         } else if (this.errorText.length > 0) {
           Column() {
             HgEmptyState({
@@ -184,28 +191,37 @@ export struct TopicsPage {
           }
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
+          .transition(HgMotion.statusTransition())
         } else if (this.items.length === 0) {
           Column() {
             HgEmptyState({ dark: this.dark, title: '暂无专题', description: '稍后再来看看' })
           }
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
+          .transition(HgMotion.statusTransition())
         } else {
-          Grid() {
-            ForEach(this.items, (topic: Topic) => {
-              GridItem() {
-                this.TopicCard(topic)
-              }
-            }, (topic: Topic) => 'topic-' + topic.id)
+          Column() {
+            Grid() {
+              ForEach(this.items, (topic: Topic) => {
+                GridItem() {
+                  this.TopicCard(topic)
+                }
+                .transition(HgMotion.appendTransition())
+              }, (topic: Topic) => 'topic-' + topic.id)
+            }
+            .columnsTemplate(HgGrid.template(this.columns()))
+            .columnsGap(HgSpace.m)
+            .rowsGap(HgSpace.l)
+            .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m, bottom: this.bottomInset + HgSpace.l })
+            .width('100%')
+            .height('100%')
+            .onReachEnd(() => {
+              this.loadMore();
+            })
           }
-          .columnsTemplate(HgGrid.template(this.columns()))
-          .columnsGap(HgSpace.m)
-          .rowsGap(HgSpace.l)
-          .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m, bottom: this.bottomInset + HgSpace.l })
           .layoutWeight(1)
-          .onReachEnd(() => {
-            this.loadMore();
-          })
+          .width('100%')
+          .transition(HgMotion.statusTransition())
         }
       }
       .width('100%')
@@ -213,5 +229,6 @@ export struct TopicsPage {
       .backgroundColor(HgColor.pageBackground(this.dark))
     }
     .hideTitleBar(true)
+    .systemTransition(NavigationSystemTransitionType.FADE)
   }
 }

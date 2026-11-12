@@ -1,7 +1,8 @@
 import { HgPosterCard } from '../HgPosterCard';
 import { HgListSource } from './HgListSource';
 import { VideoCard } from '../../models/Types';
-import { HgColor, HgSize, HgSpace } from '../../design/HgTokens';
+import { HgSpace } from '../../design/HgTokens';
+import { HgMotion } from '../../design/HgMotion';
 import { HgGrid } from '../../design/HgGrid';
 
 /**
@@ -23,7 +24,7 @@ export struct HgFeedGrid {
   /** 列表下方内边距（vp）：Tab 页传 tabBarFloating + bottomInset，详情页传 bottomInset 等。 */
   @Prop bottomPadding: number = 0;
   @Prop refreshing: boolean = false;
-  /** 切 TAG / 换一批时的整表淡入透明度。 */
+  /** 切 TAG / 换一批时的整表淡入透明度（挂在 Grid 外层容器，见 build）。 */
   @Prop listOpacity: number = 1;
   /** 切 TAG 时轻微纵向位移（动画结束由调用方复位 0）。 */
   @Prop listOffset: number = 0;
@@ -56,76 +57,83 @@ export struct HgFeedGrid {
   }
 
   build() {
-    Refresh({ refreshing: this.refreshing }) {
-      Grid(this.gridScroller) {
-        if (this.showHeader) {
-          GridItem() {
-            this.header()
+    // 整表淡入/位移挂在 Grid 外层容器：LazyForEach 已建项不会因共享 @State 变化重建，
+    // 挂在项内会导致「换一批/切 TAG」的淡出与位移不生效（审计 A P0-2）。
+    Column() {
+      Refresh({ refreshing: this.refreshing }) {
+        Grid(this.gridScroller) {
+          if (this.showHeader) {
+            GridItem() {
+              this.header()
+            }
+            .columnStart(0)
+            // Header 横跨整行：列数变化时必须跟随（不能写死 0..1）。
+            .columnEnd(this.columnsCount() - 1)
           }
-          .columnStart(0)
-          // Header 横跨整行：列数变化时必须跟随（不能写死 0..1）。
-          .columnEnd(this.columnsCount() - 1)
-        }
 
-        LazyForEach(this.source, (item: VideoCard, index: number) => {
-          GridItem() {
-            HgPosterCard({
-              videoId: item.id,
-              title: item.title,
-              coverUrl: item.cover,
-              score: item.score,
-              episodeCount: item.episode_count,
-              dark: this.dark,
-              onOpen: (id: number) => {
-                this.onOpen(index);
+          LazyForEach(this.source, (item: VideoCard, index: number) => {
+            GridItem() {
+              HgPosterCard({
+                videoId: item.id,
+                title: item.title,
+                coverUrl: item.cover,
+                score: item.score,
+                episodeCount: item.episode_count,
+                dark: this.dark,
+                onOpen: (id: number) => {
+                  this.onOpen(index);
+                }
+              })
+            }
+            // 触底追加的新条目：appear 时 fast 淡入（只作用于新增项）。
+            .transition(HgMotion.appendTransition())
+            // 曝光事件：可见面积 ≥50% 时上报（去重逻辑由宿主负责，供画像/RDB 事件层使用）。
+            .onVisibleAreaChange([0.0, 0.5, 1.0], (isExpanding: boolean, ratio: number) => {
+              if (ratio >= 0.5) {
+                this.onImpression(item.id);
               }
             })
-          }
-          // 切 TAG / 换一批只淡出淡入瀑布流卡片，Header/Hero 保持挂载与清晰。
-          .opacity(this.listOpacity)
-          .translate({ y: this.listOffset })
-          // 曝光事件：可见面积 ≥50% 时上报（去重逻辑由宿主负责，供画像/RDB 事件层使用）。
-          .onVisibleAreaChange([0.0, 0.5, 1.0], (isExpanding: boolean, ratio: number) => {
-            if (ratio >= 0.5) {
-              this.onImpression(item.id);
-            }
-          })
-        }, (item: VideoCard) => item.id.toString())
+          }, (item: VideoCard) => item.id.toString())
 
-        if (this.showFooter) {
-          GridItem() {
-            this.footer()
+          if (this.showFooter) {
+            GridItem() {
+              this.footer()
+            }
+            .columnStart(0)
+            .columnEnd(this.columnsCount() - 1)
           }
-          .columnStart(0)
-          .columnEnd(this.columnsCount() - 1)
         }
+        .columnsTemplate(HgGrid.template(this.columnsCount()))
+        .columnsGap(HgSpace.s)
+        .rowsGap(HgSpace.m)
+        .cachedCount(this.cachedCount)
+        .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.Spring)
+        .padding({
+          left: this.sideInset(),
+          right: this.sideInset(),
+          top: this.topPadding,
+          bottom: this.bottomPadding
+        })
+        .width('100%')
+        .height('100%')
+        .onScrollIndex((first: number, last: number) => {
+          this.onScrollLast(last);
+        })
+        .onReachEnd(() => {
+          this.onLoadMore();
+        })
       }
-      .columnsTemplate(HgGrid.template(this.columnsCount()))
-      .columnsGap(HgSpace.s)
-      .rowsGap(HgSpace.m)
-      .cachedCount(this.cachedCount)
-      .scrollBar(BarState.Off)
-      .edgeEffect(EdgeEffect.Spring)
-      .padding({
-        left: this.sideInset(),
-        right: this.sideInset(),
-        top: this.topPadding,
-        bottom: this.bottomPadding
-      })
+      .layoutWeight(1)
       .width('100%')
-      .height('100%')
-      .onScrollIndex((first: number, last: number) => {
-        this.onScrollLast(last);
-      })
-      .onReachEnd(() => {
-        this.onLoadMore();
+      .refreshOffset(64)
+      .onRefreshing(() => {
+        this.onRefresh();
       })
     }
-    .layoutWeight(1)
     .width('100%')
-    .refreshOffset(64)
-    .onRefreshing(() => {
-      this.onRefresh();
-    })
+    .layoutWeight(1)
+    .opacity(this.listOpacity)
+    .translate({ y: this.listOffset })
   }
 }
