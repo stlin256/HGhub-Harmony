@@ -345,18 +345,18 @@ export struct VideoDetailPage {
     if (!UserPrefs.loggedIn()) {
       this.faved = next;
       this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
-      UserPrefs.toggleFav(this.params.id);
+      UserPrefs.toggleFav(this.params.id, this.title, this.coverUrl);
       UiBus.toastOk(next ? '已收藏（本地）' : '已取消收藏');
       return;
     }
     const previousCount = this.collectCount;
     this.faved = next;
     this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
-    UserPrefs.toggleFav(this.params.id);
+    UserPrefs.toggleFav(this.params.id, this.title, this.coverUrl);
     Api.collect(this.params.id, next).catch((err: Object) => {
       this.faved = !next;
       this.collectCount = previousCount;
-      UserPrefs.toggleFav(this.params.id);
+      UserPrefs.toggleFav(this.params.id, this.title, this.coverUrl);
       UiBus.toast('操作失败，请稍后重试');
     });
   }

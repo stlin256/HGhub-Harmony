@@ -83,6 +83,14 @@
     {
       "name": "widget_desc",
       "value": "Shows your latest watch progress"
+    },
+    {
+      "name": "widget_favorites_display_name",
+      "value": "Favorites"
+    },
+    {
+      "name": "widget_favorites_desc",
+      "value": "My favorites shelf"
     }
   ]
 }

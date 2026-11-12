@@ -8,84 +8,179 @@ const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGForm';
 const PREF_NAME: string = 'hghub';
 const KEY_HISTORY: string = 'history';
+const KEY_FAVS: string = 'favs';
+const KEY_FAV_META: string = 'fav_meta';
+const KEY_STYLE_PREFIX: string = 'form_style_';
+const FORM_IDENTITY_KEY: string = 'ohos.extra.param.key.form_identity';
+const FORM_NAME_KEY: string = 'ohos.extra.param.key.form_name';
+const FORM_WIDGET: string = 'widget';
+const FORM_FAVORITES: string = 'favorites';
 
-/** 卡片数据：最近一条观看记录（无记录时 has=false）。 */
+/** 继续观看卡片数据（无记录时 has=false）。 */
 interface CardData {
   has: boolean;
   ep: number;
   percent: number;
   label: string;
-  /** 最近观看剧名 / 封面（旧历史记录可能没有）。 */
   title: string;
   cover: string;
 }
 
+/** 收藏影视架卡片数据：items 以 JSON 字符串下发，widget 内解析。 */
+interface FavsData {
+  favJson: string;
+  count: number;
+}
+
+interface FavItem {
+  title: string;
+  cover: string;
+}
+
+interface FavoriteMeta {
+  id: number;
+  title?: string;
+  cover?: string;
+}
+
+interface FavoritePayload {
+  items?: FavItem[];
+}
+
+interface WatchItem {
+  id: number;
+  ep: number;
+  t: number;
+  dur: number;
+  at: number;
+  title?: string;
+  cover?: string;
+}
+
 /**
- * 服务卡片（2*2）：展示最近一条观看进度，点击打开应用继续观看。
- *
- * 数据来源：与应用共享的 preferences（`hghub` / `history`），只读、不写。
- * 卡片进程拿不到 UIAbilityContext，因此这里直接用 preferences API 读，不走 Prefs 单例。
+ * 服务卡片（2 个样式）：
+ * - widget 2*2：最近观看封面 + 顶部「继续观看」；
+ * - favorites 4*2：收藏影视架（最多 4 张封面，无收藏用 SVG 占位卡）。
+ * 数据来源：与应用共享的 preferences（hghub），只读；卡片进程拿不到 UIAbilityContext，直接读 prefs。
  */
 export default class EntryFormAbility extends FormExtensionAbility {
   onAddForm(want: Want): formBindingData.FormBindingData {
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'onAddForm');
-    // 首次添加卡片时先返回占位数据，随后异步刷新真实进度。
+    const formId: string = EntryFormAbility.getFormId(want);
+    const formName: string = EntryFormAbility.getFormName(want);
+    this.rememberStyle(formId, formName);
+    hilog.info(LOG_DOMAIN, LOG_TAG, 'onAddForm name=%{public}s', formName);
+    if (formName === FORM_FAVORITES) {
+      const empty: FavsData = { favJson: '{"items":[]}', count: 0 };
+      this.refreshFavsAsync(formId);
+      return formBindingData.createFormBindingData(empty as Object);
+    }
     const placeholder: CardData = { has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' };
-    this.refreshAsync(want);
+    this.refreshContinueAsync(formId);
     return formBindingData.createFormBindingData(placeholder as Object);
   }
 
   onUpdateForm(formId: string): void {
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'onUpdateForm');
-    this.buildData((data: CardData) => {
-      formProvider.updateForm(formId, formBindingData.createFormBindingData(data as Object)).catch(() => {
-        hilog.warn(LOG_DOMAIN, LOG_TAG, 'updateForm failed');
-      });
-    });
+    const style: string = this.styleOf(formId);
+    hilog.info(LOG_DOMAIN, LOG_TAG, 'onUpdateForm style=%{public}s', style);
+    if (style === FORM_FAVORITES) {
+      this.buildFavsData(formId);
+    } else {
+      this.buildContinueData(formId);
+    }
   }
 
   onRemoveForm(formId: string): void {
     hilog.info(LOG_DOMAIN, LOG_TAG, 'onRemoveForm');
+    try {
+      const store = preferences.getPreferencesSync(this.context, { name: PREF_NAME });
+      store.deleteSync(KEY_STYLE_PREFIX + formId);
+      store.flushSync();
+    } catch (err) {
+    }
   }
 
-  /** 添加卡片后的异步刷新：拿到真实进度再推一次。 */
-  private refreshAsync(want: Want): void {
-    this.buildData((data: CardData) => {
-      try {
-        const formId: string = want.parameters !== undefined && want.parameters !== null ?
-          String(want.parameters['ohos.extra.param.key.form_identity'] ?? '') : '';
-        if (formId.length > 0) {
-          formProvider.updateForm(formId, formBindingData.createFormBindingData(data as Object)).catch(() => {
-          });
-        }
-      } catch (err) {
-      }
-    });
+  private refreshContinueAsync(formId: string): void {
+    if (formId.length === 0) {
+      return;
+    }
+    this.buildContinueData(formId);
   }
 
-  /** 读取最近一条观看记录并组装卡片数据。 */
-  private buildData(done: (data: CardData) => void): void {
+  private refreshFavsAsync(formId: string): void {
+    if (formId.length === 0) {
+      return;
+    }
+    this.buildFavsData(formId);
+  }
+
+  private buildContinueData(formId: string): void {
     preferences.getPreferences(this.context, { name: PREF_NAME })
       .then((store: preferences.Preferences) => {
         try {
           const raw: preferences.ValueType = store.getSync(KEY_HISTORY, '[]');
           const text: string = typeof raw === 'string' ? raw : '[]';
-          done(EntryFormAbility.parseHistory(text));
+          const data: CardData = EntryFormAbility.parseHistory(text);
+          EntryFormAbility.update(formId, data as Object);
         } catch (err) {
-          done({ has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' });
+          const empty: CardData = { has: false, ep: 0, percent: 0, label: '', title: '', cover: '' };
+          EntryFormAbility.update(formId, empty as Object);
         }
       })
       .catch(() => {
-        done({ has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' });
       });
   }
 
-  /** 解析历史 JSON，取最近一条（数组末尾）。 */
+  private buildFavsData(formId: string): void {
+    preferences.getPreferences(this.context, { name: PREF_NAME })
+      .then((store: preferences.Preferences) => {
+        let ids: number[] = [];
+        let meta: FavoriteMeta[] = [];
+        try {
+          const rawIds: preferences.ValueType = store.getSync(KEY_FAVS, '[]');
+          const idsText: string = typeof rawIds === 'string' ? rawIds : '[]';
+          ids = JSON.parse(idsText) as number[];
+          const rawMeta: preferences.ValueType = store.getSync(KEY_FAV_META, '[]');
+          const metaText: string = typeof rawMeta === 'string' ? rawMeta : '[]';
+          meta = JSON.parse(metaText) as FavoriteMeta[];
+        } catch (err) {
+          ids = [];
+          meta = [];
+        }
+        const items: FavItem[] = [];
+        for (let i = 0; i < ids.length && items.length < 4; i++) {
+          const id: number = ids[i];
+          let title: string = '';
+          let cover: string = '';
+          for (let j = 0; j < meta.length; j++) {
+            if (meta[j].id === id) {
+              title = meta[j].title !== undefined && meta[j].title !== null ? String(meta[j].title) : '';
+              cover = meta[j].cover !== undefined && meta[j].cover !== null ? String(meta[j].cover) : '';
+              break;
+            }
+          }
+          items.push({ title: title, cover: cover });
+        }
+        const payload: FavoritePayload = { items: items };
+        const data: FavsData = { favJson: JSON.stringify(payload), count: ids.length };
+        EntryFormAbility.update(formId, data as Object);
+      })
+      .catch(() => {
+      });
+  }
+
+  private static update(formId: string, data: Object): void {
+    try {
+      formProvider.updateForm(formId, formBindingData.createFormBindingData(data)).catch(() => {
+      });
+    } catch (err) {
+    }
+  }
+
   private static parseHistory(text: string): CardData {
     try {
       const list = JSON.parse(text) as WatchItem[];
       if (list === null || list.length === 0) {
-        return { has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' };
+        return { has: false, ep: 0, percent: 0, label: '', title: '', cover: '' };
       }
       const last: WatchItem = list[list.length - 1];
       const dur: number = last.dur > 0 ? last.dur : 0;
@@ -98,22 +193,59 @@ export default class EntryFormAbility extends FormExtensionAbility {
         ep: ep,
         percent: percent,
         label: '第 ' + ep + ' 集 · 已看 ' + percent + '%',
-        title: title.length > 0 ? title : '继续观看',
+        title: title,
         cover: cover
       };
     } catch (err) {
-      return { has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' };
+      return { has: false, ep: 0, percent: 0, label: '', title: '', cover: '' };
     }
   }
-}
 
-/** 历史记录条目（与 UserPrefs.WatchProgress 对齐）。 */
-interface WatchItem {
-  id: number;
-  ep: number;
-  t: number;
-  dur: number;
-  at: number;
-  title?: string;
-  cover?: string;
+  private static getFormId(want: Want): string {
+    try {
+      const params = want.parameters;
+      if (params === undefined || params === null) {
+        return '';
+      }
+      const id: Object | undefined = params[FORM_IDENTITY_KEY];
+      return id !== undefined && id !== null ? String(id) : '';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  private static getFormName(want: Want): string {
+    try {
+      const params = want.parameters;
+      if (params === undefined || params === null) {
+        return FORM_WIDGET;
+      }
+      const name: Object | undefined = params[FORM_NAME_KEY];
+      return name !== undefined && name !== null ? String(name) : FORM_WIDGET;
+    } catch (err) {
+      return FORM_WIDGET;
+    }
+  }
+
+  private rememberStyle(formId: string, formName: string): void {
+    if (formId.length === 0) {
+      return;
+    }
+    try {
+      const store = preferences.getPreferencesSync(this.context, { name: PREF_NAME });
+      store.putSync(KEY_STYLE_PREFIX + formId, formName);
+      store.flushSync();
+    } catch (err) {
+    }
+  }
+
+  private styleOf(formId: string): string {
+    try {
+      const store = preferences.getPreferencesSync(this.context, { name: PREF_NAME });
+      const raw: preferences.ValueType = store.getSync(KEY_STYLE_PREFIX + formId, FORM_WIDGET);
+      return typeof raw === 'string' ? raw : FORM_WIDGET;
+    } catch (err) {
+      return FORM_WIDGET;
+    }
+  }
 }
