@@ -2,7 +2,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
 import { UiBus } from '../services/UiBus';
 import { K_BOTTOM_INSET, K_TOP_INSET, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
-import { ROUTE_PLAYER, PlayerParam, VideoParam } from '../state/Routes';
+import { ROUTE_PLAYER, PlayerParam, VideoParam, ROUTE_USER, UserParam } from '../state/Routes';
 import { Detail, WatchProgress } from '../models/Types';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
@@ -38,6 +38,7 @@ export struct VideoDetailPage {
   @State episodeNumbers: number[] = [];
   @State previewNumbers: number[] = [];
   @State authorName: string = '';
+  @State authorId: number = 0;
   @State likeCount: number = 0;
   @State collectCount: number = 0;
   @State commentCount: number = 0;
@@ -189,6 +190,9 @@ export struct VideoDetailPage {
     this.episodeNumbers = all;
     this.previewNumbers = preview;
     const author = detail.author;
+    if (author !== undefined && author !== null && author.id !== undefined && author.id !== null) {
+      this.authorId = author.id;
+    }
     if (author !== undefined && author !== null && author.name !== undefined && author.name !== null) {
       this.authorName = author.name;
     }
@@ -567,6 +571,13 @@ export struct VideoDetailPage {
     .padding(HgSpace.m)
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
+    .onClick(() => {
+      if (this.authorId > 0) {
+        const param: UserParam = { uid: this.authorId };
+        this.navStack.pushPathByName(ROUTE_USER, param);
+      }
+    })
+    .accessibilityText('作者 ' + (this.authorName.length > 0 ? this.authorName : '匿名') + '，查看主页')
   }
 
   @Builder

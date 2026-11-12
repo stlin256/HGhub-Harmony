@@ -6,7 +6,7 @@ import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import {
   ChannelParam, PlayerParam, PostParam, ROUTE_CHANNEL, ROUTE_PLAYER, ROUTE_POST,
-  ROUTE_POSTS, ROUTE_RANKS
+  ROUTE_POSTS, ROUTE_RANKS, ROUTE_TOPICS
 } from '../state/Routes';
 import { fmt } from '../utils/Format';
 
@@ -520,6 +520,48 @@ export struct CategoryPage {
   }
 
   @Builder
+  TopicsEntry() {
+    Row({ space: HgSpace.m }) {
+      Stack() {
+        Row()
+          .width(36)
+          .height(36)
+          .backgroundColor(HgColor.accentSoft(this.dark))
+          .borderRadius(18)
+        SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+          .fontSize(HgFont.section)
+          .fontColor([HgColor.accent(this.dark)])
+      }
+      .width(36)
+      .height(36)
+
+      Column({ space: 2 }) {
+        Text('专题')
+          .fontSize(HgFont.rowTitle)
+          .fontColor(HgColor.textPrimary(this.dark))
+        Text('精选合集 · 按主题浏览')
+          .fontSize(HgFont.micro)
+          .fontColor(HgColor.textTertiary(this.dark))
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Text('查看全部 ›')
+        .fontSize(HgFont.caption)
+        .fontColor(HgColor.accent(this.dark))
+    }
+    .width('100%')
+    .height(64)
+    .padding({ left: HgSpace.m, right: HgSpace.m })
+    .backgroundColor(HgColor.surface1(this.dark))
+    .borderRadius(HgRadius.group)
+    .onClick(() => {
+      this.navStack.pushPathByName(ROUTE_TOPICS, null);
+    })
+    .accessibilityText('专题，查看全部')
+  }
+
+  @Builder
   PostsSection() {
     Column() {
       this.SectionTitle($r('sys.symbol.message'), '黄果吃瓜', '圈内爆料 · 每日更新', () => {
@@ -612,6 +654,13 @@ export struct CategoryPage {
             }
             .width('100%')
             .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+
+            Column() {
+              this.TopicsEntry()
+            }
+            .width('100%')
+            .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+            .margin({ top: HgSpace.m })
 
             ForEach(CHANNELS, (info: CateInfo, index: number) => {
               this.CateSection(index)
