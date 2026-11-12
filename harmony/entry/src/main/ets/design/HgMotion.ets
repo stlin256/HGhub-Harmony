@@ -29,6 +29,18 @@ export class HgMotion {
   static readonly pressScale: number = 0.96;
   /** 页面/区块入场纵向位移（vp）。 */
   static readonly enterOffset: number = 8;
+  /** 列表整体替换：先淡出 exitFast，替换数据后再 standard 淡入。 */
+  static readonly listSwapOut: number = 120;
+  static readonly listSwapIn: number = 220;
+  /** 主题切换颜色过渡（只动颜色/透明度，不位移）。 */
+  static readonly themeFade: number = 180;
+  /** 骨架呼吸：900ms alternate，低对比 0.88↔1.0；减少动效时静态。 */
+  static readonly skeletonPulseMs: number = 900;
+  static readonly skeletonPulseMin: number = 0.88;
+  /** 睡眠/降级：循环骨架是否允许播放（reduced 时 false）。 */
+  static skeletonAnimated(): boolean {
+    return !HgMotion.reduced();
+  }
 
   /** 统一标准曲线：所有结构性过渡使用同一条曲线，避免各页面手感不一。 */
   static readonly curve: Curve = Curve.FastOutSlowIn;
@@ -49,6 +61,24 @@ export class HgMotion {
   /** 淡入（骨架→内容 / 区块替换）。 */
   static fadeIn(duration: number = HgMotion.standard): TransitionEffect {
     return TransitionEffect.OPACITY.animation({ duration: HgMotion.ms(duration), curve: HgMotion.curve });
+  }
+
+  /** 列表新条目出现（LazyForEach append）：只对新增项做 fast 淡入。 */
+  static appendTransition(): TransitionEffect {
+    return HgMotion.fadeIn(HgMotion.fast);
+  }
+
+  /** 骨架/空态/错误/内容四类状态分支切换：standard 淡入 + exitFast 淡出。 */
+  static statusTransition(): TransitionEffect {
+    return TransitionEffect.asymmetric(
+      HgMotion.fadeIn(HgMotion.standard),
+      HgMotion.fadeOut(HgMotion.exitFast)
+    );
+  }
+
+  /** 按压时长：按下 instant，松开 fast（统一按压反馈节奏）。 */
+  static pressMs(pressed: boolean): number {
+    return HgMotion.ms(pressed ? HgMotion.instant : HgMotion.fast);
   }
 
   /** 淡出。 */
