@@ -99,7 +99,8 @@ export class UserPrefs {
     AppStorage.setOrCreate<boolean>(K_DARK, UserPrefs.resolveDark(mode, systemDark));
     AppStorage.setOrCreate<boolean>(K_MUTED, Prefs.getBool('muted', true));
     AppStorage.setOrCreate<boolean>(K_MUTE_ON_STARTUP, Prefs.getBool('mute_on_startup', true));
-    AppStorage.setOrCreate<boolean>(K_PREFER_HEVC, Prefs.getBool('prefer_hevc', false));
+    // 默认启用「优先高清（HEVC）」：有高清源时默认走高画质，用户可在设置中关闭。
+    AppStorage.setOrCreate<boolean>(K_PREFER_HEVC, Prefs.getBool('prefer_hevc', true));
     AppStorage.setOrCreate<number>(K_VOLUME, Prefs.getNumber('volume', 0.7));
     AppStorage.setOrCreate<string>(K_VIDEO_SCALE, UserPrefs.normalizeVideoScale(Prefs.getString('video_scale', 'contain')));
     AppStorage.setOrCreate<string>(K_LIKES, Prefs.getString('likes', '[]'));
