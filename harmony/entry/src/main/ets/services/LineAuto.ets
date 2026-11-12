@@ -253,6 +253,42 @@ export class LineAuto {
     return out;
   }
 
+  /**
+   * 批量探测延迟（增量回调版）：逐条并发探测，每条结果一到就回调，供线路面板「边测边刷」。
+   * 并发数 = 传入条数（调用方控制 ≤64）；命中 60s 缓存立即回调。
+   */
+  static async probeLatencyIncremental(urls: string[],
+    onResult: (url: string, ms: number) => void): Promise<void> {
+    const now: number = Date.now();
+    const tasks: Promise<void>[] = [];
+    const seen: Set<string> = new Set<string>();
+    for (let i = 0; i < urls.length; i++) {
+      const url: string = Lines.normalize(urls[i]);
+      if (url.length === 0 || seen.has(url)) {
+        continue;
+      }
+      seen.add(url);
+      const cachedAt: number = LineAuto.probeCacheAt.get(url) ?? 0;
+      const cachedMs: number = LineAuto.probeCache.get(url) ?? -1;
+      if (cachedAt > 0 && now - cachedAt < PROBE_CACHE_TTL_MS) {
+        onResult(url, cachedMs);
+        continue;
+      }
+      tasks.push(Lines.probe([url]).then((results: LineProbe[]) => {
+        const result: LineProbe | null = results.length > 0 ? results[0] : null;
+        const ms: number = result !== null && result.ok ? result.ms : -1;
+        LineAuto.probeCache.set(url, ms);
+        LineAuto.probeCacheAt.set(url, now);
+        onResult(url, ms);
+      }).catch(() => {
+        LineAuto.probeCache.set(url, -1);
+        LineAuto.probeCacheAt.set(url, now);
+        onResult(url, -1);
+      }));
+    }
+    await Promise.all(tasks);
+  }
+
   /** 播放页激活时调用：启动播放中线路巡检（仅播放中运行，暂停/离开即停）。 */
   static startWatch(): void {
     if (!LineAuto.enabled || LineAuto.watching) {
