@@ -1,5 +1,5 @@
 import { Api } from '../services/Api';
-import { SearchResult, VideoCard } from '../models/Types';
+import { HotWord, SearchResult, VideoCard } from '../models/Types';
 import { UserPrefs } from '../state/UserPrefs';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
@@ -9,6 +9,7 @@ import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } fr
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
+import { fmt } from '../utils/Format';
 
 /** 12 个热门题材（从原 Web src/pages/Search.tsx 克隆）。 */
 const HOT_TAGS: string[] = ['都市', '逆袭', '古风', '系统', '后宫', '校园',
@@ -28,6 +29,8 @@ export struct SearchPage {
   @State keyword: string = '';
   @State submitted: string = '';
   @State hist: string[] = [];
+  /** 实时热搜（接口失败时为空，回退本地 HOT_TAGS）。 */
+  @State hotWords: HotWord[] = [];
   @State items: VideoCard[] = [];
   @State total: number = 0;
   @State hasData: boolean = false;
@@ -68,7 +71,19 @@ export struct SearchPage {
   }
 
   aboutToAppear(): void {
+    this.loadHotWords();
     this.hist = UserPrefs.searchHist();
+  }
+
+  /** 拉取实时热搜词；失败静默，界面回退本地 HOT_TAGS。 */
+  private async loadHotWords(): Promise<void> {
+    try {
+      const list: HotWord[] = await Api.hotSearch();
+      if (list.length > 0) {
+        this.hotWords = list;
+      }
+    } catch (err) {
+    }
   }
 
   private submit(text: string): void {
@@ -409,6 +424,40 @@ export struct SearchPage {
           }
           .width('100%')
           .height(HgSize.hitTarget)
+
+          if (this.hotWords.length > 0) {
+            Column({ space: HgSpace.xs }) {
+              Text('实时热搜')
+                .fontSize(HgFont.caption)
+                .fontColor(HgColor.textTertiary(this.dark))
+                .width('100%')
+              ForEach(this.hotWords.slice(0, 5), (word: HotWord, index: number) => {
+                Row({ space: HgSpace.s }) {
+                  Text(String(index + 1))
+                    .fontSize(HgFont.caption)
+                    .fontColor(index < 3 ? HgColor.accent(this.dark) : HgColor.textTertiary(this.dark))
+                    .width(18)
+                  Text(word.word)
+                    .fontSize(HgFont.secondary)
+                    .fontColor(HgColor.textPrimary(this.dark))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .layoutWeight(1)
+                  Text(fmt(word.heat))
+                    .fontSize(HgFont.micro)
+                    .fontColor(HgColor.textTertiary(this.dark))
+                }
+                .width('100%')
+                .height(32)
+                .onClick(() => {
+                  this.submit(word.word);
+                })
+                .accessibilityText('热搜第' + (index + 1) + '：' + word.word)
+              }, (word: HotWord) => 'hw-' + word.word)
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+          }
 
           Flex({ wrap: FlexWrap.Wrap }) {
             ForEach(HOT_TAGS, (tag: string) => {
