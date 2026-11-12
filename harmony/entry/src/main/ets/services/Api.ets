@@ -6,6 +6,7 @@ import { Session } from './Session';
 import { ImageCache } from './ImageCache';
 import { AppContext } from './AppContext';
 import { LineAuto } from './LineAuto';
+import { MultiSource } from './MultiSource';
 import { UserPrefs } from '../state/UserPrefs';
 import { isSafeWebUrl, parseBoundedJson, parseWebUrl } from '../utils/Security';
 import {
@@ -132,6 +133,10 @@ export class Api {
   private static async edge(method: string, path: string, body: Object | null): Promise<Object | null> {
     const originBase: string = Lines.current();
     try {
+      // 多源聚合：幂等 GET 按自适应 hedge 并发多条线路，取最快稳定响应。
+      if (UserPrefs.multiSource() && method === 'GET') {
+        return await Api.edgeAggregated(method, path, body);
+      }
       return await Api.edgeOnce(method, path, body);
     } catch (err) {
       const message: string = Api.errMessage(err);
@@ -211,6 +216,91 @@ export class Api {
       setTimeout(() => {
         resolve();
       }, ms);
+    });
+  }
+
+  /**
+   * 多源聚合请求（仅 GET）：当前线路优先；在自适应 hedge 时间内未返回则并发下一线路，
+   * 最多 MultiSource.fanout() 条；首个成功即返回，业务错误/全部失败才报错。
+   * 成功源会记录 last_good，但不在此处切换当前线路（避免请求链中途清会话/触发整页重载）。
+   */
+  private static async edgeAggregated(method: string, path: string,
+    body: Object | null): Promise<Object | null> {
+    const bases: string[] = MultiSource.candidates();
+    if (bases.length <= 1) {
+      return await Api.edgeOnce(method, path, body);
+    }
+    const maxFanout: number = Math.min(MultiSource.fanout(), bases.length);
+    const hedgeMs: number = MultiSource.hedgeMs();
+    return await new Promise<Object | null>((resolve: (value: Object | null) => void,
+      reject: (reason: Object) => void) => {
+      let settled: boolean = false;
+      let started: number = 0;
+      let timer: number = -1;
+      let lastErr: Object = new Error('网络请求失败');
+
+      const clearTimer = (): void => {
+        if (timer >= 0) {
+          clearTimeout(timer);
+          timer = -1;
+        }
+      };
+
+      const startNext = (): void => {
+        if (settled || started >= maxFanout) {
+          return;
+        }
+        const base: string = bases[started];
+        started++;
+        const startedAt: number = Date.now();
+        Net.edge(base, method, path, body, Session.tokenFor(base)).then((data: Object | null) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimer();
+          MultiSource.markOk(base, Date.now() - startedAt);
+          LineAuto.markSuccess(base);
+          Api.startupPhase = false;
+          Api.startupRetries = 0;
+          resolve(data);
+        }).catch((err: Object) => {
+          if (settled) {
+            return;
+          }
+          MultiSource.markFail(base);
+          lastErr = err;
+          const message: string = Api.errMessage(err);
+          const retryable: boolean = Api.retryableNetworkError(message) ||
+            Api.retryableForStartup(message);
+          if (!retryable || started >= maxFanout) {
+            // 业务错误或候选耗尽：确认失败，交给上层统一错误/退避逻辑。
+            settled = true;
+            clearTimer();
+            reject(err);
+            return;
+          }
+          // 该源网络失败：立刻尝试下一个源（不必等 hedge）。
+          startNext();
+        });
+      };
+
+      const scheduleNext = (): void => {
+        if (settled || started >= maxFanout) {
+          return;
+        }
+        timer = setTimeout(() => {
+          timer = -1;
+          if (settled) {
+            return;
+          }
+          startNext();
+          scheduleNext();
+        }, hedgeMs);
+      };
+
+      startNext();
+      scheduleNext();
     });
   }
 

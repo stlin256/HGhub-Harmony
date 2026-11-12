@@ -11,7 +11,7 @@ import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
-import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
+import { K_BOTTOM_INSET, K_DARK, K_MULTI_SOURCE, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
 import { ROUTE_REC_DATA, ROUTE_REC_HOW } from '../state/Routes';
 import { hostOf } from '../utils/Format';
 
@@ -171,6 +171,7 @@ export struct SettingsPage {
   @State muteOnStartup: boolean = true;
   /** 优先高清（HEVC）：有高清源时优先播放。 */
   @State preferHevc: boolean = false;
+  @State multiSource: boolean = true;
   /** 本地崩溃记录数（进入页面时刷新）。 */
   @State crashCount: number = 0;
   /** 最近一次启动耗时（毫秒，0=无记录）。 */
@@ -224,6 +225,7 @@ export struct SettingsPage {
     this.themeMode = UserPrefs.themeMode();
     this.muteOnStartup = UserPrefs.muteOnStartup();
     this.preferHevc = UserPrefs.preferHevc();
+    this.multiSource = UserPrefs.multiSource();
     this.crashCount = CrashGuard.count();
     this.startupMs = PerfMark.lastStartupMs();
     // 只在进入设置页时统计一次占用空间（内存+磁盘合计），build 期间不再同步扫磁盘。
@@ -578,6 +580,34 @@ export struct SettingsPage {
   @Builder
   NetworkGroup() {
     Column() {
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.arrow_clockwise'))
+        Column({ space: 2 }) {
+          Text('多源加速')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text('并发请求多条线路取最快响应（默认开启）')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(2)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.multiSource })
+          .selectedColor(HgColor.accent(this.dark))
+          .onChange((isOn: boolean) => {
+            this.multiSource = isOn;
+            UserPrefs.setMultiSource(isOn);
+          })
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.speaker_wave_2'))
         Column({ space: 2 }) {

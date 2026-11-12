@@ -12,6 +12,8 @@ export const K_MUTED = 'hgMuted';
 export const K_MUTE_ON_STARTUP = 'hgMuteOnStartup';
 /** 优先高清（HEVC）：有高清源时优先播放。 */
 export const K_PREFER_HEVC = 'hgPreferHevc';
+/** 多源聚合：GET 请求按 hedge 策略并发多条线路，取最快稳定响应（默认开启）。 */
+export const K_MULTI_SOURCE = 'hgMultiSource';
 export const K_VOLUME = 'hgVolume';
 export const K_LIKES = 'hgLikesJson';
 export const K_FAVS = 'hgFavsJson';
@@ -103,6 +105,8 @@ export class UserPrefs {
     AppStorage.setOrCreate<boolean>(K_MUTE_ON_STARTUP, Prefs.getBool('mute_on_startup', true));
     // 默认启用「优先高清（HEVC）」：有高清源时默认走高画质，用户可在设置中关闭。
     AppStorage.setOrCreate<boolean>(K_PREFER_HEVC, Prefs.getBool('prefer_hevc', true));
+    // 多源聚合默认开启；关闭后只走当前线路（省流量/排查问题时用）。
+    AppStorage.setOrCreate<boolean>(K_MULTI_SOURCE, Prefs.getBool('multi_source', true));
     AppStorage.setOrCreate<number>(K_VOLUME, Prefs.getNumber('volume', 0.7));
     AppStorage.setOrCreate<string>(K_VIDEO_SCALE, UserPrefs.normalizeVideoScale(Prefs.getString('video_scale', 'contain')));
     AppStorage.setOrCreate<string>(K_LIKES, Prefs.getString('likes', '[]'));
@@ -183,6 +187,16 @@ export class UserPrefs {
   static preferHevc(): boolean {
     const value = AppStorage.get<boolean>(K_PREFER_HEVC);
     return value === undefined ? false : value;
+  }
+
+  static multiSource(): boolean {
+    const value = AppStorage.get<boolean>(K_MULTI_SOURCE);
+    return value === undefined ? true : value;
+  }
+
+  static setMultiSource(on: boolean): void {
+    Prefs.putBool('multi_source', on);
+    AppStorage.setOrCreate<boolean>(K_MULTI_SOURCE, on);
   }
 
   static setPreferHevc(on: boolean): void {
