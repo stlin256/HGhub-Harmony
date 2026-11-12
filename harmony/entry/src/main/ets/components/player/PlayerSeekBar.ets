@@ -1,5 +1,9 @@
 import { HgColor, HgFont, HgSpace } from '../../design/HgTokens';
+import { HgMotion } from '../../design/HgMotion';
 import { fmtTime } from '../../utils/Format';
+
+/** seek 松手后防连点窗口（ms）：DESIGN §4.8.5 要求 180ms 内不接受第二次拖动。 */
+const SEEK_REARM_MS: number = 180;
 
 /**
  * 播放器进度条：3vp 轨道 + 已缓冲段 + 播放段 + 白色圆点滑块。
@@ -27,6 +31,8 @@ export struct PlayerSeekBar {
   @State private dragMs: number = 0;
   /** 本次触摸是否发生过拖动（区分点按与拖动）。 */
   private moved: boolean = false;
+  /** 最近一次松手 seek 的时间（防连点窗口）。 */
+  private lastSeekEndAt: number = 0;
 
   private displayMs(): number {
     if (this.dragging) {
@@ -60,6 +66,11 @@ export struct PlayerSeekBar {
 
   private thumbSize(): number {
     return this.dragging ? 14 : 12;
+  }
+
+  /** 拖动时轨道加粗到 4vp（DESIGN §4.8.5），非拖动 3vp。 */
+  private trackHeight(): number {
+    return this.dragging ? 4 : 3;
   }
 
   private thumbX(): number {
@@ -104,6 +115,10 @@ export struct PlayerSeekBar {
       return;
     }
     if (event.type === TouchType.Down) {
+      // 防连点：松手后 180ms 内不接受第二次拖动（避免 seek 排队/画面连跳）。
+      if (Date.now() - this.lastSeekEndAt < SEEK_REARM_MS) {
+        return;
+      }
       this.dragging = true;
       this.moved = false;
       this.dragMs = this.msAt(this.touchX(event));
@@ -124,12 +139,14 @@ export struct PlayerSeekBar {
       const moved: boolean = this.moved;
       this.moved = false;
       this.dragging = false;
+      this.lastSeekEndAt = Date.now();
       this.onSeekEnd(target, moved);
     } else if (event.type === TouchType.Cancel) {
       if (!this.dragging) {
         return;
       }
       this.dragging = false;
+      this.lastSeekEndAt = Date.now();
       this.onSeekCancel();
     }
   }
@@ -146,24 +163,30 @@ export struct PlayerSeekBar {
     Column() {
       Stack({ alignContent: Alignment.Start }) {
         Row()
+          .height(this.trackHeight())
+          .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
           .width('100%')
-          .height(3)
           .backgroundColor('#4DFFFFFF')
           .borderRadius(2)
         Row()
+          .height(this.trackHeight())
+          // 只对轨道高度做过渡（width 在 animation 之后设置，进度跟手不补间）。
+          .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
           .width(this.bufferedPercent())
-          .height(3)
           .backgroundColor('#33FFFFFF')
           .borderRadius(2)
         Row()
+          .height(this.trackHeight())
+          .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
           .width(this.percentOf(this.displayMs()))
-          .height(3)
           .backgroundColor(HgColor.videoInk)
           .borderRadius(2)
         if (this.trackWidth > 0) {
           Circle()
             .width(this.thumbSize())
             .height(this.thumbSize())
+            // 只对尺寸做过渡（position 在 animation 之后设置，拖动跟手不补间）。
+            .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
             .fill(HgColor.videoInk)
             .position({ x: this.thumbX(), y: (24 - this.thumbSize()) / 2 })
         }
@@ -171,6 +194,7 @@ export struct PlayerSeekBar {
       .width('100%')
       .height(24)
       .opacity(this.seekEnabled ? 1 : 0.5)
+      .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
       .onAreaChange((oldValue: Area, newValue: Area) => {
         const width = parseFloat(String(newValue.width));
         if (!isNaN(width)) {

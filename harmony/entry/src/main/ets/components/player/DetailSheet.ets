@@ -1,4 +1,5 @@
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../../design/HgTokens';
+import { HgPressable } from '../HgPressable';
 import { fmt } from '../../utils/Format';
 
 /** 播放页"详情"面板：简介 / 作者 / 评分 / 互动计数 / 标签。 */
@@ -135,15 +136,19 @@ export struct DetailSheet {
               .lineHeight(HgFont.lineBody)
               .fontColor(HgColor.textSecondary(this.dark))
               .width('100%')
+              // 结构说明：maxLines 不是可动画属性，展开/收起保持即时切换（不做假动画）；
+              // 如需补间需改成固定高度容器+Scroll，成本高，W1-C 不做。
               .maxLines(this.expanded ? 1000 : 4)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.expanded ? '收起' : '展开')
-              .fontSize(HgFont.caption)
-              .fontColor(HgColor.accent(this.dark))
-              .accessibilityText('展开或收起简介')
-              .onClick(() => {
-                this.expanded = !this.expanded;
-              })
+            HgPressable({ dark: this.dark, noTap: true }) {
+              Text(this.expanded ? '收起' : '展开')
+                .fontSize(HgFont.caption)
+                .fontColor(HgColor.accent(this.dark))
+                .accessibilityText('展开或收起简介')
+                .onClick(() => {
+                  this.expanded = !this.expanded;
+                })
+            }
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)

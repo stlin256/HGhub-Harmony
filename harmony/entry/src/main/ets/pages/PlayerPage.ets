@@ -11,7 +11,9 @@ import {
 } from '../state/UserPrefs';
 import { PlayerParam } from '../state/Routes';
 import { Detail, Post, WatchProgress } from '../models/Types';
-import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
+import { HgPressable } from '../components/HgPressable';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
 import { PlayerService, SessionMeta } from '../player/PlayerService';
@@ -43,6 +45,12 @@ const SEEK_FULL_WIDTH_SECONDS: number = 120;
 const SEEK_LOADING_MS: number = 2000;
 /** seek 后 onState('playing') 兜底清除的宽限（ms）：避免 play() 恢复早于 seekDone 时闪出暂停图标。 */
 const SEEK_PLAYING_GRACE_MS: number = 600;
+/** seek 松手后防连点窗口（ms）：DESIGN §4.8.5 要求 180ms 内不接受第二次拖动。 */
+const SEEK_REARM_MS: number = 180;
+/** 画中画状态提示展示时长（ms，非动效时长）。 */
+const PIP_HINT_MS: number = 1600;
+/** 分栏淡出动画结束后再出栈的缓冲（ms）：保证退场动画先完成。 */
+const PANE_POP_BUFFER_MS: number = 20;
 /** 滑动时视频层 Y 位移的方向系数：SwiperAnimationEvent.currentOffset 与页面位移同号时取 1。 */
 const VIDEO_DRAG_SIGN: number = 1;
 /** 宽屏评论侧栏宽度（vp）与最小宽度。 */
@@ -156,6 +164,13 @@ export struct PlayerPage {
   @State dragMs: number = 0;
   /** seek 进行中（进度条拖动/手势横滑/等待 seekDone）：中央浮层与底部播放按钮显示加载圈，不显示播放/暂停图标。 */
   @State seeking: boolean = false;
+  /** chrome/互动栏按下的按钮 key（hitTest None + 坐标分发时驱动 0.96 按压反馈）。 */
+  @State pressedChrome: string = '';
+  /** 点赞/收藏图标的脉冲缩放（状态切换时 1→1.12→1）。 */
+  @State likePulse: number = 1;
+  @State favPulse: number = 1;
+  /** 画中画状态提示文案（空=不显示）。 */
+  @State pipHint: string = '';
 
   /* ── 控制状态 ─────────────────────────────────────── */
   @State chromeVisible: boolean = true;
@@ -180,6 +195,8 @@ export struct PlayerPage {
    */
   @State sheetVisible: boolean = false;
   @State sheetKind: string = '';
+  /** Sheet 已打开时切换 kind：仅此时做内容交叉淡入，首次打开不叠加二次入场（§3.6）。 */
+  @State sheetKindSwitching: boolean = false;
   /** 右上角「更多」自定义面板（bindMenu 的勾选态不会随状态刷新，改为页面内弹层）。 */
   @State menuVisible: boolean = false;
   /** 宽屏评论区侧栏（平板/大屏非帖子：替代底部评论 Sheet；手机仍走 Sheet）。 */
@@ -246,6 +263,14 @@ export struct PlayerPage {
   private swipeClampTimer: number = -1;
   /** 倍速 chip 脉冲回弹计时。 */
   private ratePulseTimer: number = -1;
+  /** 点赞/收藏脉冲回弹计时。 */
+  private railPulseTimer: number = -1;
+  /** 画中画状态提示自动隐藏计时。 */
+  private pipHintTimer: number = -1;
+  /** Sheet kind 切换交叉淡入的复位计时。 */
+  private sheetKindTimer: number = -1;
+  /** 最近一次 seek 提交时间（180ms 防连点窗口）。 */
+  private lastSeekCommitAt: number = 0;
   /** 播放页不可见时发生线路切换：回到前台再重载，避免后台起播。 */
   private pendingLineReload: boolean = false;
 
@@ -266,13 +291,37 @@ export struct PlayerPage {
     return this.windowW > 0 && this.contentW > 0 && this.contentW + 2 < this.windowW;
   }
 
-  /** 播放页返回统一入口：全屏态先退全屏（与系统返回键一致），否则真正返回。 */
+  /** 播放页返回统一入口：全屏态先退全屏（与系统返回键一致）；分栏态走与系统返回相同的淡出后出栈。 */
   private handlePlayerBack(): void {
     if (this.forceFullscreen) {
       this.togglePaneFullscreen();
       return;
     }
+    if (this.inSplitPane()) {
+      this.exitPaneAndPop();
+      return;
+    }
     this.navStack.pop();
+  }
+
+  /**
+   * 平行视窗退出播放页：先做 opacity+offset 退场（exitStandard 200ms），动画结束后再真正 pop。
+   * 返回按钮与系统返回键共用同一路径，避免一处瞬跳、一处淡出。
+   */
+  private exitPaneAndPop(): void {
+    if (this.paneExiting) {
+      return;
+    }
+    this.paneExiting = true;
+    animateTo({ duration: HgMotion.ms(HgMotion.exitStandard), curve: HgMotion.curve }, () => {
+      this.paneOpacity = 0;
+      this.paneOffsetX = 36;
+    });
+    setTimeout(() => {
+      if (!this.destroyed) {
+        this.navStack.pop();
+      }
+    }, HgMotion.ms(HgMotion.exitStandard) + PANE_POP_BUFFER_MS);
   }
 
   /** 平行视窗下显示「全屏/退出全屏」；全屏时按钮用于回到分栏。 */
@@ -302,8 +351,10 @@ export struct PlayerPage {
       return;
     }
     if (!this.appActive) {
-      // 退到后台立即恢复正常熄屏策略（播放已暂停，不应继续占用常亮）。
-      this.service.setActive(false);
+      // 退到后台立即恢复正常熄屏策略；PiP 播放中不暂停，让小窗继续播放。
+      if (!PiPController.isActiveNow()) {
+        this.service.setActive(false);
+      }
       MediaPrefetch.pause();
       this.syncKeepScreenOn();
       return;
@@ -359,6 +410,10 @@ export struct PlayerPage {
       this.paneOpacity = 0;
       this.paneOffsetX = 36;
     }
+    // PiP 生命周期回调：进入/退出时给页面一次轻量状态提示（系统 PiP 动画之外不做自绘转场）。
+    PiPController.onStateChange = (state: string) => {
+      this.onPiPState(state);
+    };
     this.openVideo(index, false);
     // 播放中线路巡检（仅播放中运行，暂停/离开自动停止）。
     LineAuto.startWatch();
@@ -375,6 +430,12 @@ export struct PlayerPage {
     // 离开播放页恢复系统熄屏策略，避免整机一直常亮。
     WindowChrome.setKeepScreenOn(false);
     LineAuto.stopWatch();
+    // 页面销毁时若 PiP 仍在播放：先停止 PiP 再释放控制器，避免小窗残留/回调悬挂。
+    if (PiPController.isActiveNow()) {
+      PiPController.exit();
+    }
+    PiPController.onStateChange = () => {
+    };
     PiPController.release();
     this.clearAllTimers();
     this.detailCache.clear();
@@ -656,6 +717,18 @@ export struct PlayerPage {
       clearTimeout(this.ratePulseTimer);
       this.ratePulseTimer = -1;
     }
+    if (this.railPulseTimer >= 0) {
+      clearTimeout(this.railPulseTimer);
+      this.railPulseTimer = -1;
+    }
+    if (this.pipHintTimer >= 0) {
+      clearTimeout(this.pipHintTimer);
+      this.pipHintTimer = -1;
+    }
+    if (this.sheetKindTimer >= 0) {
+      clearTimeout(this.sheetKindTimer);
+      this.sheetKindTimer = -1;
+    }
     this.clearSwipeClamp();
   }
 
@@ -714,7 +787,8 @@ export struct PlayerPage {
     this.posterDragY = 0;
     this.openVideo(target, false);
     try {
-      this.swiperController.changeIndex(target, false);
+      // 程序化切条（系统媒体会话上一首/下一首）走 Swiper 动画，避免整屏瞬跳。
+      this.swiperController.changeIndex(target, true);
     } catch (err) {
     }
   }
@@ -1260,10 +1334,14 @@ export struct PlayerPage {
     }
     const next = !this.liked;
     const previousCount = this.likeCount;
-    this.liked = next;
-    this.likeCount = Math.max(0, this.likeCount + (next ? 1 : -1));
+    // 点击立即响应：状态先落地，颜色/图标过渡由 animateTo(fast) 渲染，再做一次轻量脉冲。
+    animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
+      this.liked = next;
+      this.likeCount = Math.max(0, this.likeCount + (next ? 1 : -1));
+    });
     UserPrefs.toggleLike(id);
     this.haptic(next ? 18 : 10);
+    this.pulseRail('like');
     this.showChrome();
     const request: Promise<void> = this.params.feedKind === 'post'
       ? Api.postLike(id, next)
@@ -1273,8 +1351,10 @@ export struct PlayerPage {
       if (this.destroyed || this.currentId() !== id || this.liked !== next) {
         return;
       }
-      this.liked = !next;
-      this.likeCount = previousCount;
+      animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
+        this.liked = !next;
+        this.likeCount = previousCount;
+      });
       UserPrefs.toggleLike(id);
       UiBus.toast('操作失败，请稍后重试');
     });
@@ -1288,21 +1368,27 @@ export struct PlayerPage {
     const next = !this.faved;
     if (!UserPrefs.loggedIn()) {
       // 未登录：收藏只落本地（UserPrefs.toggleFav），不弹登录、不调 Api，计数本地 ±1。
-      this.faved = next;
-      this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
+      animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
+        this.faved = next;
+        this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
+      });
       UserPrefs.toggleFav(id, this.title, this.coverUrl);
       RecService.recordFavorite(id, next);
       this.haptic(next ? 18 : 10);
+      this.pulseRail('fav');
       this.showChrome();
       UiBus.toast(next ? '已收藏（本地）' : '已取消收藏');
       return;
     }
     const previousCount = this.collectCount;
-    this.faved = next;
-    this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
+    animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
+      this.faved = next;
+      this.collectCount = Math.max(0, this.collectCount + (next ? 1 : -1));
+    });
     UserPrefs.toggleFav(id, this.title, this.coverUrl);
     RecService.recordFavorite(id, next);
     this.haptic(next ? 18 : 10);
+    this.pulseRail('fav');
     this.showChrome();
     const request: Promise<void> = this.params.feedKind === 'post'
       ? Api.postCollect(id, next)
@@ -1312,11 +1398,38 @@ export struct PlayerPage {
       if (this.destroyed || this.currentId() !== id || this.faved !== next) {
         return;
       }
-      this.faved = !next;
-      this.collectCount = previousCount;
+      animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
+        this.faved = !next;
+        this.collectCount = previousCount;
+      });
       UserPrefs.toggleFav(id, this.title, this.coverUrl);
       UiBus.toast('操作失败，请稍后重试');
     });
+  }
+
+  /** 点赞/收藏图标脉冲：instant 80ms 放大到 1.12，回落 fast 140ms（与颜色过渡同步）。 */
+  private pulseRail(kind: string): void {
+    if (this.railPulseTimer >= 0) {
+      clearTimeout(this.railPulseTimer);
+      this.railPulseTimer = -1;
+    }
+    animateTo({ duration: HgMotion.ms(HgMotion.instant), curve: HgMotion.curve }, () => {
+      if (kind === 'like') {
+        this.likePulse = 1.12;
+      } else {
+        this.favPulse = 1.12;
+      }
+    });
+    this.railPulseTimer = setTimeout(() => {
+      this.railPulseTimer = -1;
+      if (this.destroyed) {
+        return;
+      }
+      animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
+        this.likePulse = 1;
+        this.favPulse = 1;
+      });
+    }, HgMotion.ms(HgMotion.instant));
   }
 
   private share(): void {
@@ -1347,17 +1460,64 @@ export struct PlayerPage {
   }
 
   /* ── Chrome 显隐 / 锁定 / 倍速 / 静音 ─────────────── */
-  /** chrome 显隐统一入口：快速淡入（140ms）/淡出（120ms），由 transition + animateTo 共同渲染。 */
+  /**
+   * chrome 显隐统一入口：显示 fast 140ms、隐藏 exitFast 120ms。
+   * 显隐动画只走三层 chrome 的 asymmetric transition（单一动画路径），这里只改状态。
+   */
   private setChromeVisible(visible: boolean): void {
     if (this.destroyed || this.chromeVisible === visible) {
       return;
     }
-    animateTo({
-      duration: visible ? HgDuration.micro : HgDuration.microExit,
-      curve: Curve.FastOutSlowIn
-    }, () => {
-      this.chromeVisible = visible;
-    });
+    if (!visible) {
+      this.pressedChrome = '';
+    }
+    this.chromeVisible = visible;
+  }
+
+  /** chrome 浮层淡入/淡出（§3.8：显示 fast、隐藏 exitFast）。 */
+  private chromeFade(): TransitionEffect {
+    return TransitionEffect.asymmetric(
+      HgMotion.fadeIn(HgMotion.fast),
+      HgMotion.fadeOut(HgMotion.exitFast)
+    );
+  }
+
+  /** 轻量 chip 显隐（画质/投播/全屏等）：fast 进、exitFast 出。 */
+  private chipFade(): TransitionEffect {
+    return TransitionEffect.asymmetric(
+      HgMotion.fadeIn(HgMotion.fast),
+      HgMotion.fadeOut(HgMotion.exitFast)
+    );
+  }
+
+  /** 按压态缩放：pressedChrome 命中 key 时 0.96。 */
+  private chromeScale(key: string): number {
+    return this.pressedChrome === key ? HgMotion.pressScale : 1;
+  }
+
+  /** 按压态动画时长：按下 instant 80ms、松开 fast 140ms。 */
+  private chromePressMs(key: string): number {
+    return HgMotion.pressMs(this.pressedChrome === key);
+  }
+
+  /**
+   * chrome 按钮自身触摸：驱动 pressedChrome 按压态。
+   * Bottom/Rail chrome 根节点为 HitTestMode.None（自身不响应、子节点响应），按钮自身收到触摸时走这里；
+   * 手势层按坐标分发时也写同一状态，两条路径不冲突。
+   */
+  private chromeTouch(key: string, event: TouchEvent): void {
+    if (event.type === TouchType.Down) {
+      this.pressedChrome = key;
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      if (this.pressedChrome === key) {
+        this.pressedChrome = '';
+      }
+    }
+  }
+
+  /** Sheet 内容过渡：仅 kind 切换时 crossfade（standard/exitFast），首次打开交给系统 Sheet 动画。 */
+  private sheetContentTransition(): TransitionEffect {
+    return this.sheetKindSwitching ? HgMotion.statusTransition() : TransitionEffect.IDENTITY;
   }
 
   private showChrome(): void {
@@ -1374,13 +1534,13 @@ export struct PlayerPage {
       this.hideTimer = -1;
     }
     if (!this.playing || this.destroyed || this.menuVisible || this.commentPanelVisible ||
-      this.castPanelOpen) {
+      this.sheetVisible || this.castPanelOpen) {
       return;
     }
     this.hideTimer = setTimeout(() => {
       this.hideTimer = -1;
       if (!this.destroyed && this.playing && !this.locked && !this.dragging && !this.menuVisible &&
-        !this.commentPanelVisible && !this.castPanelOpen) {
+        !this.commentPanelVisible && !this.sheetVisible && !this.castPanelOpen) {
         this.setChromeVisible(false);
       }
     }, CHROME_HIDE_MS);
@@ -1415,15 +1575,12 @@ export struct PlayerPage {
       this.closeCommentPanel();
     }
     this.haptic(10);
-    animateTo({
-      duration: next ? HgDuration.microExit : HgDuration.micro,
-      curve: Curve.FastOutSlowIn
-    }, () => {
-      this.locked = next;
-      if (next) {
-        this.chromeVisible = false;
-      }
-    });
+    // 锁定/解锁动画由 LockLayer 与 chrome 的 transition 承担（单一动画路径）。
+    this.locked = next;
+    if (next) {
+      this.chromeVisible = false;
+      this.pressedChrome = '';
+    }
     if (next) {
       if (this.hideTimer >= 0) {
         clearTimeout(this.hideTimer);
@@ -1458,27 +1615,32 @@ export struct PlayerPage {
     UiBus.toastInfo(rate === 1 ? '已恢复 1.0x 倍速' : rate + 'x 倍速');
   }
 
-  /** 倍速 chip 数字变化时做一个 90ms 的轻微缩放脉冲（切倍速/锁倍速都有过渡反馈）。 */
+  /** 倍速 chip 数字变化时做一个 instant 80ms 的轻微缩放脉冲（切倍速/锁倍速都有过渡反馈）。 */
   private pulseRateChip(): void {
     if (this.ratePulseTimer >= 0) {
       clearTimeout(this.ratePulseTimer);
       this.ratePulseTimer = -1;
     }
-    animateTo({ duration: HgDuration.press, curve: Curve.FastOutSlowIn }, () => {
-      this.ratePulse = 0.92;
+    animateTo({ duration: HgMotion.ms(HgMotion.instant), curve: HgMotion.curve }, () => {
+      this.ratePulse = HgMotion.pressScale;
     });
     this.ratePulseTimer = setTimeout(() => {
       this.ratePulseTimer = -1;
       if (this.destroyed) {
         return;
       }
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
         this.ratePulse = 1;
       });
-    }, HgDuration.press);
+    }, HgMotion.ms(HgMotion.instant));
   }
 
   /* ── 手势 ─────────────────────────────────────────── */
+  /** 防连点：seek 提交后 SEEK_REARM_MS(180ms) 内忽略新的横滑/进度条拖动（DESIGN §4.8.5）。 */
+  private canStartSeek(): boolean {
+    return Date.now() - this.lastSeekCommitAt >= SEEK_REARM_MS;
+  }
+
   private handleTouch(event: TouchEvent): void {
     if (this.locked || this.ids.length === 0) {
       if (event.type === TouchType.Up) {
@@ -1497,6 +1659,8 @@ export struct PlayerPage {
       this.touchStartX = x;
       this.touchStartY = y;
       this.touchStartAt = Date.now();
+      // chrome 层为 hitTest None：按下时按坐标命中按钮，驱动 0.96 按压反馈（抬起复用同一 key 分发动作）。
+      this.pressedChrome = this.chromeHitKey(x, y);
       this.startLongPress();
     } else if (event.type === TouchType.Move) {
       const dx = x - this.touchStartX;
@@ -1504,10 +1668,17 @@ export struct PlayerPage {
       if (this.gestureMode === 0) {
         if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.15) {
           this.cancelLongPress();
-          this.gestureMode = 1;
-          this.beginSeekPreview();
+          this.pressedChrome = '';
+          if (this.canStartSeek()) {
+            this.gestureMode = 1;
+            this.beginSeekPreview();
+          } else {
+            // 防连点窗口内忽略横滑 seek（避免连续拖动排队导致画面跳）。
+            this.gestureMode = 3;
+          }
         } else if (Math.abs(dy) > 16) {
           this.cancelLongPress();
+          this.pressedChrome = '';
           this.gestureMode = 3;
         }
       } else if (this.gestureMode === 1) {
@@ -1530,9 +1701,11 @@ export struct PlayerPage {
       }
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
       this.cancelLongPress();
+      this.pressedChrome = '';
       if (this.gestureMode === 1) {
         this.dragging = false;
         // 松手才真正跳转：保持加载态直到 seekDone（2s 兜底），恢复播放不提前闪出暂停图标。
+        this.lastSeekCommitAt = Date.now();
         this.startSeeking();
         this.service.seekTo(this.dragMs);
         this.positionMs = this.dragMs;
@@ -1569,12 +1742,22 @@ export struct PlayerPage {
   }
 
   /**
-   * 控件点击手动分发：chrome 层为了不挡视频手势被设为 hitTestBehavior(None)，
-   * 因此按钮点击由手势层按坐标命中后分发（避免整层拦截导致上下滑/单击显隐失效）。
+   * 控件点击手动分发：BottomChrome/RailChrome 为 hitTestBehavior(None)，
+   * 按钮点击由手势层按坐标命中后分发；同一命中逻辑在按下时驱动 pressedChrome 按压态。
    */
   private handleChromeTap(px: number, py: number): boolean {
-    if (!this.chromeVisible || this.locked) {
+    const key: string = this.chromeHitKey(px, py);
+    if (key.length === 0) {
       return false;
+    }
+    this.dispatchChromeAction(key);
+    return true;
+  }
+
+  /** 坐标 → chrome 按钮 key（空字符串=未命中）；顺序与视觉层级保持一致。 */
+  private chromeHitKey(px: number, py: number): string {
+    if (!this.chromeVisible || this.locked) {
+      return '';
     }
     // chrome 位于 Swiper 页内：侧栏打开时页面已收窄为左侧视频区，坐标基准同步用可用宽度。
     const w: number = this.videoAreaWidth();
@@ -1586,18 +1769,15 @@ export struct PlayerPage {
     const topRight: number = this.rightInset + HgSpace.l;
     if (py <= this.topSafePad() + hit + HgSpace.s) {
       if (px <= topLeft + hit) {
-        this.handlePlayerBack();
-        return true;
+        return 'back';
       }
       if (px >= w - topRight - hit) {
-        this.setMenuVisible(true);
-        return true;
+        return 'menu';
       }
       if (px >= w - topRight - hit - 8 - 76 && px < w - topRight - hit - 6) {
-        this.openLines();
-        return true;
+        return 'lines';
       }
-      return false;
+      return '';
     }
     // 底部控制条（播放/静音/倍速/选集/锁）
     const rowBottom: number = h - inset - HgSpace.m;
@@ -1606,46 +1786,68 @@ export struct PlayerPage {
     const barRight: number = this.chromeRightPad();
     if (py >= rowTop - HgSpace.m && py <= rowBottom + HgSpace.l) {
       if (px >= w - barRight - hit) {
-        this.toggleLock();
-        return true;
+        return 'lock';
       }
       if (px >= w - barRight - hit - HgSpace.s - 84 && px < w - barRight - hit - HgSpace.s) {
-        this.openSheet('episode');
-        return true;
+        return 'episode';
       }
       if (px <= barLeft + hit) {
-        this.togglePlay();
-        return true;
+        return 'play';
       }
       if (px <= barLeft + hit * 2 + HgSpace.s) {
-        this.toggleMute();
-        return true;
+        return 'mute';
       }
       // 倍速 chip：点按循环切换倍速（手动路由无法弹 bindMenu）。
       if (px >= w - this.rightInset - 200 && px < w - this.rightInset - 134) {
-        const rates: number[] = [1, 1.25, 1.5, 2];
-        const at: number = rates.indexOf(this.rate);
-        this.changeRate(rates[(at + 1) % rates.length]);
-        return true;
+        return 'rate';
       }
-      return false;
+      return '';
     }
     // 右侧互动栏（点赞/收藏/评论/分享）：宽屏评论侧栏打开时互动栏已隐藏，不再拦截点击。
     if (!this.commentPanelVisible && px >= w - this.rightInset - 88 && py > h * 0.28 && py < h * 0.60) {
       const ratio: number = py / h;
       if (ratio < 0.36) {
-        this.toggleLike();
-      } else if (ratio < 0.435) {
-        this.toggleFav();
-      } else if (ratio < 0.50) {
-        this.openComments();
-        this.showChrome();
-      } else {
-        this.share();
+        return 'like';
       }
-      return true;
+      if (ratio < 0.435) {
+        return 'fav';
+      }
+      if (ratio < 0.50) {
+        return 'comment';
+      }
+      return 'share';
     }
-    return false;
+    return '';
+  }
+
+  private dispatchChromeAction(key: string): void {
+    if (key === 'back') {
+      this.handlePlayerBack();
+    } else if (key === 'menu') {
+      this.setMenuVisible(true);
+    } else if (key === 'lines') {
+      this.openLines();
+    } else if (key === 'lock') {
+      this.toggleLock();
+    } else if (key === 'episode') {
+      this.openSheet('episode');
+    } else if (key === 'play') {
+      this.togglePlay();
+    } else if (key === 'mute') {
+      this.toggleMute();
+    } else if (key === 'rate') {
+      const at: number = RATES.indexOf(this.rate);
+      this.changeRate(RATES[(at + 1) % RATES.length]);
+    } else if (key === 'like') {
+      this.toggleLike();
+    } else if (key === 'fav') {
+      this.toggleFav();
+    } else if (key === 'comment') {
+      this.openComments();
+      this.showChrome();
+    } else if (key === 'share') {
+      this.share();
+    }
   }
 
   /** 单击=显示/隐藏 chrome；双击=播放/暂停；单击延迟 280ms 等待双击判定。 */
@@ -1657,6 +1859,8 @@ export struct PlayerPage {
         clearTimeout(this.tapTimer);
         this.tapTimer = -1;
       }
+      // 双击播放/暂停：轻触觉 10ms（DESIGN §2.10），动画由 Overlay/播放图标状态过渡承担。
+      this.haptic(10);
       this.togglePlay();
       return;
     }
@@ -1754,6 +1958,8 @@ export struct PlayerPage {
       if (this.destroyed || this.locked || this.gestureMode !== 0) {
         return;
       }
+      // 长按进入倍速：取消 chrome 按压态，避免按钮一直保持缩小。
+      this.pressedChrome = '';
       this.gestureMode = 2;
       this.speedBoost = true;
       this.service.setSpeed(2);
@@ -1867,7 +2073,7 @@ export struct PlayerPage {
     this.swipeTargetChanged = targetIndex !== index;
     this.swipeAnimating = true;
     this.pendingVideoSettle = false;
-    animateTo({ duration: 260, curve: Curve.FastOutSlowIn }, () => {
+    animateTo({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve }, () => {
       this.videoDragY = target;
       this.posterDragY = target;
     });
@@ -1890,7 +2096,7 @@ export struct PlayerPage {
       return;
     }
     if (!this.swipeTargetChanged) {
-      this.resetVideoDrag(140);
+      this.resetVideoDrag(HgMotion.ms(HgMotion.fast));
     }
     this.scheduleSwipeClamp();
   }
@@ -1909,13 +2115,13 @@ export struct PlayerPage {
     this.posterDragY = 0;
   }
 
-  /** 用 140ms 左右动画把视频层回正（滑到一半回弹等场景）。 */
+  /** 用 fast 140ms 动画把视频层回正（滑到一半回弹等场景，时长由调用方传 HgMotion token）。 */
   private resetVideoDrag(duration: number): void {
     this.clearVideoDragReset();
     if (this.destroyed || this.videoDragY === 0) {
       return;
     }
-    animateTo({ duration: duration, curve: Curve.FastOutSlowIn }, () => {
+    animateTo({ duration: duration, curve: HgMotion.curve }, () => {
       this.videoDragY = 0;
       this.posterDragY = 0;
     });
@@ -1934,7 +2140,7 @@ export struct PlayerPage {
       this.swipeAnimating = false;
       this.pendingVideoSettle = false;
       if (this.videoDragY !== 0 || this.posterDragY !== 0) {
-        animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+        animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
           this.videoDragY = 0;
           this.posterDragY = 0;
         });
@@ -2019,6 +2225,26 @@ export struct PlayerPage {
 
   /** 打开底部面板（选集/评论/详情/线路共用同一个 Sheet）。 */
   private openSheet(kind: string): void {
+    this.pressedChrome = '';
+    // 面板打开期间保持 chrome 常驻：清掉自动隐藏计时，避免关闭 Sheet 后 chrome 已隐藏。
+    if (this.hideTimer >= 0) {
+      clearTimeout(this.hideTimer);
+      this.hideTimer = -1;
+    }
+    // 已打开时切换内容：标记一次 crossfade，并在动画结束后复位；首次打开不叠加二次入场。
+    if (this.sheetVisible && this.sheetKind !== kind) {
+      this.sheetKindSwitching = true;
+      if (this.sheetKindTimer >= 0) {
+        clearTimeout(this.sheetKindTimer);
+      }
+      this.sheetKindTimer = setTimeout(() => {
+        this.sheetKindTimer = -1;
+        if (this.destroyed) {
+          return;
+        }
+        this.sheetKindSwitching = false;
+      }, HgMotion.ms(HgMotion.standard) + PANE_POP_BUFFER_MS);
+    }
     this.sheetKind = kind;
     this.sheetVisible = true;
   }
@@ -2037,10 +2263,11 @@ export struct PlayerPage {
         this.sheetVisible = false;
       }
       this.commentRefreshKey++;
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      // 侧栏属大块面板：surface 260ms 进出，视频区 resize 同步同时长。
+      animateTo({ duration: HgMotion.ms(HgMotion.surface), curve: HgMotion.curve }, () => {
         this.commentPanelVisible = true;
       });
-      this.recomputeVideoRect(true);
+      this.recomputeVideoRect(true, HgMotion.surface);
       return;
     }
     this.openSheet('comments');
@@ -2051,10 +2278,10 @@ export struct PlayerPage {
     if (!this.commentPanelVisible) {
       return;
     }
-    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
+    animateTo({ duration: HgMotion.ms(HgMotion.exitSurface), curve: HgMotion.curve }, () => {
       this.commentPanelVisible = false;
     });
-    this.recomputeVideoRect(true);
+    this.recomputeVideoRect(true, HgMotion.exitSurface);
     // 侧栏收起后恢复 chrome 的自动隐藏计时（播放中 3s 隐藏）。
     this.scheduleHideChrome();
   }
@@ -2102,7 +2329,8 @@ export struct PlayerPage {
   /**
    * 右上角「更多」改为页面内自定义弹层：bindMenu 的菜单项在展开时按快照渲染，
    * 勾选态不会随 UserPrefs/@StorageProp 变化刷新，导致切了比例后 ✓ 不动、画面也不变。
-   * 自定义弹层直接读 @StorageProp(K_VIDEO_SCALE) 渲染 ✓，点击可靠，并复用 chrome 的 140ms 渐隐动画。
+   * 自定义弹层直接读 @StorageProp(K_VIDEO_SCALE) 渲染 ✓，点击可靠；
+   * 开合动画由 MoreMenuMask/MoreMenuPanel 的 asymmetric transition 渲染（§3.6）。
    */
   private setMenuVisible(visible: boolean): void {
     if (this.destroyed || this.menuVisible === visible) {
@@ -2112,12 +2340,7 @@ export struct PlayerPage {
       clearTimeout(this.hideTimer);
       this.hideTimer = -1;
     }
-    animateTo({
-      duration: visible ? HgDuration.micro : HgDuration.microExit,
-      curve: Curve.FastOutSlowIn
-    }, () => {
-      this.menuVisible = visible;
-    });
+    this.menuVisible = visible;
     if (!visible) {
       this.showChrome();
     }
@@ -2199,6 +2422,44 @@ export struct PlayerPage {
     if (!ok) {
       UiBus.toast('当前设备暂不支持画中画');
     }
+  }
+
+  /**
+   * PiP 生命周期回调（来自 PiPController）：系统负责小窗动画，App 内只做 fast 140ms 轻量状态提示，
+   * 不叠加自绘转场；恢复时把 chrome 重新唤出。
+   */
+  private onPiPState(state: string): void {
+    if (this.destroyed) {
+      return;
+    }
+    if (state === 'started') {
+      this.showPiPHint('已进入画中画');
+    } else if (state === 'restore') {
+      this.showPiPHint('已退出画中画');
+      this.showChrome();
+    } else if (state === 'stopped') {
+      // PiP 窗口在后台被关闭：页面仍不可见时恢复常规后台暂停，避免音频继续在后台播放。
+      if (!this.appActive || !this.pageShown) {
+        this.service.setActive(false);
+      }
+      this.showChrome();
+    }
+  }
+
+  /** 画中画状态提示：fast 淡入、exitFast 淡出，PIP_HINT_MS 后自动隐藏。 */
+  private showPiPHint(text: string): void {
+    if (this.pipHintTimer >= 0) {
+      clearTimeout(this.pipHintTimer);
+      this.pipHintTimer = -1;
+    }
+    this.pipHint = text;
+    this.pipHintTimer = setTimeout(() => {
+      this.pipHintTimer = -1;
+      if (this.destroyed) {
+        return;
+      }
+      this.pipHint = '';
+    }, PIP_HINT_MS);
   }
 
   private rateItems(): MenuElement[] {
@@ -2374,9 +2635,9 @@ export struct PlayerPage {
    * - 适应（含横屏回退）：min 比例缩放完整显示，横屏视频中心放在屏幕高度 42% 处（略偏上）；
    *   竖屏视频（含「横屏窗口里放竖屏视频」的平板/旋转场景）一律居中，两侧黑边，不裁切不拉伸；
    * - 全屏沉浸（仅竖屏）：max 比例等比放大，超出窗口部分由窗口裁切（cover）。
-   * 尺寸/位置变化走 140ms 动画，切比例或切视频时不跳变。
+   * 尺寸/位置变化默认走 surface 260ms 动画（评论侧栏/比例切换），切视频时由调用方传 false。
    */
-  private recomputeVideoRect(animated: boolean): void {
+  private recomputeVideoRect(animated: boolean, duration: number = HgMotion.surface): void {
     // 可用宽度：宽屏评论侧栏打开时让出右侧面板宽度（视频在左侧区域 contain 居中，安全区不参与视频几何）。
     const sw: number = this.videoAreaWidth();
     const sh: number = this.frameHeight();
@@ -2420,7 +2681,7 @@ export struct PlayerPage {
       this.videoRectH = h;
     };
     if (animated) {
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, apply);
+      animateTo({ duration: HgMotion.ms(duration), curve: HgMotion.curve }, apply);
     } else {
       apply();
     }
@@ -2532,24 +2793,41 @@ export struct PlayerPage {
     return diff > 0 ? '+' + diff + ' 秒' : diff + ' 秒';
   }
 
+  /** 拖动预览浮层内 62% 宽进度条的填充百分比（DESIGN §4.8.4）。 */
+  private dragProgressPercent(): string {
+    if (this.durationMs <= 0) {
+      return '0%';
+    }
+    let ratio: number = this.dragMs / this.durationMs;
+    if (ratio < 0) {
+      ratio = 0;
+    }
+    if (ratio > 1) {
+      ratio = 1;
+    }
+    return (ratio * 100).toFixed(2) + '%';
+  }
+
   /* ── UI ───────────────────────────────────────────── */
   @Builder
   TopChrome() {
     Column() {
       Row() {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.chevron_left'))
-            .fontSize(HgIconSize.emphasis)
-            .fontColor([HgColor.videoInk])
+        HgPressable({ dark: true, noTap: true }) {
+          Stack() {
+            SymbolGlyph($r('sys.symbol.chevron_left'))
+              .fontSize(HgIconSize.emphasis)
+              .fontColor([HgColor.videoInk])
+          }
+          .width(HgSize.hitTarget)
+          .height(HgSize.hitTarget)
+          .borderRadius(HgSize.hitTarget / 2)
+          .backgroundColor(HgColor.videoChip)
+          .onClick(() => {
+            this.handlePlayerBack();
+          })
+          .accessibilityText('返回')
         }
-        .width(HgSize.hitTarget)
-        .height(HgSize.hitTarget)
-        .borderRadius(HgSize.hitTarget / 2)
-        .backgroundColor(HgColor.videoChip)
-        .onClick(() => {
-          this.handlePlayerBack();
-        })
-        .accessibilityText('返回')
 
         Column({ space: 2 }) {
           Text(this.titleText())
@@ -2568,23 +2846,31 @@ export struct PlayerPage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         .margin({ left: HgSpace.s, right: HgSpace.s })
+        // 切集/换线时标题与副标题随进度区一起 fast 淡出淡入，避免文案硬切。
+        .opacity(this.progressSwitching ? 0 : 1)
+        .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
 
         if (this.qualityBadge.length > 0) {
-          Text(this.qualityBadge)
-            .fontSize(HgFont.micro)
-            .fontWeight(HgFont.weightMedium)
-            .fontColor(HgColor.videoInk)
-            .maxLines(1)
-            .height(32)
-            .padding({ left: 10, right: 10 })
-            .backgroundColor(HgColor.videoChip)
-            .borderRadius(16)
-            .textAlign(TextAlign.Center)
-            .margin({ right: HgSpace.s })
-            .onClick(() => {
-              this.toggleQuality();
-            })
-            .accessibilityText(this.qualityBadge === 'HD' ? '当前高清，点击切换标准' : '当前标准，点击切换高清')
+          Column() {
+            HgPressable({ dark: true, noTap: true }) {
+              Text(this.qualityBadge)
+                .fontSize(HgFont.micro)
+                .fontWeight(HgFont.weightMedium)
+                .fontColor(HgColor.videoInk)
+                .maxLines(1)
+                .height(32)
+                .padding({ left: 10, right: 10 })
+                .backgroundColor(HgColor.videoChip)
+                .borderRadius(16)
+                .textAlign(TextAlign.Center)
+                .margin({ right: HgSpace.s })
+                .onClick(() => {
+                  this.toggleQuality();
+                })
+                .accessibilityText(this.qualityBadge === 'HD' ? '当前高清，点击切换标准' : '当前标准，点击切换高清')
+            }
+          }
+          .transition(this.chipFade())
         }
 
         if (this.castAvailable) {
@@ -2611,53 +2897,63 @@ export struct PlayerPage {
           .backgroundColor(HgColor.videoChip)
           .margin({ right: HgSpace.xs })
           .accessibilityText('投播到其他设备')
+          .transition(this.chipFade())
         }
 
         if (this.canToggleFullscreen()) {
-          Text(this.forceFullscreen ? '退出全屏' : '全屏')
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.videoInk2)
-            .maxLines(1)
-            .height(32)
-            .padding({ left: 10, right: 10 })
-            .backgroundColor(HgColor.videoChip)
-            .borderRadius(16)
-            .margin({ right: HgSpace.xs })
-            .onClick(() => {
-              this.togglePaneFullscreen();
-            })
-            .accessibilityText(this.forceFullscreen ? '退出全屏，回到平行视窗' : '全屏播放')
+          Column() {
+            HgPressable({ dark: true, noTap: true }) {
+              Text(this.forceFullscreen ? '退出全屏' : '全屏')
+                .fontSize(HgFont.micro)
+                .fontColor(HgColor.videoInk2)
+                .maxLines(1)
+                .height(32)
+                .padding({ left: 10, right: 10 })
+                .backgroundColor(HgColor.videoChip)
+                .borderRadius(16)
+                .margin({ right: HgSpace.xs })
+                .onClick(() => {
+                  this.togglePaneFullscreen();
+                })
+                .accessibilityText(this.forceFullscreen ? '退出全屏，回到平行视窗' : '全屏播放')
+            }
+          }
+          .transition(this.chipFade())
         }
 
-        Row({ space: 2 }) {
-          Text('线路')
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.videoInk2)
-            .maxLines(1)
-          SymbolGlyph($r('sys.symbol.chevron_down'))
-            .fontSize(HgFont.nano)
-            .fontColor([HgColor.videoInk3])
+        HgPressable({ dark: true, noTap: true }) {
+          Row({ space: 2 }) {
+            Text('线路')
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.videoInk2)
+              .maxLines(1)
+            SymbolGlyph($r('sys.symbol.chevron_down'))
+              .fontSize(HgFont.nano)
+              .fontColor([HgColor.videoInk3])
+          }
+          .height(32)
+          .padding({ left: 10, right: 10 })
+          .backgroundColor(HgColor.videoChip)
+          .borderRadius(16)
+          .onClick(() => {
+            this.openLines();
+          })
+          .accessibilityText('切换线路')
         }
-        .height(32)
-        .padding({ left: 10, right: 10 })
-        .backgroundColor(HgColor.videoChip)
-        .borderRadius(16)
-        .onClick(() => {
-          this.openLines();
-        })
-        .accessibilityText('切换线路')
 
-        Stack() {
-          SymbolGlyph($r('sys.symbol.ellipsis_circle'))
-            .fontSize(HgIconSize.emphasis)
-            .fontColor([HgColor.videoInk])
+        HgPressable({ dark: true, noTap: true }) {
+          Stack() {
+            SymbolGlyph($r('sys.symbol.ellipsis_circle'))
+              .fontSize(HgIconSize.emphasis)
+              .fontColor([HgColor.videoInk])
+          }
+          .width(HgSize.hitTarget)
+          .height(HgSize.hitTarget)
+          .onClick(() => {
+            this.toggleMenu();
+          })
+          .accessibilityText('更多')
         }
-        .width(HgSize.hitTarget)
-        .height(HgSize.hitTarget)
-        .onClick(() => {
-          this.toggleMenu();
-        })
-        .accessibilityText('更多')
       }
       .width('100%')
       .height(44)
@@ -2674,7 +2970,7 @@ export struct PlayerPage {
       angle: 180,
       colors: [['#B3000000', 0.0], ['#00000000', 1.0]]
     })
-    .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+    .transition(this.chromeFade())
   }
 
   @Builder
@@ -2691,11 +2987,18 @@ export struct PlayerPage {
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
           .backgroundColor(HgColor.videoChip)
+          // 点赞状态切换脉冲（1→1.12→1），由 pulseRail 用 animateTo 驱动。
+          .scale({ x: this.likePulse, y: this.likePulse })
           Text(fmt(this.likeCount))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.videoInk2)
         }
         .width(48)
+        .scale({ x: this.chromeScale('like'), y: this.chromeScale('like') })
+        .animation({ duration: this.chromePressMs('like'), curve: HgMotion.curve })
+        .onTouch((event: TouchEvent) => {
+          this.chromeTouch('like', event);
+        })
         .onClick(() => {
           this.toggleLike();
         })
@@ -2711,11 +3014,18 @@ export struct PlayerPage {
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
           .backgroundColor(HgColor.videoChip)
+          // 收藏状态切换脉冲（1→1.12→1），由 pulseRail 用 animateTo 驱动。
+          .scale({ x: this.favPulse, y: this.favPulse })
           Text('收藏')
             .fontSize(HgFont.micro)
             .fontColor(HgColor.videoInk2)
         }
         .width(48)
+        .scale({ x: this.chromeScale('fav'), y: this.chromeScale('fav') })
+        .animation({ duration: this.chromePressMs('fav'), curve: HgMotion.curve })
+        .onTouch((event: TouchEvent) => {
+          this.chromeTouch('fav', event);
+        })
         .onClick(() => {
           this.toggleFav();
         })
@@ -2736,6 +3046,11 @@ export struct PlayerPage {
             .fontColor(HgColor.videoInk2)
         }
         .width(48)
+        .scale({ x: this.chromeScale('comment'), y: this.chromeScale('comment') })
+        .animation({ duration: this.chromePressMs('comment'), curve: HgMotion.curve })
+        .onTouch((event: TouchEvent) => {
+          this.chromeTouch('comment', event);
+        })
         .onClick(() => {
           this.openComments();
           this.showChrome();
@@ -2757,6 +3072,11 @@ export struct PlayerPage {
             .fontColor(HgColor.videoInk2)
         }
         .width(48)
+        .scale({ x: this.chromeScale('share'), y: this.chromeScale('share') })
+        .animation({ duration: this.chromePressMs('share'), curve: HgMotion.curve })
+        .onTouch((event: TouchEvent) => {
+          this.chromeTouch('share', event);
+        })
         .onClick(() => {
           this.share();
         })
@@ -2768,7 +3088,7 @@ export struct PlayerPage {
     .width('100%')
     .height('100%')
     .hitTestBehavior(HitTestMode.None)
-    .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+    .transition(this.chromeFade())
   }
 
   @Builder
@@ -2793,6 +3113,9 @@ export struct PlayerPage {
         .width('100%')
         .alignItems(HorizontalAlign.Start)
         .padding({ right: 72 })
+        // 切集/换线时标题与 meta 随进度区一起 fast 淡出淡入，避免文案硬切。
+        .opacity(this.progressSwitching ? 0 : 1)
+        .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
         .onClick(() => {
           this.openSheet('detail');
         })
@@ -2811,6 +3134,8 @@ export struct PlayerPage {
           },
           onSeekEnd: (ms: number, moved: boolean) => {
             this.dragging = false;
+            // 记录提交时间：进度条与手势共用 180ms 防连点窗口。
+            this.lastSeekCommitAt = Date.now();
             // 拖到片尾：视为看完，直接续播下一集（末集复用 handleCompleted 记录完播信号）。
             // 只认「拖动」：轻点进度条右侧也会落在片尾附近，不应被当成看完。
             if (PlayerSeekPolicy.isSeekToEnd(moved, ms, this.durationMs) &&
@@ -2840,9 +3165,9 @@ export struct PlayerPage {
           }
         })
         .margin({ top: HgSpace.m })
-        // 切集/换剧/换线时淡出 200ms，准备好后淡入，避免进度条与时间数字瞬间跳变。
+        // 切集/换剧/换线时 standard 220ms 淡出，准备好后淡入，避免进度条与时间数字瞬间跳变。
         .opacity(this.progressSwitching ? 0 : 1)
-        .animation({ duration: 200, curve: Curve.FastOutSlowIn })
+        .animation({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve })
 
         Row({ space: HgSpace.s }) {
           Stack() {
@@ -2852,16 +3177,23 @@ export struct PlayerPage {
                 .width(24)
                 .height(24)
                 .color(HgColor.videoInk)
+                .transition(this.chipFade())
             } else {
               SymbolGlyph(this.playing ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
                 .fontSize(HgIconSize.player)
                 .fontColor([HgColor.videoInk])
+                .transition(this.chipFade())
             }
           }
           .width(HgSize.hitTarget)
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
           .backgroundColor(HgColor.videoChip)
+          .scale({ x: this.chromeScale('play'), y: this.chromeScale('play') })
+          .animation({ duration: this.chromePressMs('play'), curve: HgMotion.curve })
+          .onTouch((event: TouchEvent) => {
+            this.chromeTouch('play', event);
+          })
           .onClick(() => {
             this.togglePlay();
           })
@@ -2877,6 +3209,11 @@ export struct PlayerPage {
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
           .backgroundColor(HgColor.videoChip)
+          .scale({ x: this.chromeScale('mute'), y: this.chromeScale('mute') })
+          .animation({ duration: this.chromePressMs('mute'), curve: HgMotion.curve })
+          .onTouch((event: TouchEvent) => {
+            this.chromeTouch('mute', event);
+          })
           .onClick(() => {
             this.toggleMute();
           })
@@ -2884,16 +3221,24 @@ export struct PlayerPage {
 
           Blank()
 
-          Text(this.rateLabel())
-            .fontSize(HgFont.micro)
-            .fontWeight(HgFont.weightMedium)
-            .fontColor(HgColor.videoInk)
-            .height(32)
-            .padding({ left: 10, right: 10 })
-            .backgroundColor(HgColor.videoChip)
-            .borderRadius(16)
-            .scale({ x: this.ratePulse, y: this.ratePulse })
-            .bindMenu(this.rateItems())
+          Stack() {
+            Text(this.rateLabel())
+              .fontSize(HgFont.micro)
+              .fontWeight(HgFont.weightMedium)
+              .fontColor(HgColor.videoInk)
+              .height(32)
+              .padding({ left: 10, right: 10 })
+              .backgroundColor(HgColor.videoChip)
+              .borderRadius(16)
+              // 倍速切换脉冲（由 pulseRateChip 用 animateTo 驱动）。
+              .scale({ x: this.ratePulse, y: this.ratePulse })
+              .bindMenu(this.rateItems())
+          }
+          .scale({ x: this.chromeScale('rate'), y: this.chromeScale('rate') })
+          .animation({ duration: this.chromePressMs('rate'), curve: HgMotion.curve })
+          .onTouch((event: TouchEvent) => {
+            this.chromeTouch('rate', event);
+          })
 
           if (this.params.feedKind !== 'post') {
             Row({ space: HgSpace.xs }) {
@@ -2908,6 +3253,11 @@ export struct PlayerPage {
             .padding({ left: 10, right: 10 })
             .backgroundColor(HgColor.videoChip)
             .borderRadius(16)
+            .scale({ x: this.chromeScale('episode'), y: this.chromeScale('episode') })
+            .animation({ duration: this.chromePressMs('episode'), curve: HgMotion.curve })
+            .onTouch((event: TouchEvent) => {
+              this.chromeTouch('episode', event);
+            })
             .onClick(() => {
               PlaybackLog.info('ui.episode', 'tap');
               this.openSheet('episode');
@@ -2924,6 +3274,11 @@ export struct PlayerPage {
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
           .backgroundColor(HgColor.videoChip)
+          .scale({ x: this.chromeScale('lock'), y: this.chromeScale('lock') })
+          .animation({ duration: this.chromePressMs('lock'), curve: HgMotion.curve })
+          .onTouch((event: TouchEvent) => {
+            this.chromeTouch('lock', event);
+          })
           .onClick(() => {
             this.toggleLock();
           })
@@ -2947,7 +3302,7 @@ export struct PlayerPage {
     .width('100%')
     .height('100%')
     .hitTestBehavior(HitTestMode.None)
-    .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+    .transition(this.chromeFade())
   }
 
   @Builder
@@ -2966,7 +3321,7 @@ export struct PlayerPage {
       }
       if (this.loading) {
         Column({ space: HgSpace.xs }) {
-          // 切线路/重载的轻量 loading：200ms 渐入，避免硬闪。
+          // 切线路/重载的轻量 loading：standard 220ms 渐入，避免硬闪。
           LoadingProgress()
             .width(32)
             .height(32)
@@ -2979,7 +3334,7 @@ export struct PlayerPage {
           }
         }
         .alignItems(HorizontalAlign.Center)
-        .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       }
 
       // seek 跳转中：中央显示加载圈（拖动预览时由下方目标时间浮层表达，避免两层叠在一起）。
@@ -2995,7 +3350,11 @@ export struct PlayerPage {
             .maxLines(1)
         }
         .alignItems(HorizontalAlign.Center)
-        .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.FastOutSlowIn }))
+        // seek 加载态按 §3.8：fast 140ms 淡入、exitFast 120ms 淡出。
+        .transition(TransitionEffect.asymmetric(
+          HgMotion.fadeIn(HgMotion.fast),
+          HgMotion.fadeOut(HgMotion.exitFast)
+        ))
       }
 
       if (this.buffering && !this.loading && !this.seeking && this.errorText.length === 0) {
@@ -3010,25 +3369,29 @@ export struct PlayerPage {
               .fontColor(HgColor.videoInk2)
           }
         }
-        .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       }
 
       if (this.pausedPlayVisible()) {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.play_fill'))
-            .fontSize(HgIconSize.hero)
-            .fontColor([HgColor.videoInk])
+        Column() {
+          HgPressable({ dark: true, noTap: true }) {
+            Stack() {
+              SymbolGlyph($r('sys.symbol.play_fill'))
+                .fontSize(HgIconSize.hero)
+                .fontColor([HgColor.videoInk])
+            }
+            .width(64)
+            .height(64)
+            .borderRadius(32)
+            .backgroundColor('#66000000')
+            .border({ width: 1, color: HgColor.videoHairline })
+            .onClick(() => {
+              this.togglePlay();
+            })
+            .accessibilityText('继续播放')
+          }
         }
-        .width(64)
-        .height(64)
-        .borderRadius(32)
-        .backgroundColor('#66000000')
-        .border({ width: 1, color: HgColor.videoHairline })
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
-        .onClick(() => {
-          this.togglePlay();
-        })
-        .accessibilityText('继续播放')
+        .transition(HgMotion.statusTransition())
       }
 
       if (this.ended) {
@@ -3062,7 +3425,7 @@ export struct PlayerPage {
         .padding(HgSpace.xl)
         .backgroundColor('#CC000000')
         .borderRadius(HgRadius.group)
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       }
 
       if (this.errorText.length > 0) {
@@ -3102,7 +3465,7 @@ export struct PlayerPage {
         .padding(HgSpace.xl)
         .backgroundColor('#CC000000')
         .borderRadius(HgRadius.group)
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       }
 
       if (this.dragging) {
@@ -3114,6 +3477,22 @@ export struct PlayerPage {
           Text('/ ' + fmtTime(Math.floor(this.durationMs / 1000)))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.videoInk3)
+          // DESIGN §4.8.4：预览浮层含 62% 宽进度条（跟手更新，不做补间）。
+          Stack({ alignContent: Alignment.Start }) {
+            Row()
+              .width('100%')
+              .height(3)
+              .backgroundColor('#4DFFFFFF')
+              .borderRadius(2)
+            Row()
+              .width(this.dragProgressPercent())
+              .height(3)
+              .backgroundColor(HgColor.videoInk)
+              .borderRadius(2)
+          }
+          .width('62%')
+          .height(3)
+          .margin({ top: HgSpace.xs })
           Text(this.dragDiffText())
             .fontSize(HgFont.caption)
             .fontColor(HgColor.videoGold)
@@ -3121,6 +3500,10 @@ export struct PlayerPage {
         .padding(HgSpace.xl)
         .backgroundColor(HgColor.videoScrimFull)
         .borderRadius(HgRadius.group)
+        .transition(TransitionEffect.asymmetric(
+          HgMotion.fadeIn(HgMotion.fast),
+          HgMotion.fadeOut(HgMotion.exitFast)
+        ))
       }
     }
     .width('100%')
@@ -3145,9 +3528,13 @@ export struct PlayerPage {
           .borderRadius(HgRadius.chip)
           .margin({ top: this.topSafePad() + 52 })
           .scale({ x: this.ratePulse, y: this.ratePulse })
-          .transition(TransitionEffect.OPACITY
-            .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
-            .combine(TransitionEffect.scale({ x: 0.92, y: 0.92 })))
+          .transition(TransitionEffect.asymmetric(
+            HgMotion.fadeIn(HgMotion.fast).combine(
+              TransitionEffect.scale({ x: HgMotion.pressScale, y: HgMotion.pressScale })
+                .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
+            ),
+            HgMotion.fadeOut(HgMotion.exitFast)
+          ))
           .onClick(() => {
             if (this.speedLocked) {
               this.speedLocked = false;
@@ -3161,6 +3548,30 @@ export struct PlayerPage {
     .width('100%')
     .height('100%')
     .padding({ left: this.leftInset, right: this.rightInset + this.commentPanelWidth() })
+    .hitTestBehavior(HitTestMode.None)
+  }
+
+  /** 画中画状态提示（App 内 fast 140ms 级轻量反馈，系统小窗动画之外不叠加自绘转场）。 */
+  @Builder
+  PiPHintChip() {
+    Column() {
+      if (this.pipHint.length > 0) {
+        Text(this.pipHint)
+          .fontSize(HgFont.micro)
+          .fontColor(HgColor.videoInk)
+          .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.xs, bottom: HgSpace.xs })
+          .backgroundColor(HgColor.videoChipStrong)
+          .borderRadius(HgRadius.chip)
+          .transition(TransitionEffect.asymmetric(
+            HgMotion.fadeIn(HgMotion.fast),
+            HgMotion.fadeOut(HgMotion.exitFast)
+          ))
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .alignItems(HorizontalAlign.Center)
+    .padding({ top: this.topSafePad() + 52 })
     .hitTestBehavior(HitTestMode.None)
   }
 
@@ -3195,9 +3606,15 @@ export struct PlayerPage {
     .backgroundColor(HgColor.surface1(true))
     .border({ width: { left: 0.5 }, color: HgColor.hairline(true) })
     .position({ x: this.frameWidth() - this.commentPanelWidth(), y: 0 })
-    .transition(TransitionEffect.OPACITY
-      .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
-      .combine(TransitionEffect.translate({ x: this.commentPanelWidth() })))
+    // 侧栏属大块面板（§3.6）：surface 260ms 进、exitSurface 220ms 出，位移与视频区 resize 同时长。
+    .transition(TransitionEffect.asymmetric(
+      TransitionEffect.OPACITY.animation({ duration: HgMotion.ms(HgMotion.surface), curve: HgMotion.curve })
+        .combine(TransitionEffect.translate({ x: this.commentPanelWidth() })
+          .animation({ duration: HgMotion.ms(HgMotion.surface), curve: HgMotion.curve })),
+      TransitionEffect.OPACITY.animation({ duration: HgMotion.ms(HgMotion.exitSurface), curve: HgMotion.curve })
+        .combine(TransitionEffect.translate({ x: this.commentPanelWidth() })
+          .animation({ duration: HgMotion.ms(HgMotion.exitSurface), curve: HgMotion.curve }))
+    ))
   }
 
   /**
@@ -3224,7 +3641,7 @@ export struct PlayerPage {
     .width('100%')
     .height('100%')
     .hitTestBehavior(HitTestMode.None)
-    .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+    .transition(this.chromeFade())
   }
 
   /* ── 「更多」自定义弹层（遮罩 + 右上角面板） ──────── */
@@ -3237,46 +3654,54 @@ export struct PlayerPage {
       .onClick(() => {
         this.setMenuVisible(false);
       })
-      .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+      // 遮罩：standard 220ms 淡入、exitStandard 200ms 淡出（§3.6）。
+      .transition(TransitionEffect.asymmetric(
+        HgMotion.fadeIn(HgMotion.standard),
+        HgMotion.fadeOut(HgMotion.exitStandard)
+      ))
   }
 
   @Builder
   MenuScaleRow(mode: string) {
-    Row() {
-      Text(this.scaleLabel(mode))
-        .fontSize(HgFont.body)
-        .fontColor(this.scaleRowColor(mode))
-        .layoutWeight(1)
-      if (!this.scaleRowDisabled(mode) && this.menuCheck(mode)) {
-        SymbolGlyph($r('sys.symbol.checkmark'))
-          .fontSize(HgIconSize.compact)
-          .fontColor([HgColor.accent(true)])
+    HgPressable({ dark: true, noTap: true }) {
+      Row() {
+        Text(this.scaleLabel(mode))
+          .fontSize(HgFont.body)
+          .fontColor(this.scaleRowColor(mode))
+          .layoutWeight(1)
+        if (!this.scaleRowDisabled(mode) && this.menuCheck(mode)) {
+          SymbolGlyph($r('sys.symbol.checkmark'))
+            .fontSize(HgIconSize.compact)
+            .fontColor([HgColor.accent(true)])
+        }
       }
+      .width('100%')
+      .height(44)
+      .padding({ left: HgSpace.m, right: HgSpace.m })
+      .onClick(() => {
+        this.pickScale(mode);
+      })
+      .accessibilityText(this.scaleLabel(mode) + (this.menuCheck(mode) ? '，已选' : ''))
     }
-    .width('100%')
-    .height(44)
-    .padding({ left: HgSpace.m, right: HgSpace.m })
-    .onClick(() => {
-      this.pickScale(mode);
-    })
-    .accessibilityText(this.scaleLabel(mode) + (this.menuCheck(mode) ? '，已选' : ''))
   }
 
   @Builder
   MenuActionRow(action: string, label: string) {
-    Row() {
-      Text(label)
-        .fontSize(HgFont.body)
-        .fontColor(HgColor.textPrimary(true))
-        .layoutWeight(1)
+    HgPressable({ dark: true, noTap: true }) {
+      Row() {
+        Text(label)
+          .fontSize(HgFont.body)
+          .fontColor(HgColor.textPrimary(true))
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .height(44)
+      .padding({ left: HgSpace.m, right: HgSpace.m })
+      .onClick(() => {
+        this.onMenuAction(action);
+      })
+      .accessibilityText(label)
     }
-    .width('100%')
-    .height(44)
-    .padding({ left: HgSpace.m, right: HgSpace.m })
-    .onClick(() => {
-      this.onMenuAction(action);
-    })
-    .accessibilityText(label)
   }
 
   @Builder
@@ -3321,9 +3746,11 @@ export struct PlayerPage {
     .position({ x: this.videoAreaWidth() - this.rightInset - 232 - HgSpace.m, y: this.topSafePad() + 52 })
     .onClick(() => {
     })
-    .transition(TransitionEffect.OPACITY
-      .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
-      .combine(TransitionEffect.translate({ y: -10 })))
+    // 自定义弹窗：surfaceEnter 260ms（opacity+0.96 scale）进、exitStandard 200ms 出（§3.6）。
+    .transition(TransitionEffect.asymmetric(
+      HgMotion.surfaceEnter(),
+      HgMotion.fadeOut(HgMotion.exitStandard)
+    ))
   }
 
   @Builder
@@ -3343,7 +3770,7 @@ export struct PlayerPage {
     .height('100%')
     .backgroundColor(HgColor.playerBackground)
     .opacity(this.starting || this.loading || this.errorText.length > 0 ? 1 : 0)
-    .animation({ duration: 220, curve: Curve.FastOutSlowIn })
+    .animation({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve })
     // 与视频层同步位移：上下滑时封面缩略图跟着页面一起走；切页落定后由 posterDragY=0 回正显示新封面。
     .translate({ y: this.posterDragY })
     .hitTestBehavior(HitTestMode.None)
@@ -3555,13 +3982,33 @@ export struct PlayerPage {
   SheetContent() {
     Column() {
       if (this.sheetKind === 'comments') {
-        this.CommentsSheetBuilder()
+        Column() {
+          this.CommentsSheetBuilder()
+        }
+        .width('100%')
+        .height('100%')
+        .transition(this.sheetContentTransition())
       } else if (this.sheetKind === 'detail') {
-        this.DetailSheetBuilder()
+        Column() {
+          this.DetailSheetBuilder()
+        }
+        .width('100%')
+        .height('100%')
+        .transition(this.sheetContentTransition())
       } else if (this.sheetKind === 'lines') {
-        this.LineSheetBuilder()
+        Column() {
+          this.LineSheetBuilder()
+        }
+        .width('100%')
+        .height('100%')
+        .transition(this.sheetContentTransition())
       } else {
-        this.EpisodeSheetBuilder()
+        Column() {
+          this.EpisodeSheetBuilder()
+        }
+        .width('100%')
+        .height('100%')
+        .transition(this.sheetContentTransition())
       }
     }
     .width('100%')
@@ -3621,8 +4068,9 @@ export struct PlayerPage {
         .loop(false)
         .indicator(false)
         .cachedCount(1)
-        .duration(240)
-        .curve(Curve.FastOutSlowIn)
+        // 与视频层跟随动画同一时长/曲线（standard 220ms），避免松手尾部画面与页面错位。
+        .duration(HgMotion.ms(HgMotion.standard))
+        .curve(HgMotion.curve)
         // 上下滑切条：视频层跟着页面同位移（手指拖动跟手、松手后继续滑出），
         // onChange/onAnimationEnd 兜底复位，500ms 定时器防止任何回调异常导致永久偏移。
         .onGestureSwipe((index: number, extraInfo: SwiperAnimationEvent) => {
@@ -3663,6 +4111,7 @@ export struct PlayerPage {
         }
 
         this.SpeedChip()
+        this.PiPHintChip()
         if (this.locked) {
           this.LockLayer()
         }
@@ -3720,8 +4169,8 @@ export struct PlayerPage {
       if (this.inSplitPane() && !this.forceFullscreen) {
         if (!this.paneEntered) {
           this.paneEntered = true;
-          // 平行视窗首次进入播放页：180ms 淡入 + 归位（退出动画在返回时做）。
-          animateTo({ duration: 180, curve: Curve.FastOutSlowIn }, () => {
+          // 平行视窗首次进入播放页：standard 220ms 淡入 + 归位（退出动画在返回时做）。
+          animateTo({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve }, () => {
             this.paneOpacity = 1;
             this.paneOffsetX = 0;
           });
@@ -3744,7 +4193,10 @@ export struct PlayerPage {
       WindowChrome.showStatusBar();
       WindowChrome.syncSystemBarColors(UserPrefs.dark(), false);
       WindowChrome.setKeepScreenOn(false);
-      this.service.setActive(false);
+      // PiP 播放中窗口进入后台不应暂停：小窗继续播放，退出 PiP 后再恢复常规前后台策略。
+      if (!PiPController.isActiveNow()) {
+        this.service.setActive(false);
+      }
       MediaPrefetch.pause();
     })
     .onBackPressed(() => {
@@ -3770,20 +4222,13 @@ export struct PlayerPage {
         return true;
       }
       if (this.inSplitPane() && !this.paneExiting) {
-        // 平行视窗退出播放页：先 140ms 淡出 + 右移，再真正 pop，避免"瞬间跳走"。
-        this.paneExiting = true;
-        animateTo({ duration: 140, curve: Curve.FastOutSlowIn }, () => {
-          this.paneOpacity = 0;
-          this.paneOffsetX = 36;
-        });
-        setTimeout(() => {
-          if (!this.destroyed) {
-            this.navStack.pop();
-          }
-        }, 150);
+        // 平行视窗退出播放页：与返回按钮共用 exitPaneAndPop（exitStandard 200ms 淡出 + 右移后 pop）。
+        this.exitPaneAndPop();
         return true;
       }
       return false;
     })
+    // 页面根：统一 FADE 系统转场，去掉默认右滑横移（Index 不启用 customNavContentTransition）。
+    .systemTransition(NavigationSystemTransitionType.FADE)
   }
 }
