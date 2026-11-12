@@ -360,6 +360,10 @@ export interface WatchProgress {
   t: number;
   dur: number;
   at: number;
+  /** 剧名（服务卡片/继续观看展示用，旧记录可能为空）。 */
+  title?: string;
+  /** 封面 URL（旧记录可能为空）。 */
+  cover?: string;
 }
 
 /** 播放页上下文：ids 是来源列表，index 是当前条目 */

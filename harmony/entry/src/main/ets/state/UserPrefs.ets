@@ -86,6 +86,12 @@ function parseHistory(raw: string): WatchProgress[] {
           dur: Number(item.dur) || 0,
           at: Number(item.at) || 0
         };
+        if (item.title !== undefined && item.title !== null && item.title.length > 0) {
+          entry.title = String(item.title);
+        }
+        if (item.cover !== undefined && item.cover !== null && item.cover.length > 0) {
+          entry.cover = String(item.cover);
+        }
         out.push(entry);
       }
     }
@@ -358,8 +364,12 @@ export class UserPrefs {
     return null;
   }
 
-  /** 记一条观看记录；ep 变化时进度归零，与 Web 版 store.addHistory 一致。 */
-  static addHistory(id: number, ep: number, t: number, durSeconds: number): void {
+  /**
+   * 记一条观看记录；ep 变化时进度归零，与 Web 版 store.addHistory 一致。
+   * title/cover 供「继续观看」服务卡片展示；调用方不传时沿用旧记录的元数据。
+   */
+  static addHistory(id: number, ep: number, t: number, durSeconds: number,
+    title: string = '', cover: string = ''): void {
     if (!id) {
       return;
     }
@@ -367,11 +377,17 @@ export class UserPrefs {
     let prevEp = -1;
     let prevT = 0;
     let prevDur = 0;
+    let prevTitle = '';
+    let prevCover = '';
     for (let i = 0; i < list.length; i++) {
       if (list[i].id === id) {
         prevEp = list[i].ep;
         prevT = list[i].t;
         prevDur = list[i].dur;
+        const itemTitle: string | undefined = list[i].title;
+        const itemCover: string | undefined = list[i].cover;
+        prevTitle = itemTitle !== undefined && itemTitle !== null ? itemTitle : '';
+        prevCover = itemCover !== undefined && itemCover !== null ? itemCover : '';
         break;
       }
     }
@@ -383,6 +399,14 @@ export class UserPrefs {
       dur: durSeconds,
       at: Date.now()
     };
+    const finalTitle: string = title.length > 0 ? title : prevTitle;
+    const finalCover: string = cover.length > 0 ? cover : prevCover;
+    if (finalTitle.length > 0) {
+      entry.title = finalTitle;
+    }
+    if (finalCover.length > 0) {
+      entry.cover = finalCover;
+    }
     const next: WatchProgress[] = [];
     next.push(entry);
     for (let i = 0; i < list.length; i++) {
