@@ -1,6 +1,7 @@
 import { avSession } from '@kit.AVSessionKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from '../services/AppContext';
+import { ImageCache } from '../services/ImageCache';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGMediaSession';
@@ -45,8 +46,9 @@ export class MediaSession {
     }
     MediaSession.creating = true;
     try {
+      // 短剧是视频内容：用 video 类型会话，投播面板才有视频预览/正确的设备语义。
       const session: avSession.AVSession = await avSession.createAVSession(
-        AppContext.abilityContext(), SESSION_TAG, 'audio');
+        AppContext.abilityContext(), SESSION_TAG, 'video');
       MediaSession.session = session;
       MediaSession.registerCallbacks(session);
       await session.activate();
@@ -101,8 +103,12 @@ export class MediaSession {
     }
   }
 
-  /** 同步媒体元数据（标题 / 作者）。 */
-  static async setMetadata(title: string, artist: string, assetId: string): Promise<void> {
+  /**
+   * 同步媒体元数据：标题 / 作者 / 封面 / 副标题 / 时长。
+   * 投播面板与锁屏卡片都读这里；封面用 ImageCache 拿到了 PixelMap 才设置（失败静默回退灰占位）。
+   */
+  static async setMetadata(title: string, artist: string, assetId: string, coverUrl: string = '',
+    subtitle: string = '', durationMs: number = 0): Promise<void> {
     const session = MediaSession.session;
     if (session === undefined) {
       return;
@@ -113,6 +119,21 @@ export class MediaSession {
         title: title,
         artist: artist
       };
+      if (subtitle.length > 0) {
+        metadata.subtitle = subtitle;
+      }
+      if (durationMs > 0) {
+        metadata.duration = Math.round(durationMs);
+      }
+      if (coverUrl.length > 0) {
+        try {
+          const cover = await ImageCache.load(coverUrl, 480, 480);
+          if (cover !== null) {
+            metadata.mediaImage = cover;
+          }
+        } catch (err) {
+        }
+      }
       await session.setAVMetadata(metadata);
     } catch (err) {
     }

@@ -17,6 +17,13 @@ const UI_INTERVAL_MS: number = 250;
 const PLAY_CACHE_TTL_MS: number = 8 * 60 * 1000;
 const NEAR_END_MS: number = 3000;
 
+/** 页面注入的真实媒体元数据（系统会话/投播面板展示用）。 */
+export interface SessionMeta {
+  title: string;
+  cover: string;
+  subtitle: string;
+}
+
 class PlayCacheEntry {
   info: PlaybackInfo;
   at: number;
@@ -51,6 +58,8 @@ export class PlayerService {
   onRetry: (attempt: number, max: number) => void = () => {};
   /** 系统媒体会话就绪（可用于展示投播入口）。 */
   onSessionReady: () => void = () => {};
+  /** 页面提供的真实元数据（剧名/封面/副标题）；未提供时回退「视频 + id」。 */
+  sessionMetaProvider: (videoId: number) => SessionMeta | null = () => null;
   /** 视频原始尺寸变化（prepared/切集/切视频时回调）；页面据此计算 XComponent 展示矩形。 */
   onVideoSize: (width: number, height: number) => void = () => {};
 
@@ -134,12 +143,35 @@ export class PlayerService {
   /** 系统侧「上一首」。 */
   onSessionPrevious: () => void = () => {};
 
+  /** 页面注册真实元数据提供者（标题/封面/副标题），用于系统会话与投播面板预览。 */
+  setSessionMetaProvider(provider: (videoId: number) => SessionMeta | null): void {
+    this.sessionMetaProvider = provider;
+  }
+
+  /** 详情/封面更新后主动刷新会话元数据（页面在 applyDetail / applyPost 后调用）。 */
+  refreshSessionMeta(): void {
+    if (this.released || this.videoId <= 0) {
+      return;
+    }
+    this.syncSessionMeta().catch(() => {
+    });
+  }
+
   /** 首次播放时创建会话并同步元数据（失败静默）。 */
   private async syncSessionMeta(): Promise<void> {
     try {
       await MediaSession.ensure();
-      const title: string = this.videoId > 0 ? ('视频 ' + this.videoId) : 'HGhub';
-      await MediaSession.setMetadata(title, 'HGhub', String(this.videoId) + ':' + this.ep);
+      const meta: SessionMeta | null = this.sessionMetaProvider(this.videoId);
+      let title: string = meta !== null ? meta.title : '';
+      if (title.length === 0) {
+        title = this.videoId > 0 ? ('视频 ' + this.videoId) : 'HGhub';
+      }
+      const cover: string = meta !== null ? meta.cover : '';
+      const subtitle: string = meta !== null ? meta.subtitle : '';
+      // 投播面板第二行展示 artist：带上集数信息，避免只显示「HGhub」。
+      const artist: string = subtitle.length > 0 ? ('HGhub · ' + subtitle) : 'HGhub';
+      await MediaSession.setMetadata(title, artist, String(this.videoId) + ':' + this.ep,
+        cover, subtitle, 0);
       this.onSessionReady();
     } catch (err) {
     }

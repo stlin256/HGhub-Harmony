@@ -1,4 +1,5 @@
 import { Api } from '../services/Api';
+import { CateInfo, CategoryCatalog } from '../services/CategoryCatalog';
 import { Paged, Post, VideoCard } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
@@ -10,25 +11,12 @@ import {
 } from '../state/Routes';
 import { fmt } from '../utils/Format';
 
-interface CateInfo {
-  cate: string;
-  name: string;
-  desc: string;
-}
-
-/** 4 个固定频道（从原 Web src/pages/Category.tsx 克隆）。 */
-const CHANNELS: CateInfo[] = [
-  { cate: 'ai-duanju', name: 'AI成人短剧', desc: '高能反转 · 一口气看完' },
-  { cate: 'ai-manju', name: 'AI成人漫剧', desc: '国创漫剧 · 每周更新' },
-  { cate: 'ai-huanlian', name: 'AI换脸', desc: '换脸演绎 · 全新剧情' },
-  { cate: 'ai-mogai', name: 'AI魔改', desc: '魔改名场面 · 脑洞大开' }
-];
-
 const PREVIEW_SIZE: number = 8;
 
 /**
- * 分类总览：排行榜入口 + 4 个频道横向预览 + 吃瓜预览。
- * 只在 Tab 首次可见时加载（aboutToAppear），避免启动抢带宽；每区独立骨架/失败/重试。
+ * 分类总览：排行榜入口 + 动态频道横向预览 + 吃瓜预览。
+ * 频道先渲染本地已知顺序，再按接口（/api/site/categories/video）动态合并：缺失隐藏、
+ * 410 内容下线隐藏、新增追加末尾。只在 Tab 首次可见时加载，每区独立骨架/失败/重试。
  */
 @Component
 export struct CategoryPage {
@@ -38,8 +26,11 @@ export struct CategoryPage {
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
   /** 窗口宽度（vp）：旋转/分屏/平板时由 EntryAbility 更新，用于响应式居中与卡片尺寸。 */
   @StorageProp(K_NAV_W) windowW: number = 400;
+  /** 动态频道：先渲染本地已知顺序（fallback），aboutToAppear 异步合并接口结果后刷新。 */
+  @State channels: CateInfo[] = CategoryCatalog.fallbackKnown();
+  /** 横向预览行数据/加载/错误：长度始终与 channels 对齐（按 route 合并保留）。 */
   @State rowData: VideoCard[][] = [[], [], [], []];
-  @State rowLoading: boolean[] = [true, true, true, true];
+  @State rowLoading: boolean[] = [false, false, false, false];
   @State rowError: string[] = ['', '', '', ''];
   @State posts: Post[] = [];
   @State postsLoading: boolean = true;
@@ -52,6 +43,10 @@ export struct CategoryPage {
   private rowFadeTimers: number[] = [0, 0, 0, 0];
   private postFadeTimer: number = -1;
   private started: boolean = false;
+  /** 页面已销毁标记：异步回调/定时器不再 setState。 */
+  private pageGone: boolean = false;
+  /** route -> 该频道预览请求代次：频道隐藏/重排后，旧响应按代次丢弃，避免错行。 */
+  private routeSeq: Map<string, number> = new Map<string, number>();
 
   /** 内容最大宽度 960vp 居中：宽屏时左右额外留白。 */
   private contentGutter(): number {
@@ -78,14 +73,21 @@ export struct CategoryPage {
   }
 
   aboutToAppear(): void {
+    this.pageGone = false;
+    // 上次离开时被丢弃的刷新态复位，回页后下拉刷新仍可用。
+    this.refreshing = false;
     if (this.started) {
       return;
     }
     this.started = true;
+    // 首帧先按 fallback 频道渲染并拉预览，随后异步合并接口频道（不阻塞首屏）。
+    this.initRows();
     this.loadEverything(false);
+    this.loadChannels();
   }
 
   aboutToDisappear(): void {
+    this.pageGone = true;
     for (let i = 0; i < this.rowFadeTimers.length; i++) {
       if (this.rowFadeTimers[i] > 0) {
         clearTimeout(this.rowFadeTimers[i]);
@@ -98,30 +100,188 @@ export struct CategoryPage {
     }
   }
 
-  private async loadEverything(refresh: boolean): Promise<void> {
-    const tasks: Promise<void>[] = [];
-    tasks.push(this.fetchCate(0, !refresh));
-    tasks.push(this.fetchCate(1, !refresh));
-    tasks.push(this.fetchCate(2, !refresh));
-    await Promise.all(tasks);
-    await this.fetchCate(3, !refresh);
-    await this.fetchPosts(!refresh);
-    this.refreshing = false;
+  /** 按当前 channels 初始化行状态数组（aboutToAppear 首帧调用，保证 build 时 index 有效）。 */
+  private initRows(): void {
+    const data: VideoCard[][] = [];
+    const loading: boolean[] = [];
+    const error: string[] = [];
+    const opacity: number[] = [];
+    const timers: number[] = [];
+    for (let i = 0; i < this.channels.length; i++) {
+      data.push([]);
+      loading.push(false);
+      error.push('');
+      opacity.push(1);
+      timers.push(0);
+    }
+    this.rowData = data;
+    this.rowLoading = loading;
+    this.rowError = error;
+    this.rowOpacity = opacity;
+    this.rowFadeTimers = timers;
   }
 
-  private setRowLoading(index: number, value: boolean): void {
+  /**
+   * 动态频道：接口回来后合并。保留同 route 的行数据（不重复请求），
+   * 新增频道追加空行并拉预览，410/内容下线的频道从列表移除（与首页 chips 同一结果）。
+   */
+  private async loadChannels(): Promise<void> {
+    try {
+      const list: CateInfo[] = await CategoryCatalog.load();
+      if (this.pageGone || this.sameRoutes(list)) {
+        return;
+      }
+      this.applyChannels(list);
+    } catch (err) {
+    }
+  }
+
+  private sameRoutes(list: CateInfo[]): boolean {
+    if (list.length !== this.channels.length) {
+      return false;
+    }
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].route !== this.channels[i].route) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** 按新频道列表重建行状态（同 route 保留已加载数据/加载态/错误，新 route 触发预览请求）。 */
+  private applyChannels(next: CateInfo[]): void {
+    if (this.sameRoutes(next)) {
+      return;
+    }
+    const oldChannels: CateInfo[] = this.channels;
+    const oldData: VideoCard[][] = this.rowData;
+    const oldLoading: boolean[] = this.rowLoading;
+    const oldError: string[] = this.rowError;
+    const oldOpacity: number[] = this.rowOpacity;
+    const oldTimers: number[] = this.rowFadeTimers;
+    const data: VideoCard[][] = [];
+    const loading: boolean[] = [];
+    const error: string[] = [];
+    const opacity: number[] = [];
+    const timers: number[] = [];
+    for (let i = 0; i < next.length; i++) {
+      const route: string = next[i].route;
+      let oldAt: number = -1;
+      for (let k = 0; k < oldChannels.length; k++) {
+        if (oldChannels[k].route === route) {
+          oldAt = k;
+          break;
+        }
+      }
+      if (oldAt < 0 || oldAt >= oldData.length) {
+        data.push([]);
+        loading.push(false);
+        error.push('');
+        opacity.push(1);
+        timers.push(0);
+      } else {
+        data.push(oldData[oldAt]);
+        loading.push(oldLoading[oldAt]);
+        error.push(oldError[oldAt]);
+        opacity.push(oldOpacity[oldAt]);
+        timers.push(oldTimers[oldAt]);
+      }
+    }
+    this.channels = next;
+    this.rowData = data;
+    this.rowLoading = loading;
+    this.rowError = error;
+    this.rowOpacity = opacity;
+    this.rowFadeTimers = timers;
+    // 新出现的频道（无数据且不在加载中）立即拉一次预览；保留的行不重复请求。
+    for (let i = 0; i < next.length; i++) {
+      if (this.rowData[i].length === 0 && !this.rowLoading[i]) {
+        this.fetchCate(next[i].route, true);
+      }
+    }
+  }
+
+  /** 首屏 410（内容已下线）：直接隐藏该频道（不显示错误行）。 */
+  private hideChannel(route: string): void {
+    if (this.channelIndex(route) < 0) {
+      return;
+    }
+    const next: CateInfo[] = [];
+    for (let i = 0; i < this.channels.length; i++) {
+      if (this.channels[i].route !== route) {
+        next.push(this.channels[i]);
+      }
+    }
+    this.routeSeq.delete(route);
+    this.applyChannels(next);
+  }
+
+  private channelIndex(route: string): number {
+    for (let i = 0; i < this.channels.length; i++) {
+      if (this.channels[i].route === route) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  private nextRouteSeq(route: string): number {
+    let prev: number = 0;
+    const found: number | undefined = this.routeSeq.get(route);
+    if (found !== undefined) {
+      prev = found;
+    }
+    const seq: number = prev + 1;
+    this.routeSeq.set(route, seq);
+    return seq;
+  }
+
+  private async loadEverything(refresh: boolean): Promise<void> {
+    const routes: string[] = [];
+    for (let i = 0; i < this.channels.length; i++) {
+      routes.push(this.channels[i].route);
+    }
+    // 每次最多 3 个频道并行预览（与原实现一致，避免首屏一次发太多请求）。
+    let start: number = 0;
+    while (start < routes.length) {
+      const tasks: Promise<void>[] = [];
+      for (let i = start; i < start + 3 && i < routes.length; i++) {
+        tasks.push(this.fetchCate(routes[i], !refresh));
+      }
+      await Promise.all(tasks);
+      start += 3;
+    }
+    await this.fetchPosts(!refresh);
+    if (!this.pageGone) {
+      this.refreshing = false;
+    }
+  }
+
+  private setRowLoading(route: string, value: boolean): void {
+    const index: number = this.channelIndex(route);
+    if (index < 0 || index >= this.rowLoading.length) {
+      return;
+    }
     const next: boolean[] = this.rowLoading.slice(0);
     next[index] = value;
     this.rowLoading = next;
   }
 
-  private setRowError(index: number, value: string): void {
+  private setRowError(route: string, value: string): void {
+    const index: number = this.channelIndex(route);
+    if (index < 0 || index >= this.rowError.length) {
+      return;
+    }
     const next: string[] = this.rowError.slice(0);
     next[index] = value;
     this.rowError = next;
   }
 
-  private setRowData(index: number, value: VideoCard[]): void {
+  private setRowData(route: string, value: VideoCard[]): void {
+    const index: number = this.channelIndex(route);
+    if (index < 0 || index >= this.rowData.length) {
+      return;
+    }
     const next: VideoCard[][] = this.rowData.slice(0);
     next[index] = value;
     // 先归零再落数据：新内容从 0 → 1 淡入（140ms），骨架→内容/刷新都不硬切。
@@ -139,6 +299,9 @@ export struct CategoryPage {
     }
     this.rowFadeTimers[index] = setTimeout(() => {
       this.rowFadeTimers[index] = 0;
+      if (this.pageGone || index >= this.rowOpacity.length) {
+        return;
+      }
       animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
         const op: number[] = this.rowOpacity.slice(0);
         op[index] = 1;
@@ -155,31 +318,52 @@ export struct CategoryPage {
     }
     this.postFadeTimer = setTimeout(() => {
       this.postFadeTimer = -1;
+      if (this.pageGone) {
+        return;
+      }
       animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
         this.postOpacity = 1;
       });
     }, 40);
   }
 
-  private async fetchCate(index: number, skeleton: boolean): Promise<void> {
-    if (index < 0 || index >= CHANNELS.length) {
-      return;
-    }
+  private async fetchCate(route: string, skeleton: boolean): Promise<void> {
+    const seq: number = this.nextRouteSeq(route);
     if (skeleton) {
-      this.setRowLoading(index, true);
+      this.setRowLoading(route, true);
     }
-    this.setRowError(index, '');
+    this.setRowError(route, '');
     try {
-      const res: Paged<VideoCard> = await Api.category(CHANNELS[index].cate, 1, PREVIEW_SIZE);
+      const res: Paged<VideoCard> = await Api.category(route, 1, PREVIEW_SIZE);
+      if (this.pageGone || this.routeSeq.get(route) !== seq) {
+        return;
+      }
       const list: VideoCard[] = res.items !== undefined && res.items !== null ? res.items : [];
-      this.setRowData(index, list);
+      this.setRowData(route, list);
     } catch (err) {
-      if (this.rowData[index].length === 0) {
-        this.setRowError(index, (err as Error).message);
+      if (this.pageGone || this.routeSeq.get(route) !== seq) {
+        return;
+      }
+      const message: string = (err as Error).message;
+      if (CategoryCatalog.isOfflineError(message)) {
+        // 实测 ai-huanlian / ai-mogai 内容接口返回 HTTP 410「内容已下线」：直接隐藏该频道，不显示错误行。
+        this.hideChannel(route);
+      } else if (this.rowDataAt(route).length === 0) {
+        this.setRowError(route, message);
       }
     } finally {
-      this.setRowLoading(index, false);
+      if (!this.pageGone && this.routeSeq.get(route) === seq) {
+        this.setRowLoading(route, false);
+      }
     }
+  }
+
+  private rowDataAt(route: string): VideoCard[] {
+    const index: number = this.channelIndex(route);
+    if (index < 0 || index >= this.rowData.length) {
+      return [];
+    }
+    return this.rowData[index];
   }
 
   private async fetchPosts(skeleton: boolean): Promise<void> {
@@ -189,15 +373,23 @@ export struct CategoryPage {
     this.postsError = '';
     try {
       const res: Paged<Post> = await Api.posts(1, PREVIEW_SIZE);
+      if (this.pageGone) {
+        return;
+      }
       const list: Post[] = res.items !== undefined && res.items !== null ? res.items : [];
       this.flashPosts();
       this.posts = list;
     } catch (err) {
+      if (this.pageGone) {
+        return;
+      }
       if (this.posts.length === 0) {
         this.postsError = (err as Error).message;
       }
     } finally {
-      this.postsLoading = false;
+      if (!this.pageGone) {
+        this.postsLoading = false;
+      }
     }
   }
 
@@ -210,12 +402,18 @@ export struct CategoryPage {
   }
 
   private openChannel(index: number): void {
-    const info = CHANNELS[index];
-    const param: ChannelParam = { cate: info.cate, name: info.name };
+    if (index < 0 || index >= this.channels.length) {
+      return;
+    }
+    const info: CateInfo = this.channels[index];
+    const param: ChannelParam = { cate: info.route, name: info.name };
     this.navStack.pushPathByName(ROUTE_CHANNEL, param);
   }
 
   private openRow(index: number, itemIndex: number): void {
+    if (index < 0 || index >= this.rowData.length || index >= this.channels.length) {
+      return;
+    }
     const list: VideoCard[] = this.rowData[index];
     if (itemIndex < 0 || itemIndex >= list.length) {
       return;
@@ -227,7 +425,7 @@ export struct CategoryPage {
     const param: PlayerParam = {
       videoIds: ids,
       index: itemIndex,
-      title: CHANNELS[index].name,
+      title: this.channels[index].name,
       source: 'category',
       feedKind: 'video',
       startEp: 1,
@@ -462,7 +660,9 @@ export struct CategoryPage {
         .padding({ left: HgSpace.s })
         .accessibilityText('重试')
         .onClick(() => {
-          this.fetchCate(index, true);
+          if (index >= 0 && index < this.channels.length) {
+            this.fetchCate(this.channels[index].route, true);
+          }
         })
     }
     .width('100%')
@@ -473,7 +673,7 @@ export struct CategoryPage {
   @Builder
   CateSection(index: number) {
     Column() {
-      this.SectionTitle($r('sys.symbol.square_grid_2x2'), CHANNELS[index].name, CHANNELS[index].desc, () => {
+      this.SectionTitle($r('sys.symbol.square_grid_2x2'), this.channels[index].name, this.channels[index].desc, () => {
         this.openChannel(index);
       })
       if (this.rowLoading[index]) {
@@ -638,7 +838,7 @@ export struct CategoryPage {
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
           .lineHeight(HgFont.linePageLarge)
-        Text('5 个频道 · 每周持续上新')
+        Text(this.channels.length + ' 个频道 · 每周持续上新')
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
           .margin({ left: HgSpace.s, bottom: 5 })
@@ -666,11 +866,13 @@ export struct CategoryPage {
             }
             .width('100%')
             .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
-            .margin({ top: HgSpace.m })
+            // 与上下的间距对称：上方由 RankEntry 的 margin-bottom 提供（20），这里只补下方 20；
+            // 之前是 top 12 且无下边距，导致专题卡与上方 32、与下方频道标题几乎贴住。
+            .margin({ bottom: HgSpace.xl })
 
-            ForEach(CHANNELS, (info: CateInfo, index: number) => {
+            ForEach(this.channels, (info: CateInfo, index: number) => {
               this.CateSection(index)
-            }, (info: CateInfo) => info.cate)
+            }, (info: CateInfo) => info.route)
 
             this.PostsSection()
 

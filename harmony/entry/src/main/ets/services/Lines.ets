@@ -10,6 +10,8 @@ import { parseHttpsUrl } from '../utils/Security';
 export const DEFAULT_BASE: string = 'https://example.invalid';
 /** AppStorage key：当前线路（供页面响应式刷新；切换线路后内容页重新加载）。 */
 export const K_LINE_BASE = 'hgLineBase';
+/** Prefs：最近一次业务请求成功的线路（启动时优先使用，避免冷启动先撞不可用线路）。 */
+export const PREF_LINE_LAST_GOOD: string = 'line_last_good';
 
 const PUBLISH_PAGE: string = 'https://example.invalid';
 const MIRROR_MAX: number = 60;
@@ -176,12 +178,20 @@ export class Lines {
     return items;
   }
 
-  /** 启动时读回上次线路；内容不合法则保持默认。 */
+  /**
+   * 启动时读回线路：优先「上次业务请求成功的端点」（line_last_good），
+   * 其次上次保存的线路（line_base），最后默认固定线路。零网络等待，立即生效。
+   */
   static load(): void {
-    const saved = Prefs.getString('line_base', '');
-    const normalized = Lines.normalize(saved);
-    if (normalized.length > 0) {
-      Lines.base = normalized;
+    const lastGood: string = Lines.normalize(Prefs.getString(PREF_LINE_LAST_GOOD, ''));
+    const saved: string = Lines.normalize(Prefs.getString('line_base', ''));
+    if (lastGood.length > 0) {
+      Lines.base = lastGood;
+    } else if (saved.length > 0) {
+      Lines.base = saved;
+    }
+    if (Lines.base !== saved) {
+      Prefs.putString('line_base', Lines.base);
     }
     AppStorage.setOrCreate<string>(K_LINE_BASE, Lines.base);
     Lines.rebuildAllowed();
@@ -446,22 +456,22 @@ export class Lines {
     return out;
   }
 
+  /**
+   * 单线路探测：用 App 真实接口（/api/edge/request + /api/search/hot 信封与结构）判断可用性。
+   * 不再只看站点首页 HTML —— 不少线路首页能开但接口路径/结构已变（例如 example.invalid 首页 200、API 404）。
+   */
   private static async probeOne(url: string): Promise<LineProbe> {
     let target = url.trim();
     while (target.endsWith('/')) {
       target = target.substring(0, target.length - 1);
     }
     const started = Date.now();
-    try {
-      const raw = await Net.getText(target + '/', '', PROBE_TIMEOUT);
-      const ms = Date.now() - started;
-      const result: LineProbe = { url: url, ok: raw.code < 400, status: raw.code, ms: ms };
-      return result;
-    } catch (err) {
-      const ms = Date.now() - started;
-      const result: LineProbe = { url: url, ok: false, ms: ms, error: Net.errorText(err) };
-      return result;
+    const ok: boolean = await Net.probeApi(target, PROBE_TIMEOUT);
+    const ms: number = Date.now() - started;
+    if (ok) {
+      return { url: url, ok: true, status: 200, ms: ms };
     }
+    return { url: url, ok: false, ms: ms, status: 0, error: '接口不可用或结构不匹配' };
   }
 }
 
