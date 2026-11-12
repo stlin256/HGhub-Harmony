@@ -17,6 +17,7 @@ import { RecService } from '../recommend/RecService';
 import { PlayerService } from '../player/PlayerService';
 import { PlayerSeekPolicy } from '../player/PlayerSeekPolicy';
 import { ContinuationState } from '../services/ContinuationState';
+import { PiPController } from '../player/PiPController';
 import { AVCastPicker, AVCastPickerColorMode } from '@kit.AVSessionKit';
 import { MediaPrefetch } from '../player/MediaPrefetch';
 import { PlaybackLog } from '../player/PlaybackLog';
@@ -319,6 +320,7 @@ export struct PlayerPage {
     // 离开播放页恢复系统熄屏策略，避免整机一直常亮。
     WindowChrome.setKeepScreenOn(false);
     LineAuto.stopWatch();
+    PiPController.release();
     this.clearAllTimers();
     this.detailCache.clear();
     this.metaPending.clear();
@@ -2007,6 +2009,20 @@ export struct PlayerPage {
       this.openComments();
     } else if (action === 'share') {
       this.share();
+    } else if (action === 'pip') {
+      this.enterPiP();
+    }
+  }
+
+  /** 进入画中画：把当前播放的 XComponent 交给系统 PiP 窗口。 */
+  private async enterPiP(): Promise<void> {
+    if (!PiPController.isEnabled()) {
+      UiBus.toast('系统未开启画中画');
+      return;
+    }
+    const ok: boolean = await PiPController.enter(this.xController, 'hgNav');
+    if (!ok) {
+      UiBus.toast('当前设备暂不支持画中画');
     }
   }
 
@@ -3069,6 +3085,7 @@ export struct PlayerPage {
       this.MenuActionRow('episodes', '选集')
       this.MenuActionRow('comments', '评论')
       this.MenuActionRow('share', '分享链接')
+      this.MenuActionRow('pip', '画中画')
     }
     .width(232)
     .padding({ top: HgSpace.s, bottom: HgSpace.s })

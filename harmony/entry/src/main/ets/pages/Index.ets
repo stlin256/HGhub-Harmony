@@ -335,6 +335,7 @@ struct Index {
       .enableModeChangeAnimation(false)
       .hideTitleBar(true)
       .navDestination(this.PageMap)
+      .id('hgNav')
       .width('100%')
       .height('100%')
 
