@@ -65,6 +65,10 @@
       "value": "Me"
     },
     {
+      "name": "permission_distributed_reason",
+      "value": "Used for distributed casting and continued playback with nearby devices"
+    },
+    {
       "name": "EntryFormAbility_desc",
       "value": "HGhub 卡片入口"
     },

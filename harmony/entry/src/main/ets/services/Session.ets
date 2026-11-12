@@ -50,6 +50,11 @@ export class Session {
     return data.token.length > 0 && data.token.length <= SESSION_MAX_TOKEN_LEN;
   }
 
+  /** 当前登录用户（无有效会话时返回 null）。 */
+  static user(): User | null {
+    return Session.data.token.length > 0 ? Session.data.user : null;
+  }
+
   static tokenFor(origin: string): string {
     if (Session.data.origin === origin && Session.data.token.length > 0) {
       return Session.data.token;
