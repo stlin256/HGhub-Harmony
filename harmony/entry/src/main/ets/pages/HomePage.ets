@@ -1827,8 +1827,14 @@ export struct HomePage {
           cachedCount: 22,
           showHeader: true,
           showFooter: true,
-          header: this.HomeHeader,
-          footer: this.GridFooter,
+          // 用箭头函数包一层，确保 @BuilderParam 在子组件里执行时 this 仍绑定到 HomePage
+          //（直接传 this.HomeHeader 会在子组件触发时丢失 this 上下文，运行时报 bind of undefined）。
+          header: (): void => {
+            this.HomeHeader();
+          },
+          footer: (): void => {
+            this.GridFooter();
+          },
           onOpen: (index: number) => {
             this.openAt(index);
           },
