@@ -1,6 +1,7 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
 import { CrashGuard } from '../services/CrashGuard';
+import { PerfMark } from '../utils/PerfMark';
 import { K_LINE_BASE, Lines } from '../services/Lines';
 import { ImageCache } from '../services/ImageCache';
 import { UiBus } from '../services/UiBus';
@@ -171,6 +172,8 @@ export struct SettingsPage {
   @State preferHevc: boolean = false;
   /** 本地崩溃记录数（进入页面时刷新）。 */
   @State crashCount: number = 0;
+  /** 最近一次启动耗时（毫秒，0=无记录）。 */
+  @State startupMs: number = 0;
   /** 封面缓存占用（内存+磁盘合计，如 "12.3 MB"）：aboutToAppear/清理后刷新，build 只读状态、不扫盘。 */
   @State cacheText: string = '0 B';
   @State favCount: number = 0;
@@ -221,6 +224,7 @@ export struct SettingsPage {
     this.muteOnStartup = UserPrefs.muteOnStartup();
     this.preferHevc = UserPrefs.preferHevc();
     this.crashCount = CrashGuard.count();
+    this.startupMs = PerfMark.lastStartupMs();
     // 只在进入设置页时统计一次占用空间（内存+磁盘合计），build 期间不再同步扫磁盘。
     this.cacheText = ImageCache.totalText();
     this.favCount = UserPrefs.favs().length;
@@ -827,6 +831,27 @@ export struct SettingsPage {
       .onClick(() => {
         this.copyCrashLog();
       })
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.bolt_fill'))
+        Column({ space: 2 }) {
+          Text('启动耗时')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text(this.startupMs > 0 ? '最近一次 ' + this.startupMs + ' ms（本地打点）' : '暂无记录')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
 
       Divider()
         .width('100%')
