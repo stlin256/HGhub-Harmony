@@ -14,7 +14,8 @@ export struct PlayerSeekBar {
   @Prop showTime: boolean = true;
   onSeekStart: () => void = () => {};
   onSeekPreview: (ms: number) => void = () => {};
-  onSeekEnd: (ms: number) => void = () => {};
+  /** 松手回调：moved=false 表示只是点按（未拖动），调用方据此避免把「点一下片尾」当成看完。 */
+  onSeekEnd: (ms: number, moved: boolean) => void = () => {};
   /**
    * 拖动被系统/手势打断（TouchType.Cancel）：只通知父组件复位「拖动浮层 + 暂停态」，不执行 seek。
    * 缺少该回调时父组件的 dragging 会永久为 true、播放一直停在暂停，直到下一次拖动。
@@ -24,6 +25,8 @@ export struct PlayerSeekBar {
   @State private trackWidth: number = 0;
   @State private dragging: boolean = false;
   @State private dragMs: number = 0;
+  /** 本次触摸是否发生过拖动（区分点按与拖动）。 */
+  private moved: boolean = false;
 
   private displayMs(): number {
     if (this.dragging) {
@@ -102,6 +105,7 @@ export struct PlayerSeekBar {
     }
     if (event.type === TouchType.Down) {
       this.dragging = true;
+      this.moved = false;
       this.dragMs = this.msAt(this.touchX(event));
       this.onSeekStart();
       this.onSeekPreview(this.dragMs);
@@ -109,6 +113,7 @@ export struct PlayerSeekBar {
       if (!this.dragging) {
         return;
       }
+      this.moved = true;
       this.dragMs = this.msAt(this.touchX(event));
       this.onSeekPreview(this.dragMs);
     } else if (event.type === TouchType.Up) {
@@ -116,8 +121,10 @@ export struct PlayerSeekBar {
         return;
       }
       const target = this.dragMs;
+      const moved: boolean = this.moved;
+      this.moved = false;
       this.dragging = false;
-      this.onSeekEnd(target);
+      this.onSeekEnd(target, moved);
     } else if (event.type === TouchType.Cancel) {
       if (!this.dragging) {
         return;

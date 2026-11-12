@@ -165,6 +165,8 @@ export struct SettingsPage {
   @StorageProp(K_VIDEO_SCALE) videoScale: string = 'contain';
   @State themeMode: string = 'system';
   @State muteOnStartup: boolean = true;
+  /** 优先高清（HEVC）：有高清源时优先播放。 */
+  @State preferHevc: boolean = false;
   /** 封面缓存占用（内存+磁盘合计，如 "12.3 MB"）：aboutToAppear/清理后刷新，build 只读状态、不扫盘。 */
   @State cacheText: string = '0 B';
   @State favCount: number = 0;
@@ -213,6 +215,7 @@ export struct SettingsPage {
   aboutToAppear(): void {
     this.themeMode = UserPrefs.themeMode();
     this.muteOnStartup = UserPrefs.muteOnStartup();
+    this.preferHevc = UserPrefs.preferHevc();
     // 只在进入设置页时统计一次占用空间（内存+磁盘合计），build 期间不再同步扫磁盘。
     this.cacheText = ImageCache.totalText();
     this.favCount = UserPrefs.favs().length;
@@ -458,6 +461,34 @@ export struct SettingsPage {
           .onChange((isOn: boolean) => {
             this.muteOnStartup = isOn;
             UserPrefs.setMuteOnStartup(isOn);
+          })
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.sparkles'))
+        Column({ space: 2 }) {
+          Text('优先高清（HEVC）')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text('有高清源时优先播放，更清晰但更耗流量')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(2)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.preferHevc })
+          .selectedColor(HgColor.accent(this.dark))
+          .onChange((isOn: boolean) => {
+            this.preferHevc = isOn;
+            UserPrefs.setPreferHevc(isOn);
           })
       }
       .width('100%')

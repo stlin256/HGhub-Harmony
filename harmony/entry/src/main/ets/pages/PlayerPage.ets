@@ -2,6 +2,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { vibrator } from '@kit.SensorServiceKit';
 import { Api } from '../services/Api';
 import { K_LINE_BASE, Lines } from '../services/Lines';
+import { LineAuto } from '../services/LineAuto';
 import { UiBus } from '../services/UiBus';
 import { WindowChrome } from '../services/WindowChrome';
 import {
@@ -31,6 +32,8 @@ const TOP_SAFE_FALLBACK: number = HgSpace.xxl;
 /** 横屏视频「适应」时，视频中心所在屏幕高度比例（略高于正中心，给底部控件留空间）。 */
 const LANDSCAPE_CENTER_Y_RATIO: number = 0.42;
 const LONG_PRESS_MS: number = 380;
+/** 拖动到片尾该比例以上松手 → 视为「看完了」，自动续播下一集。 */
+const SEEK_END_RATIO: number = 0.95;
 const SEEK_FULL_WIDTH_SECONDS: number = 120;
 /** 滑动时视频层 Y 位移的方向系数：SwiperAnimationEvent.currentOffset 与页面位移同号时取 1。 */
 const VIDEO_DRAG_SIGN: number = 1;
@@ -125,6 +128,10 @@ export struct PlayerPage {
   @State bufferingPercent: number = 0;
   @State ended: boolean = false;
   @State errorText: string = '';
+  /** 画质徽章文案：HD=高清中 / SD=标准中 / 空=无高清源。 */
+  @State qualityBadge: string = '';
+  /** 播放失败自动重试提示（空=未在重试）。 */
+  @State retryText: string = '';
   @State positionMs: number = 0;
   @State durationMs: number = 0;
   @State bufferedMs: number = 0;
@@ -178,6 +185,10 @@ export struct PlayerPage {
   private pageShown: boolean = true;
   /** 最近一次已记录"播放开始"的条目 id：切集/换剧只记一次，避免重复计数。 */
   private lastPlayRecordId: number = -1;
+  /** 待确认的画质切换目标（null=无）；onPrepared 确认成功，onError 回退。 */
+  private pendingQuality: boolean | null = null;
+  /** 高清源回退是否已发生（避免无限回退）。 */
+  private hevcFallbackDone: boolean = false;
   private initialIndex: number = 0;
   private initialDone: boolean = false;
   private playVideoId: number = 0;
@@ -293,6 +304,8 @@ export struct PlayerPage {
       this.paneOffsetX = 36;
     }
     this.openVideo(index, false);
+    // 播放中线路巡检（仅播放中运行，暂停/离开自动停止）。
+    LineAuto.startWatch();
   }
 
   aboutToDisappear(): void {
@@ -300,6 +313,7 @@ export struct PlayerPage {
     WindowChrome.showStatusBar();
     // 离开播放页恢复系统熄屏策略，避免整机一直常亮。
     WindowChrome.setKeepScreenOn(false);
+    LineAuto.stopWatch();
     this.clearAllTimers();
     this.detailCache.clear();
     this.metaPending.clear();
@@ -333,6 +347,8 @@ export struct PlayerPage {
     this.pendingLineReload = false;
     this.sheetVisible = false;
     this.menuVisible = false;
+    this.pendingQuality = null;
+    this.hevcFallbackDone = false;
     this.loadedBase = base;
     this.clearMetaCache();
     this.resetCommentPanelContext();
@@ -352,10 +368,25 @@ export struct PlayerPage {
       this.positionMs = 0;
       this.durationMs = 0;
       this.bufferedMs = 0;
+      this.retryText = '';
+      this.qualityBadge = '';
     };
     this.service.onPrepared = () => {
       this.loading = false;
       this.progressSwitching = false;
+      this.retryText = '';
+      this.errorText = '';
+      this.syncQualityBadge();
+      if (this.pendingQuality !== null) {
+        const next: boolean = this.pendingQuality;
+        this.pendingQuality = null;
+        this.hevcFallbackDone = false;
+        if (next && !this.service.currentHasHevc()) {
+          UiBus.toast('该视频暂无高清源');
+        } else {
+          UiBus.toastOk(next ? '已切换到高清' : '已切换到标准');
+        }
+      }
       // 新视频画面已可上屏：把滑出屏幕的视频层复位到基准位（此时海报层仍盖着，不会看到跳变）。
       // 若翻页动画还没结束，推迟到 onAnimationEnd 再复位，避免画面在滑动中途回正。
       if (this.swipeAnimating) {
@@ -384,8 +415,10 @@ export struct PlayerPage {
       this.playing = state === 'playing';
       if (state === 'playing') {
         this.scheduleHideChrome();
+        LineAuto.startWatch();
       } else if (state === 'paused') {
         this.showChrome();
+        LineAuto.stopWatch();
       }
       this.syncKeepScreenOn();
     };
@@ -413,10 +446,25 @@ export struct PlayerPage {
       this.playing = false;
       this.buffering = false;
       this.progressSwitching = false;
+      this.retryText = '';
       this.settleVideoDragAfterSwitch();
+      // 高清源播放失败（设备不支持/源异常）：自动回退标准画质一次，不让用户卡在错误页。
+      if (this.pendingQuality === true && !this.hevcFallbackDone) {
+        this.pendingQuality = null;
+        this.hevcFallbackDone = true;
+        this.errorText = '';
+        UiBus.toast('高清不可用，已切回标准');
+        // 回退只影响本次播放，不改用户全局偏好；并自动续播，避免停在 0:00 等用户再点。
+        this.service.switchQuality(false, true, false);
+        return;
+      }
+      this.pendingQuality = null;
       this.errorText = message;
       this.showChrome();
       this.syncKeepScreenOn();
+    };
+    this.service.onRetry = (attempt: number, max: number) => {
+      this.retryText = '正在重试（' + attempt + '/' + max + '）…';
     };
     this.service.onSeekDone = (ms: number) => {
       this.positionMs = ms;
@@ -428,6 +476,30 @@ export struct PlayerPage {
       this.videoH = height;
       this.recomputeVideoRect(width > 0 && height > 0);
     };
+  }
+
+  /** 根据当前播放响应刷新画质徽章：无高清源不显示，高清中显示 HD，标准中显示 SD。 */
+  private syncQualityBadge(): void {
+    if (!this.service.currentHasHevc()) {
+      this.qualityBadge = '';
+      return;
+    }
+    this.qualityBadge = this.service.preferHevcEnabled() ? 'HD' : 'SD';
+  }
+
+  /** 点击画质徽章：在 HEVC 高清与标准之间切换（保留进度，失败自动回退）。 */
+  private toggleQuality(): void {
+    if (this.destroyed || this.errorText.length > 0) {
+      return;
+    }
+    if (!this.service.currentHasHevc()) {
+      return;
+    }
+    const next: boolean = !this.service.preferHevcEnabled();
+    this.pendingQuality = next;
+    this.hevcFallbackDone = false;
+    this.qualityBadge = next ? 'HD' : 'SD';
+    this.service.switchQuality(next);
   }
 
   private clearAllTimers(): void {
@@ -565,6 +637,8 @@ export struct PlayerPage {
 
   private playNow(id: number, ep: number, sec: number, force: boolean): void {
     this.ep = ep;
+    this.pendingQuality = null;
+    this.hevcFallbackDone = false;
     this.service.load(id, ep, sec, true, force);
   }
 
@@ -963,6 +1037,9 @@ export struct PlayerPage {
     if (ep < 1 || ep === this.ep) {
       return;
     }
+    // 切集后旧的画质切换确认不再适用，避免误弹 toast / 误回退。
+    this.pendingQuality = null;
+    this.hevcFallbackDone = false;
     if (this.episodeCount > 0 && ep > this.episodeCount) {
       return;
     }
@@ -2250,6 +2327,24 @@ export struct PlayerPage {
         .alignItems(HorizontalAlign.Start)
         .margin({ left: HgSpace.s, right: HgSpace.s })
 
+        if (this.qualityBadge.length > 0) {
+          Text(this.qualityBadge)
+            .fontSize(HgFont.micro)
+            .fontWeight(HgFont.weightMedium)
+            .fontColor(HgColor.videoInk)
+            .maxLines(1)
+            .height(32)
+            .padding({ left: 10, right: 10 })
+            .backgroundColor(HgColor.videoChip)
+            .borderRadius(16)
+            .textAlign(TextAlign.Center)
+            .margin({ right: HgSpace.s })
+            .onClick(() => {
+              this.toggleQuality();
+            })
+            .accessibilityText(this.qualityBadge === 'HD' ? '当前高清，点击切换标准' : '当前标准，点击切换高清')
+        }
+
         Row({ space: 2 }) {
           Text('线路')
             .fontSize(HgFont.micro)
@@ -2430,8 +2525,16 @@ export struct PlayerPage {
           onSeekPreview: (ms: number) => {
             this.dragMs = ms;
           },
-          onSeekEnd: (ms: number) => {
+          onSeekEnd: (ms: number, moved: boolean) => {
             this.dragging = false;
+            // 拖到片尾：视为看完，直接续播下一集（末集复用 handleCompleted 记录完播信号）。
+            // 只认「拖动」：轻点进度条右侧也会落在片尾附近，不应被当成看完。
+            if (moved && this.params.feedKind !== 'post' && this.durationMs > 0 &&
+              ms >= this.durationMs * SEEK_END_RATIO) {
+              this.positionMs = ms;
+              this.handleCompleted();
+              return;
+            }
             this.service.seekTo(ms);
             this.positionMs = ms;
             if (this.seekWasPlaying) {
@@ -2565,12 +2668,21 @@ export struct PlayerPage {
           })
       }
       if (this.loading) {
-        // 切线路/重载的轻量 loading：200ms 渐入，避免硬闪。
-        LoadingProgress()
-          .width(32)
-          .height(32)
-          .color(HgColor.videoInk)
-          .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.FastOutSlowIn }))
+        Column({ space: HgSpace.xs }) {
+          // 切线路/重载的轻量 loading：200ms 渐入，避免硬闪。
+          LoadingProgress()
+            .width(32)
+            .height(32)
+            .color(HgColor.videoInk)
+          if (this.retryText.length > 0) {
+            Text(this.retryText)
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.videoInk2)
+              .maxLines(1)
+          }
+        }
+        .alignItems(HorizontalAlign.Center)
+        .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.FastOutSlowIn }))
       }
 
       if (this.buffering && !this.loading && this.errorText.length === 0) {

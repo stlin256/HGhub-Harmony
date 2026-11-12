@@ -158,6 +158,9 @@ function delay(ms: number): Promise<void> {
 
 /** 线路（数据源）管理：固定线路 + 地址发布页镜像，切换即换 base。 */
 export class Lines {
+  /** 允许访问的 host 白名单：固定线路 + 发布页镜像 + 当前线路；空集合表示尚未初始化（不拦截）。 */
+  private static allowedHosts: Set<string> = new Set<string>();
+
   private static base: string = DEFAULT_BASE;
 
   static current(): string {
@@ -181,6 +184,7 @@ export class Lines {
       Lines.base = normalized;
     }
     AppStorage.setOrCreate<string>(K_LINE_BASE, Lines.base);
+    Lines.rebuildAllowed();
     hilog.info(0x0000, 'HGLine', 'line loaded: %{public}s', Lines.base);
   }
 
@@ -222,16 +226,62 @@ export class Lines {
     return 'https://' + host + (port.length > 0 ? ':' + port : '');
   }
 
+  /** 从线路地址取小写 host（复用系统 URL 解析；非法返回空串）。 */
+  static hostOfUrl(raw: string): string {
+    const parsed = parseHttpsUrl(raw.trim());
+    if (parsed === null) {
+      return '';
+    }
+    return parsed.hostname.toLowerCase();
+  }
+
+  /** 重建 host 白名单：固定线路 + 缓存镜像 + 当前线路。 */
+  static rebuildAllowed(): void {
+    Lines.allowedHosts.clear();
+    const fixed: LineItem[] = Lines.fixed();
+    for (let i = 0; i < fixed.length; i++) {
+      Lines.addAllowed(fixed[i].url);
+    }
+    const cached: LineItem[] = Lines.cachedMirrors();
+    for (let i = 0; i < cached.length; i++) {
+      Lines.addAllowed(cached[i].url);
+    }
+    Lines.addAllowed(Lines.base);
+  }
+
+  private static addAllowed(url: string): void {
+    const host: string = Lines.hostOfUrl(url);
+    if (host.length > 0) {
+      Lines.allowedHosts.add(host);
+    }
+  }
+
+  /** 该线路是否在白名单内（白名单为空时放行，避免初始化顺序导致误拦）。 */
+  static isAllowed(url: string): boolean {
+    if (Lines.allowedHosts.size === 0) {
+      return true;
+    }
+    const host: string = Lines.hostOfUrl(url);
+    if (host.length === 0) {
+      return false;
+    }
+    return Lines.allowedHosts.has(host);
+  }
+
   /** 切换线路：立即生效并落盘；换站后清空会话（token 与 origin 绑定）。 */
   static setBase(raw: string): string {
     const next = Lines.normalize(raw);
     if (next.length === 0) {
       throw new Error('线路地址无效（需要纯 HTTPS 站点地址，禁止内网）');
     }
+    if (!Lines.isAllowed(next)) {
+      throw new Error('该域名不在线路白名单内');
+    }
     const previous = Lines.base;
     Lines.base = next;
     Prefs.putString('line_base', next);
     AppStorage.setOrCreate<string>(K_LINE_BASE, next);
+    Lines.addAllowed(next);
     hilog.info(0x0000, 'HGLine', 'line switched: %{public}s -> %{public}s', previous, next);
     if (previous !== next) {
       Session.clear();
@@ -305,6 +355,8 @@ export class Lines {
     }
     // 成功拉取后落盘：下次启动/无网时 LineAuto 仍能用上次缓存的镜像做候选。
     Lines.saveMirrorCache(items);
+    // 新镜像加入白名单，允许后续切换。
+    Lines.rebuildAllowed();
     const result: LineMirrors = { source: PUBLISH_PAGE, script: jsUrl, items: items };
     return result;
   }

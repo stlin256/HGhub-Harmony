@@ -14,6 +14,10 @@ const HISTORY_INTERVAL_MS: number = 5000;
 const UI_INTERVAL_MS: number = 250;
 const PLAY_CACHE_TTL_MS: number = 8 * 60 * 1000;
 const NEAR_END_MS: number = 3000;
+/** 播放失败重试：分级退避（首次重试 0.5s，之后 1.5s / 3s）。 */
+const RETRY_DELAYS_MS: number[] = [500, 1500, 3000];
+/** 最大尝试次数（含首次）。 */
+const MAX_ATTEMPTS: number = 4;
 
 class PlayCacheEntry {
   info: PlaybackInfo;
@@ -45,6 +49,8 @@ export class PlayerService {
   onCompleted: () => void = () => {};
   onError: (message: string, code: number) => void = () => {};
   onSeekDone: (ms: number) => void = () => {};
+  /** 播放失败自动重试进度回调（attempt 从 1 开始，max 为最大重试次数）。 */
+  onRetry: (attempt: number, max: number) => void = () => {};
   /** 视频原始尺寸变化（prepared/切集/切视频时回调）；页面据此计算 XComponent 展示矩形。 */
   onVideoSize: (width: number, height: number) => void = () => {};
 
@@ -89,6 +95,10 @@ export class PlayerService {
   private lastUiAt: number = 0;
   private lastHistoryAt: number = 0;
   private seekLockAt: number = 0;
+  /** 当前播放是否优先 HEVC 高清源（跟随 UserPrefs，可被 switchQuality 改写）。 */
+  private preferHevc: boolean = false;
+  /** 当前播放地址响应（用于判断是否存在高清源）。 */
+  private currentInfo: PlaybackInfo | undefined = undefined;
   private prefetching: Set<string> = new Set<string>();
   private cache: Map<string, PlayCacheEntry> = new Map<string, PlayCacheEntry>();
 
@@ -188,12 +198,13 @@ export class PlayerService {
   }
 
   /* ── 播放地址 ─────────────────────────────────────── */
-  private cacheKey(videoId: number, ep: number): string {
-    return videoId + ':' + ep;
+  private cacheKey(videoId: number, ep: number, preferHevc: boolean): string {
+    return videoId + ':' + ep + ':' + (preferHevc ? 'h' : 's');
   }
 
-  private async resolvePlay(videoId: number, ep: number, force: boolean): Promise<PlaybackInfo> {
-    const key = this.cacheKey(videoId, ep);
+  private async resolvePlay(videoId: number, ep: number, force: boolean,
+    preferHevc: boolean): Promise<PlaybackInfo> {
+    const key = this.cacheKey(videoId, ep, preferHevc);
     if (!force) {
       const entry = this.cache.get(key);
       if (entry !== undefined && !PlayerService.cacheStale(entry)) {
@@ -201,7 +212,7 @@ export class PlayerService {
       }
     }
     const info = await Api.playback(videoId, ep);
-    const url: string = PlayerService.mainUrl(info);
+    const url: string = PlayerService.streamUrl(info, preferHevc);
     if (url.length === 0) {
       throw new Error('暂无播放地址');
     }
@@ -222,13 +233,33 @@ export class PlayerService {
     return false;
   }
 
-  /** 从 playback 响应里取主播放地址。 */
-  private static mainUrl(info: PlaybackInfo): string {
+  /** 该播放响应是否带 HEVC 高清源。 */
+  static hasHevc(info: PlaybackInfo | undefined): boolean {
+    if (info === undefined || info === null) {
+      return false;
+    }
     const streams = info.streams;
-    if (streams === undefined || streams === null || streams.main === undefined || streams.main === null) {
+    if (streams === undefined || streams === null) {
+      return false;
+    }
+    const hevc: string | undefined = streams.hevc;
+    return hevc !== undefined && hevc !== null && hevc.length > 0;
+  }
+
+  /** 按画质偏好取播放地址：优先 HEVC，无高清源或未开启时回退标准源。 */
+  static streamUrl(info: PlaybackInfo, preferHevc: boolean): string {
+    const streams = info.streams;
+    if (streams === undefined || streams === null) {
       return '';
     }
-    return streams.main;
+    if (preferHevc) {
+      const hevc: string | undefined = streams.hevc;
+      if (hevc !== undefined && hevc !== null && hevc.length > 0) {
+        return hevc;
+      }
+    }
+    const main: string | undefined = streams.main;
+    return main === undefined || main === null ? '' : main;
   }
 
   /** 上游 CDN 鉴权头（x-cdn-auth / x-cdn-app 等）+ 基础请求头。 */
@@ -269,14 +300,15 @@ export class PlayerService {
     if (videoId <= 0 || ep <= 0) {
       return;
     }
-    const key = this.cacheKey(videoId, ep);
+    const preferHevc: boolean = this.preferHevc;
+    const key = this.cacheKey(videoId, ep, preferHevc);
     if (this.cache.has(key) || this.prefetching.has(key)) {
       return;
     }
     this.prefetching.add(key);
     Api.playback(videoId, ep).then((info: PlaybackInfo) => {
       this.prefetching.delete(key);
-      const url: string = PlayerService.mainUrl(info);
+      const url: string = PlayerService.streamUrl(info, preferHevc);
       if (url.length > 0) {
         this.cache.set(key, new PlayCacheEntry(info, Date.now()));
         PlaybackLog.info('play.prefetch', 'done ep=' + ep);
@@ -287,8 +319,10 @@ export class PlayerService {
     });
   }
 
+  /** 清掉某集的两种画质缓存（切画质/播放失败重取时用）。 */
   private dropCache(videoId: number, ep: number): void {
-    this.cache.delete(this.cacheKey(videoId, ep));
+    this.cache.delete(this.cacheKey(videoId, ep, false));
+    this.cache.delete(this.cacheKey(videoId, ep, true));
   }
 
   /** 线路切换后清空播放地址缓存：旧线路的签名地址不可复用，当前集/预取的下一集都要重新请求。 */
@@ -318,14 +352,53 @@ export class PlayerService {
     this.positionMs = 0;
     this.durationMs = 0;
     this.bufferedMs = 0;
+    this.preferHevc = UserPrefs.preferHevc();
+    this.currentInfo = undefined;
     this.resetVideoSize();
     this.onTime(0);
     this.onDuration(0);
     this.onLoading();
-    PlaybackLog.info('load.begin', 'id=' + videoId + ' ep=' + ep);
+    PlaybackLog.info('load.begin', 'id=' + videoId + ' ep=' + ep +
+      ' hevc=' + (this.preferHevc ? '1' : '0'));
     this.enqueue(() => {
-      return this.loadByApi(videoId, ep, startSec, autoPlay, forceRefresh, serial, false);
+      return this.loadByApi(videoId, ep, startSec, autoPlay, forceRefresh, serial, 0);
     });
+  }
+
+  /** 当前播放响应是否带 HEVC 高清源（页面据此决定是否显示画质徽章）。 */
+  currentHasHevc(): boolean {
+    return PlayerService.hasHevc(this.currentInfo);
+  }
+
+  /** 当前播放是否正在使用高清源。 */
+  preferHevcEnabled(): boolean {
+    return this.preferHevc;
+  }
+
+  /**
+   * 切换画质：持久化偏好 → 清当前集缓存 → 保留进度重新解析播放。
+   * 切换结果通过 onPrepared / onError 回调体现；失败由页面回退标准画质。
+   */
+  switchQuality(preferHevc: boolean, autoPlay: boolean = false, persist: boolean = true): void {
+    if (this.released) {
+      return;
+    }
+    const videoId: number = this.videoId;
+    const ep: number = this.ep;
+    if (videoId <= 0) {
+      return;
+    }
+    const positionSec: number = Math.max(0, this.positionMs / 1000);
+    // 失败回退时 state 已是 error，不能只看 state 判断是否续播；autoPlay 供回退路径显式指定。
+    const wasPlaying: boolean = autoPlay || this.state === 'playing';
+    if (persist) {
+      UserPrefs.setPreferHevc(preferHevc);
+    }
+    this.preferHevc = preferHevc;
+    this.dropCache(videoId, ep);
+    PlaybackLog.info('quality.switch', 'hevc=' + (preferHevc ? '1' : '0') +
+      ' pos=' + Math.round(positionSec * 1000) + ' play=' + (wasPlaying ? '1' : '0'));
+    this.load(videoId, ep, positionSec, wasPlaying, true);
   }
 
   /**
@@ -342,21 +415,27 @@ export class PlayerService {
   }
 
   private async loadByApi(videoId: number, ep: number, startSec: number, autoPlay: boolean,
-    forceRefresh: boolean, serial: number, retried: boolean): Promise<void> {
+    forceRefresh: boolean, serial: number, attempt: number): Promise<void> {
     let info: PlaybackInfo;
     try {
-      info = await this.resolvePlay(videoId, ep, forceRefresh || retried);
+      info = await this.resolvePlay(videoId, ep, forceRefresh || attempt > 0, this.preferHevc);
     } catch (err) {
       if (serial !== this.serial || this.released) {
         return;
       }
-      this.fail(PlayerService.errText(err), -1);
+      const code: number = PlayerService.errCode(err);
+      const text: string = PlayerService.errText(err);
+      if (await this.retryOrFail(videoId, ep, startSec, autoPlay, serial, attempt, code, text, true)) {
+        return;
+      }
+      this.fail(text, -1);
       return;
     }
     if (serial !== this.serial || this.released) {
       return;
     }
-    const url: string = PlayerService.mainUrl(info);
+    this.currentInfo = info;
+    const url: string = PlayerService.streamUrl(info, this.preferHevc);
     this.playUrl = url;
     const cdnHeaders: Record<string, string> = PlayerService.cdnHeaders(info);
     // 代理回源分片/密钥也要带 CDN 鉴权头（与直连模式等价搬运）。
@@ -370,16 +449,68 @@ export class PlayerService {
       if (serial !== this.serial || this.released) {
         return;
       }
-      if (!retried) {
-        // 播放地址通常带签名时效：失败一次就清缓存重取，避免"永久不可播"。
-        PlaybackLog.warn('load.retry', 'refresh play url once');
-        this.dropCache(videoId, ep);
-        await this.loadByApi(videoId, ep, startSec, autoPlay, true, serial, true);
+      const code: number = PlayerService.errCode(err);
+      const text: string = PlayerService.errText(err);
+      if (await this.retryOrFail(videoId, ep, startSec, autoPlay, serial, attempt, code, text, false)) {
         return;
       }
-      this.fail(PlayerService.friendlyError(PlayerService.errCode(err), PlayerService.errText(err)),
-        PlayerService.errCode(err));
+      this.fail(PlayerService.friendlyError(code, text), code);
     }
+  }
+
+  /**
+   * 失败后按策略重试：可重试错误按指数退避重取播放地址，最多 MAX_ATTEMPTS 次。
+   * @returns true=已安排重试（调用方直接返回），false=不再重试（调用方报错）
+   */
+  private async retryOrFail(videoId: number, ep: number, startSec: number, autoPlay: boolean,
+    serial: number, attempt: number, code: number, text: string, fromResolve: boolean): Promise<boolean> {
+    if (attempt + 1 >= MAX_ATTEMPTS || !PlayerService.isRetryable(code, text)) {
+      return false;
+    }
+    const delay: number = PlayerService.retryDelay(attempt + 1);
+    PlaybackLog.warn('load.retry', 'attempt=' + (attempt + 1) + ' delay=' + delay +
+      ' code=' + code + ' from=' + (fromResolve ? 'resolve' : 'open'));
+    this.onRetry(attempt + 1, MAX_ATTEMPTS - 1);
+    if (delay > 0) {
+      await PlayerService.sleep(delay);
+    }
+    if (serial !== this.serial || this.released) {
+      return true;
+    }
+    // 播放地址通常带签名时效：重试前清缓存重取，避免"永久不可播"。
+    this.dropCache(videoId, ep);
+    await this.loadByApi(videoId, ep, startSec, autoPlay, true, serial, attempt + 1);
+    return true;
+  }
+
+  /**
+   * 判断错误是否值得重试：网络类 / 服务端 5xx / 播放器 IO 错误可重试；
+   * 鉴权（401/403）、资源不存在（404）、无播放地址、5400102（状态不满足的瞬时操作错误）不重试。
+   */
+  private static isRetryable(code: number, message: string): boolean {
+    if (code === 5400103) {
+      return true;
+    }
+    const text: string = message.toLowerCase();
+    if (text.indexOf('http 5') >= 0) {
+      return true;
+    }
+    return text.indexOf('timeout') >= 0 || text.indexOf('超时') >= 0 ||
+      text.indexOf('网络') >= 0 || text.indexOf('connect') >= 0 ||
+      text.indexOf('network') >= 0;
+  }
+
+  private static retryDelay(attempt: number): number {
+    const index: number = Math.min(Math.max(0, attempt), RETRY_DELAYS_MS.length - 1);
+    return RETRY_DELAYS_MS[index];
+  }
+
+  private static sleep(ms: number): Promise<void> {
+    return new Promise<void>((resolve: () => void) => {
+      setTimeout(() => {
+        resolve();
+      }, ms);
+    });
   }
 
   /** 帖子直链播放（post.video_url 非空时使用，不走 /play 接口）。 */
@@ -398,6 +529,9 @@ export class PlayerService {
     this.positionMs = 0;
     this.durationMs = 0;
     this.bufferedMs = 0;
+    // 直链播放没有 streams 响应：清掉上一条视频的播放信息，避免画质徽章残留/误切端点。
+    this.currentInfo = undefined;
+    this.preferHevc = UserPrefs.preferHevc();
     this.resetVideoSize();
     this.onTime(0);
     this.onDuration(0);
