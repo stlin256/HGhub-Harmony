@@ -125,7 +125,7 @@ export class MediaSession {
       return;
     }
     try {
-      const state: avSession.PlaybackState = {
+      const state: avSession.AVPlaybackState = {
         state: playing ? avSession.PlaybackState.PLAYBACK_STATE_PLAY :
           avSession.PlaybackState.PLAYBACK_STATE_PAUSE,
         position: {

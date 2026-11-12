@@ -495,7 +495,7 @@ export struct SettingsPage {
         .color(HgColor.hairline(this.dark))
 
       Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.sparkles'))
+        this.RowIcon($r('sys.symbol.aspect_ratio'))
         Column({ space: 2 }) {
           Text('优先高清（HEVC）')
             .fontSize(HgFont.rowTitle)

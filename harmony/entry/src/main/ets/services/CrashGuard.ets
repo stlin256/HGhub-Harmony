@@ -82,7 +82,8 @@ export class CrashGuard {
   /** 从事件参数里取字符串字段（取不到返回空串）。 */
   private static paramText(info: hiAppEvent.AppEventInfo, key: string): string {
     try {
-      const params: Record<string, Object> = info.params;
+      // SDK 里 AppEventInfo.params 类型是 object：显式转成键值表后再按 key 取值。
+      const params: Record<string, Object> = info.params as Record<string, Object>;
       if (params === undefined || params === null) {
         return '';
       }

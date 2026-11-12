@@ -16,6 +16,10 @@ export class HgColor {
   static mask(dark: boolean): string { return dark ? '#99000000' : '#66000000'; }
   static skeletonBase(dark: boolean): string { return dark ? '#FF171A1F' : '#FFEDF0F4'; }
   static skeletonHighlight(dark: boolean): string { return dark ? '#FF20242A' : '#FFF7F8FA'; }
+  /** 页面背景（新页面统一入口，与 canvas 同值）。 */
+  static pageBackground(dark: boolean): string { return dark ? '#FF0B0C10' : '#FFF3F4F6'; }
+  /** 卡片背景（新页面统一入口，与 surface1 同值）。 */
+  static cardBackground(dark: boolean): string { return dark ? '#FF14161B' : '#FFFFFFFF'; }
 
   // 文字与语义
   static textPrimary(dark: boolean): string { return dark ? '#FFF5F6F8' : '#FF15171B'; }
@@ -131,6 +135,8 @@ export class HgSize {
 
 export class HgRadius {
   static readonly badge: number = 6;
+  /** 内容卡片圆角（新页面统一入口）。 */
+  static readonly card: number = 16;
   static readonly inline: number = 8;
   static readonly control: number = 10;
   static readonly row: number = 12;

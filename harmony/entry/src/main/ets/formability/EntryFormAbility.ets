@@ -1,4 +1,4 @@
-import { FormExtensionAbility, formBindingData } from '@kit.FormKit';
+import { FormExtensionAbility, formBindingData, formProvider } from '@kit.FormKit';
 import { Want } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -35,11 +35,9 @@ export default class EntryFormAbility extends FormExtensionAbility {
   onUpdateForm(formId: string): void {
     hilog.info(LOG_DOMAIN, LOG_TAG, 'onUpdateForm');
     this.buildData((data: CardData) => {
-      try {
-        this.updateForm(formId, formBindingData.createFormBindingData(data as Object));
-      } catch (err) {
+      formProvider.updateForm(formId, formBindingData.createFormBindingData(data as Object)).catch(() => {
         hilog.warn(LOG_DOMAIN, LOG_TAG, 'updateForm failed');
-      }
+      });
     });
   }
 
@@ -54,7 +52,8 @@ export default class EntryFormAbility extends FormExtensionAbility {
         const formId: string = want.parameters !== undefined && want.parameters !== null ?
           String(want.parameters['ohos.extra.param.key.form_identity'] ?? '') : '';
         if (formId.length > 0) {
-          this.updateForm(formId, formBindingData.createFormBindingData(data as Object));
+          formProvider.updateForm(formId, formBindingData.createFormBindingData(data as Object)).catch(() => {
+          });
         }
       } catch (err) {
       }

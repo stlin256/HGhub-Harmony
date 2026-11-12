@@ -65,6 +65,10 @@
       "value": "我的"
     },
     {
+      "name": "permission_distributed_reason",
+      "value": "用于与附近设备分布式投播与接续播放"
+    },
+    {
       "name": "EntryFormAbility_desc",
       "value": "HGhub 卡片入口"
     },
