@@ -24,6 +24,7 @@
         "startWindowIcon": "$media:app_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        "backgroundModes": ["audioPlayback"],
         "skills": [
           {
             "entities": ["entity.system.home"],
@@ -41,6 +42,9 @@
       },
       {
         "name": "ohos.permission.VIBRATE"
+      },
+      {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING"
       }
     ]
   }

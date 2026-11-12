@@ -9,6 +9,7 @@ import { PlaybackLog } from './PlaybackLog';
 import { LocalProxy } from './LocalProxy';
 import { MediaPrefetch } from './MediaPrefetch';
 import { PlayerQuality } from './PlayerQuality';
+import { MediaSession } from './MediaSession';
 import { redactSensitive } from '../utils/Security';
 
 const HISTORY_INTERVAL_MS: number = 5000;
@@ -90,6 +91,8 @@ export class PlayerService {
   private queue: Promise<void> = Promise.resolve();
 
   private lastUiAt: number = 0;
+  /** 上次同步系统媒体会话状态的时间（1s 节流）。 */
+  private lastSessionAt: number = 0;
   private lastHistoryAt: number = 0;
   private seekLockAt: number = 0;
   /** 当前播放是否优先 HEVC 高清源（跟随 UserPrefs，可被 switchQuality 改写）。 */
@@ -98,6 +101,57 @@ export class PlayerService {
   private currentInfo: PlaybackInfo | undefined = undefined;
   private prefetching: Set<string> = new Set<string>();
   private cache: Map<string, PlayCacheEntry> = new Map<string, PlayCacheEntry>();
+
+  constructor() {
+    MediaSession.bind({
+      onPlay: () => {
+        this.play();
+      },
+      onPause: () => {
+        this.pause();
+      },
+      onStop: () => {
+        this.pause();
+      },
+      onNext: () => {
+        this.onSessionNext();
+      },
+      onPrevious: () => {
+        this.onSessionPrevious();
+      },
+      onSeek: (positionMs: number) => {
+        this.seekTo(positionMs);
+      }
+    });
+  }
+
+  /* ── 系统媒体会话（锁屏 / 控制中心） ─────────────── */
+
+  /** 系统侧「下一首」：交给页面处理（切集/切下一条）。 */
+  onSessionNext: () => void = () => {};
+  /** 系统侧「上一首」。 */
+  onSessionPrevious: () => void = () => {};
+
+  /** 首次播放时创建会话并同步元数据（失败静默）。 */
+  private async syncSessionMeta(): Promise<void> {
+    try {
+      await MediaSession.ensure();
+      const title: string = this.videoId > 0 ? ('视频 ' + this.videoId) : 'HGhub';
+      await MediaSession.setMetadata(title, 'HGhub', String(this.videoId) + ':' + this.ep);
+    } catch (err) {
+    }
+  }
+
+  /** 同步播放状态到系统会话（1s 节流）。 */
+  private syncSessionState(force: boolean): void {
+    const now: number = Date.now();
+    if (!force && now - this.lastSessionAt < 1000) {
+      return;
+    }
+    this.lastSessionAt = now;
+    MediaSession.setState(this.state === 'playing', this.positionMs, this.rate).catch(() => {
+    });
+  }
 
   /* ── 对外查询 ─────────────────────────────────────── */
   currentState(): string {
@@ -413,6 +467,8 @@ export class PlayerService {
       return;
     }
     this.currentInfo = info;
+    this.syncSessionMeta().catch(() => {
+    });
     const url: string = PlayerService.streamUrl(info, this.preferHevc);
     this.playUrl = url;
     const cdnHeaders: Record<string, string> = PlayerService.cdnHeaders(info);
@@ -533,8 +589,10 @@ export class PlayerService {
       if (state === 'playing') {
         this.buffering = false;
         this.onState('playing');
+        this.syncSessionState(true);
       } else if (state === 'paused') {
         this.onState('paused');
+        this.syncSessionState(true);
       } else if (state === 'prepared') {
         this.buffering = false;
         this.onState('prepared');
@@ -551,6 +609,7 @@ export class PlayerService {
 
     player.on('timeUpdate', (ms: number) => {
       this.positionMs = ms;
+      this.syncSessionState(false);
       const now = Date.now();
       if (now - this.lastUiAt >= UI_INTERVAL_MS) {
         this.lastUiAt = now;
