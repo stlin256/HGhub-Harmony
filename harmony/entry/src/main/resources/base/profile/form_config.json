@@ -31,8 +31,8 @@
       "isDefault": false,
       "updateEnabled": true,
       "updateDuration": 1,
-      "defaultDimension": "4*4",
-      "supportDimensions": ["4*4"]
+      "defaultDimension": "2*4",
+      "supportDimensions": ["2*4"]
     }
   ]
 }

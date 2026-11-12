@@ -3,6 +3,7 @@
  * 最多展示 4 张收藏封面；没有收藏/封面为空时用灰色 SVG 占位卡。
  */
 interface FavItem {
+  id: number;
   title: string;
   cover: string;
 }
@@ -11,7 +12,7 @@ interface FavItem {
 @Component
 struct WidgetFavorites {
   @LocalStorageProp('favJson') @Watch('onData') favJson: string = '[]';
-  @LocalStorageProp('count') count: number = 0;
+  @LocalStorageProp('favCount') count: number = 0;
   @State slots: FavItem[] = [];
 
   aboutToAppear(): void {
@@ -33,7 +34,7 @@ struct WidgetFavorites {
     }
     const out: FavItem[] = [];
     for (let i = 0; i < 4; i++) {
-      out.push(i < list.length ? list[i] : { title: '', cover: '' });
+      out.push(i < list.length ? list[i] : { id: 0, title: '', cover: '' });
     }
     this.slots = out;
   }
@@ -44,6 +45,23 @@ struct WidgetFavorites {
       abilityName: 'EntryAbility',
       params: {
         hgFormAction: 'favorites'
+      }
+    });
+  }
+
+  private openItem(item: FavItem): void {
+    if (item.id <= 0) {
+      this.openApp();
+      return;
+    }
+    postCardAction(this, {
+      action: 'router',
+      abilityName: 'EntryAbility',
+      params: {
+        hgFormAction: 'open',
+        hgFormVideoId: item.id,
+        hgFormEp: 1,
+        hgFormTitle: item.title
       }
     });
   }
@@ -84,6 +102,9 @@ struct WidgetFavorites {
           .backgroundColor('#33FFFFFF')
           .borderRadius(10)
           .clip(true)
+          .onClick(() => {
+            this.openItem(item);
+          })
         }, (item: FavItem, index: number) => 'fav-slot-' + index)
       }
       .width('100%')

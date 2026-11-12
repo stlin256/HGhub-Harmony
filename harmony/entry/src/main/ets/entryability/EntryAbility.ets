@@ -11,6 +11,7 @@ import { LineAuto } from '../services/LineAuto';
 import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
 import { ContinuationState } from '../services/ContinuationState';
+import { WidgetRefresher } from '../services/WidgetRefresher';
 import { RecService } from '../recommend/RecService';
 import { Prefs } from '../services/Prefs';
 import { Session } from '../services/Session';
@@ -85,7 +86,32 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       const action: Object | undefined = params['hgFormAction'];
-      if (action === undefined || action === null || String(action) !== 'continue') {
+      if (action === undefined || action === null) {
+        return;
+      }
+      // 收藏影视架：点某一张封面直接打开对应剧集。
+      if (String(action) === 'open') {
+        const rawId: Object | undefined = params['hgFormVideoId'];
+        const videoId: number = rawId !== undefined && rawId !== null ? Number(rawId) : 0;
+        if (videoId <= 0) {
+          return;
+        }
+        const rawEp: Object | undefined = params['hgFormEp'];
+        const ep: number = rawEp !== undefined && rawEp !== null ? Number(rawEp) : 1;
+        const rawTitle: Object | undefined = params['hgFormTitle'];
+        const title: string = rawTitle !== undefined && rawTitle !== null ? String(rawTitle) : '收藏';
+        const payload: string = JSON.stringify({
+          id: videoId,
+          ep: ep > 0 ? ep : 1,
+          t: 0,
+          title: title,
+          cover: ''
+        });
+        AppStorage.setOrCreate<string>('hgFormContinueJson', payload);
+        hilog.info(DOMAIN, TAG, 'form open id=%{public}d', videoId);
+        return;
+      }
+      if (String(action) !== 'continue') {
         return;
       }
       const list = UserPrefs.history();
@@ -122,6 +148,8 @@ export default class EntryAbility extends UIAbility {
       Lines.load();
       Session.load();
       UserPrefs.init(systemDark);
+      // 冷启动：立即刷新一次所有已添加卡片；封面快照生成后 UserListPrefetch 再补一次。
+      WidgetRefresher.requestRefresh(500);
       hilog.info(DOMAIN, TAG, 'services ready, base=%{public}s', Lines.current());
       // 崩溃监控：监听系统 fault 事件并落本地（不上报）。
       CrashGuard.init();
