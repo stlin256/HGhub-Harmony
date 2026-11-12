@@ -418,6 +418,7 @@ export struct SearchPage {
             Text('完整榜单 ›')
               .fontSize(HgFont.caption)
               .fontColor(HgColor.accent(this.dark))
+              .accessibilityText('完整榜单 ›')
               .onClick(() => {
                 this.navStack.pushPathByName(ROUTE_RANKS, null);
               })
@@ -449,6 +450,7 @@ export struct SearchPage {
                 }
                 .width('100%')
                 .height(32)
+                .accessibilityText('实时热搜')
                 .onClick(() => {
                   this.submit(word.word);
                 })

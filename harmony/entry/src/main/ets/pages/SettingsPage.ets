@@ -139,6 +139,7 @@ struct AboutDialog {
         .backgroundColor(HgColor.accent(this.dark))
         .borderRadius(HgRadius.chip)
         .margin({ top: HgSpace.s })
+        .accessibilityText('知道了，关闭关于')
         .onClick(() => {
           this.dismiss();
         })
@@ -447,6 +448,7 @@ export struct SettingsPage {
             .padding({ left: HgSpace.m, right: HgSpace.m })
             .backgroundColor(this.themeMode === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
             .borderRadius(HgRadius.chip)
+            .accessibilityText('主题')
             .onClick(() => {
               this.setTheme(option.key);
             })
@@ -541,6 +543,7 @@ export struct SettingsPage {
               .padding({ left: HgSpace.m, right: HgSpace.m })
               .backgroundColor(this.videoScale === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
               .borderRadius(HgRadius.chip)
+              .accessibilityText('画面比例')
               .onClick(() => {
                 this.setScale(option.key, option.label);
               })
@@ -591,6 +594,7 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(HgSize.listRowDouble)
+      .accessibilityText('线路')
       .onClick(() => {
         UiBus.openLines();
       })
@@ -622,6 +626,7 @@ export struct SettingsPage {
           .fontColor(HgColor.accent(this.dark))
           .height(HgSize.hitTarget)
           .padding({ left: HgSpace.s })
+          .accessibilityText('封面缓存')
           .onClick(() => {
             this.clearCache();
           })
@@ -652,6 +657,7 @@ export struct SettingsPage {
           .fontColor(HgColor.danger(this.dark))
           .height(HgSize.hitTarget)
           .padding({ left: HgSpace.s })
+          .accessibilityText('清空历史')
           .onClick(() => {
             this.clearHistory();
           })
@@ -682,6 +688,7 @@ export struct SettingsPage {
           .fontColor(HgColor.danger(this.dark))
           .height(HgSize.hitTarget)
           .padding({ left: HgSpace.s })
+          .accessibilityText('清空')
           .onClick(() => {
             this.clearSearchHistory();
           })
@@ -742,6 +749,7 @@ export struct SettingsPage {
           .fontColor(HgColor.accent(this.dark))
           .height(HgSize.hitTarget)
           .padding({ left: HgSpace.s })
+          .accessibilityText('管理')
           .onClick(() => {
             this.navStack.pushPathByName(ROUTE_REC_DATA, null);
           })
@@ -771,6 +779,7 @@ export struct SettingsPage {
           .fontColor(HgColor.accent(this.dark))
           .height(HgSize.hitTarget)
           .padding({ left: HgSpace.s })
+          .accessibilityText('查看')
           .onClick(() => {
             this.navStack.pushPathByName(ROUTE_REC_HOW, null);
           })
@@ -803,6 +812,7 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(HgSize.listRowDouble)
+      .accessibilityText('检查更新')
       .onClick(() => {
         this.checkUpdate();
       })
@@ -828,6 +838,7 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(HgSize.listRowDouble)
+      .accessibilityText('崩溃日志')
       .onClick(() => {
         this.copyCrashLog();
       })
@@ -874,6 +885,7 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(HgSize.listRowDouble)
+      .accessibilityText('v')
       .onClick(() => {
         this.showAbout();
       })

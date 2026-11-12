@@ -433,6 +433,7 @@ export struct ProfilePage {
         .padding({ left: HgSpace.m, right: HgSpace.s })
         .backgroundColor(HgColor.accent(this.dark))
         .borderRadius(HgRadius.chip)
+        .accessibilityText('登录')
         .onClick(() => {
           UiBus.openLogin();
         })
@@ -443,6 +444,7 @@ export struct ProfilePage {
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
     .border({ width: 0.5, color: HgColor.hairline(this.dark) })
+    .accessibilityText('登录')
     .onClick(() => {
       if (!this.loggedIn) {
         UiBus.openLogin();
@@ -463,6 +465,7 @@ export struct ProfilePage {
         .backgroundColor(this.tab === 'fav' ? HgColor.surface1(this.dark) : Color.Transparent)
         .borderRadius(HgRadius.chip)
         .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
+        .accessibilityText('我的收藏')
         .onClick(() => {
           this.switchTab('fav');
         })
@@ -476,6 +479,7 @@ export struct ProfilePage {
         .backgroundColor(this.tab === 'history' ? HgColor.surface1(this.dark) : Color.Transparent)
         .borderRadius(HgRadius.chip)
         .animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn })
+        .accessibilityText('观看历史')
         .onClick(() => {
           this.switchTab('history');
         })
@@ -607,6 +611,7 @@ export struct ProfilePage {
             .backgroundColor(HgColor.surface2(this.dark))
             .borderRadius(HgRadius.chip)
             .margin({ top: HgSpace.m })
+            .accessibilityText('清空观看历史')
             .onClick(() => {
               this.clearHistory();
             })
@@ -662,6 +667,7 @@ export struct ProfilePage {
     .padding({ left: HgSpace.m, right: HgSpace.m })
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
+    .accessibilityText('关注作者的最新作品')
     .onClick(() => {
       this.navStack.pushPathByName(ROUTE_FOLLOW, null);
     })
@@ -685,6 +691,7 @@ export struct ProfilePage {
         .width(HgSize.hitTarget)
         .height(HgSize.hitTarget)
         .borderRadius(HgSize.hitTarget / 2)
+        .accessibilityText('我的')
         .onClick(() => {
           this.navStack.pushPathByName(ROUTE_SETTINGS, null);
         })

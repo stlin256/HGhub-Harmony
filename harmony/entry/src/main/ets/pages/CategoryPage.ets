@@ -276,6 +276,7 @@ export struct CategoryPage {
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
     .margin({ bottom: HgSpace.xl })
+    .accessibilityText('热播榜 · 推荐榜 · 潜力榜')
     .onClick(() => {
       this.navStack.pushPathByName(ROUTE_RANKS, null);
     })
@@ -324,6 +325,7 @@ export struct CategoryPage {
     .width('100%')
     .height(52)
     .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+    .accessibilityText('全部')
     .onClick(action)
   }
 
@@ -458,6 +460,7 @@ export struct CategoryPage {
         .fontColor(HgColor.accent(this.dark))
         .height(HgSize.hitTarget)
         .padding({ left: HgSpace.s })
+        .accessibilityText('重试')
         .onClick(() => {
           this.fetchCate(index, true);
         })
@@ -499,6 +502,7 @@ export struct CategoryPage {
             ListItem() {
               this.RowCard(item)
             }
+            .accessibilityText('暂无内容')
             .onClick(() => {
               this.openRow(index, itemIndex);
             })
@@ -555,6 +559,7 @@ export struct CategoryPage {
     .padding({ left: HgSpace.m, right: HgSpace.m })
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
+    .accessibilityText('查看全部 ›')
     .onClick(() => {
       this.navStack.pushPathByName(ROUTE_TOPICS, null);
     })
@@ -586,6 +591,7 @@ export struct CategoryPage {
             .fontColor(HgColor.accent(this.dark))
             .height(HgSize.hitTarget)
             .padding({ left: HgSpace.s })
+            .accessibilityText('重试')
             .onClick(() => {
               this.fetchPosts(true);
             })

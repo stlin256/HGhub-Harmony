@@ -293,6 +293,7 @@ struct HomeHeroSwiper {
         .height('100%')
         .borderRadius(HgRadius.hero)
         .clip(true)
+        .accessibilityText('推荐内容，点击播放')
         .onClick(() => {
           this.onOpen(index);
         })
@@ -1610,6 +1611,7 @@ export struct HomePage {
             .fontColor(HgColor.textPrimary(this.dark))
         }
         .height(HgSize.hitTarget)
+        .accessibilityText('为你推荐')
         .onClick(() => {
           this.nextBatch();
         })
@@ -1631,6 +1633,7 @@ export struct HomePage {
         }
         .height(HgSize.hitTarget)
         .padding({ left: HgSpace.s })
+        .accessibilityText('换一批')
         .onClick(() => {
           // 真实随机：整池洗牌后替换展示并回顶，不是重发同一页。
           this.nextBatch();
@@ -1649,6 +1652,7 @@ export struct HomePage {
         .width('100%')
         .height(HgSize.hitTarget)
         .justifyContent(FlexAlign.Center)
+        .accessibilityText('加载失败，点击重试')
         .onClick(() => {
           this.retryCate();
         })
@@ -1675,6 +1679,7 @@ export struct HomePage {
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .padding(HgSpace.m)
+          .accessibilityText('加载失败，点击重试')
           .onClick(() => {
             this.loadMore();
           })
@@ -1768,6 +1773,7 @@ export struct HomePage {
               .fontColor(HgColor.accent(this.dark))
               .height(HgSize.hitTarget)
               .margin({ top: HgSpace.s })
+              .accessibilityText('切换线路')
               .onClick(() => {
                 UiBus.openLines();
               })
