@@ -1040,7 +1040,7 @@ export class PlayerService {
       target = this.durationMs;
     }
     const now = Date.now();
-    if (now - this.seekLockAt < 120) {
+    if (now - this.seekLockAt < 180) {
       return;
     }
     this.seekLockAt = now;

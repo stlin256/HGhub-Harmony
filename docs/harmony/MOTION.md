@@ -33,8 +33,9 @@
 ## 3. 标准模式库
 
 ### 3.1 页面转场（NavDestination）
-- 进入：`HgMotion.pageEnter()`（opacity 0→1 + 上移 8vp，280ms）；退出：`liquid` 不自定义，沿用系统返回（避免自绘退场与系统手势冲突）。
+- 统一使用系统 FADE：每个 NavDestination 末尾 `.systemTransition(NavigationSystemTransitionType.FADE)`；不再自绘整页横移/自定义转场（避免与系统返回手势冲突）。
 - 播放页进入/退出：沿用现有 `playerEnter/playerExit` 语义（见播放器章节），不做整页横移。
+- 后续若需要自定义时长/位移，再统一接 `Navigation.customNavContentTransition`（当前不做）。
 
 ### 3.2 底部 Tab 切换
 - 内容：交叉淡入 160–200ms（`standard`），不做横向滑动；
@@ -136,4 +137,9 @@ Stack().scale({ x: pressed ? HgMotion.pressScale : 1, y: pressed ? HgMotion.pres
 4. **W3 P2 46 项**：token 迁移与裸数字清理、Footer/空态/按压细节、Hero 轮播 token、文档回写。
 
 标准口径以本文件第 2–5 节为准；DESIGN.md §2.9 旧表已标记 deprecated（保留历史参考）。
+
+**整改进度（2026-11-13）**：W0/W1 已完成并分步提交（W0 公共件 + W1-A 浏览 / W1-B 我的设置 / W1-C 播放器 / W1-D 跨页面），
+代码中已无页面级 `HgDuration`、裸动画时长或裸曲线；减少动态效果开关已接入设置页。
+剩余项均为**产品功能缺口**（下拉刷新等）或 ArkUI 属性不可补间（详情简介 maxLines），不属于动效标准未落地，
+详见审计报告第 7 节。
 
