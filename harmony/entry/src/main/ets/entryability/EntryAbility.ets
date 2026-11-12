@@ -5,6 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from '../services/AppContext';
 import { Api } from '../services/Api';
 import { LineAuto } from '../services/LineAuto';
+import { CrashGuard } from '../services/CrashGuard';
 import { RecService } from '../recommend/RecService';
 import { Prefs } from '../services/Prefs';
 import { Session } from '../services/Session';
@@ -72,6 +73,8 @@ export default class EntryAbility extends UIAbility {
       Session.load();
       UserPrefs.init(systemDark);
       hilog.info(DOMAIN, TAG, 'services ready, base=%{public}s', Lines.current());
+      // 崩溃监控：监听系统 fault 事件并落本地（不上报）。
+      CrashGuard.init();
       // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
       LineAuto.init();
       // 离线推荐：异步载入随包目录（3,388 条）+ 本地画像，并按冷却时间静默同步增量目录。
