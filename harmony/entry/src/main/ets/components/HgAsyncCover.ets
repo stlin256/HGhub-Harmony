@@ -23,11 +23,22 @@ export struct HgAsyncCover {
   @State ready: boolean = false;
   @State failed: boolean = false;
   @State pulse: number = 1;
+  @State loadingPulse: number = 1;
   /** 组件已销毁：封面解码回调要在销毁后丢弃，避免对已卸载节点 setState。 */
   private destroyed: boolean = false;
 
   aboutToAppear(): void {
     this.reload();
+    if (HgMotion.skeletonAnimated()) {
+      animateTo({
+        duration: HgMotion.skeletonPulseMs,
+        curve: Curve.EaseInOut,
+        iterations: -1,
+        playMode: PlayMode.Alternate
+      }, () => {
+        this.loadingPulse = HgMotion.skeletonPulseMin;
+      });
+    }
   }
 
   aboutToDisappear(): void {
@@ -92,6 +103,7 @@ export struct HgAsyncCover {
           .height('100%')
           // 深色下骨架用高亮档而不是接近 canvas 的底色：卡片未出图时也清晰可见，避免"那块消失/突然出现"的观感。
           .backgroundColor(this.dark ? HgColor.skeletonHighlight(this.dark) : HgColor.skeletonBase(this.dark))
+          .opacity(this.loadingPulse)
         Column() {
           LoadingProgress()
             .width(22)

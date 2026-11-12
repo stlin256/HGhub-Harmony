@@ -503,6 +503,7 @@ struct Index {
         .position({ x: this.navBarWidth(), y: 0 })
         .justifyContent(FlexAlign.Center)
         .hitTestBehavior(HitTestMode.None)
+        .transition(HgMotion.fadeIn(HgMotion.fast))
       }
 
       // 主题切换遮罩：旧主题 canvas 色 180ms 淡出（只遮视觉，不拦截交互）。

@@ -79,3 +79,25 @@
 4. 页面转场：push/pop 统一、快速连点不卡中间态；
 5. 设置开启「减少动态效果」后转场直切、骨架静态。
 
+
+
+## 7. 整改完成记录（2026-11-13）
+
+| 波次 | 提交 | 覆盖 |
+| --- | --- | --- |
+| W0 公共件 | af7bd90 | HgPressable、HgSkeletonBlock、HgCommon、HgAsyncCover、Index 主题遮罩/底栏、EntryAbility 首帧主题 |
+| W1-A 浏览/列表 | ab82653 | 首页/搜索/分类/榜单/吃瓜/专题/关注/用户/视频详情/PostDetail（Lead）：分支交叉、listSwap、append、按压、Footer、缓存不淡入、FADE 转场、token 清零 |
+| W1-B 我的/设置/弹窗 | f791d48 | 统一弹窗壳、主题/减少动效、AlertDialog 迁移、Profile 骨架/切 Tab/按压/回顶/标题折叠、Settings/RecData/LineSheet/LoginSheet |
+| W1-C 播放器 | e8f54a8 | 点赞收藏、chrome 单路径、Overlay、MoreMenu、侧栏、全屏分栏、seek、PiP、Sheet kind、token 清零 |
+| W1-D 跨页面/通用 | a854e54 | HgPressable 冲突修复、PostDetail 动效与 FADE |
+| 收尾 | fix commit | Index navEmpty fade、PlayerService 防连点 180ms、HgAsyncCover 骨架呼吸、Profile 大标题折叠、文档口径 |
+
+**验证口径**：debug/release 构建成功；页面级 HgDuration/裸动画时长/裸曲线为 0（骨架 900ms EaseInOut 例外）；13 个 NavDestination 全部 systemTransition(FADE)；设置页「减少动态效果」写入 hgReduceMotion 后 HgMotion.ms() 全局生效。
+
+**明确保留（非动效标准缺口）**：
+1. 下拉刷新：Profile/专题/专题详情/关注/用户等页面尚无 Refresh 控件（产品功能项，不擅自新增）。
+2. 详情简介展开/收起：ArkUI maxLines 不可补间，采用 exitFast→切换→standard 收敛，不做假高度动画。
+3. 播放器 clampSwipeToAdjacent 惯性回正保持无动画：避免与 Swiper 翻页动画竞态。
+4. LoginSheet 登录/注册标题切换、autoCancel 遮罩关闭：系统/文本内容替换，非动效缺失。
+5. Hero 轮播间隔是业务节奏常量（4200ms），切换时长已走 HgMotion.surface。
+6. 非 Profile Tab 的再次点击回顶需各 Tab 滚动控制器接入（当前仅 Profile 接入）；列为后续交互优化，不影响动效一致性。

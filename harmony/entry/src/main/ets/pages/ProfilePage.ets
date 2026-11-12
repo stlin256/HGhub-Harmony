@@ -91,6 +91,8 @@ export struct ProfilePage {
   /** 我的页确认弹窗（清空历史/退出登录）：复用统一弹窗壳，替代系统 AlertDialog。 */
   private confirmCopy: ConfirmCopy = new ConfirmCopy('', '', '确定', '取消', false);
   private pendingConfirm: () => void = () => {};
+  /** 大标题随滚动折叠（>24vp 收为 section 字号；回顶恢复）。 */
+  @State private titleCollapsed: boolean = false;
   private confirmController: CustomDialogController = new CustomDialogController({
     builder: ConfirmDialog({
       copyOf: (): ConfirmCopy => this.confirmCopy,
@@ -1250,10 +1252,11 @@ export struct ProfilePage {
     Column() {
       Row() {
         Text('我的')
-          .fontSize(HgFont.pageLarge)
+          .fontSize(this.titleCollapsed ? HgFont.section : HgFont.pageLarge)
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
-          .lineHeight(HgFont.linePageLarge)
+          .lineHeight(this.titleCollapsed ? HgFont.lineSection : HgFont.linePageLarge)
+          .animation({ duration: HgMotion.ms(HgMotion.exitFast), curve: HgMotion.curve })
           .layoutWeight(1)
         HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
           Stack() {
@@ -1319,6 +1322,13 @@ export struct ProfilePage {
       // 记录收藏/历史各自的滚动位置（onScroll 已废弃，用 onDidScroll + currentOffset 读绝对值）；
       // 距底部阈值内触发加载更多（收藏/历史无限滚动）。
       .onDidScroll((xOffset: number, yOffset: number) => {
+        const offset: number = this.scroller.currentOffset().yOffset;
+        const collapsed: boolean = offset > 24;
+        if (collapsed !== this.titleCollapsed) {
+          animateTo({ duration: HgMotion.ms(HgMotion.exitFast), curve: HgMotion.curve }, () => {
+            this.titleCollapsed = collapsed;
+          });
+        }
         this.saveScrollOffset();
         this.maybeLoadMore();
       })
