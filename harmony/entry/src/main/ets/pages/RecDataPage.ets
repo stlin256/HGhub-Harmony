@@ -1,7 +1,9 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { HgTopBar } from '../components/HgCommon';
 import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
+import { HgPressable } from '../components/HgPressable';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecDict } from '../recommend/RecDict';
 import { parseBoundedJson } from '../utils/Security';
@@ -31,6 +33,9 @@ export struct RecDataPage {
   @State modelVersion: string = '';
   @State modelScored: number = 0;
   @State packVersion: string = '';
+  /** 列表整体替换过渡：exitFast 淡出 → 换数据 → standard 淡入。 */
+  @State listFade: number = 1;
+  private fadeTimer: number = -1;
   private confirmCopy: ConfirmCopy = new ConfirmCopy('', '', '确定', '取消', false);
   /** 清空确认：共用主题化确认弹窗（不用系统 AlertDialog）。 */
   private confirmController: CustomDialogController = new CustomDialogController({
@@ -47,6 +52,35 @@ export struct RecDataPage {
 
   aboutToAppear(): void {
     this.refresh();
+  }
+
+  aboutToDisappear(): void {
+    if (this.fadeTimer >= 0) {
+      clearTimeout(this.fadeTimer);
+      this.fadeTimer = -1;
+    }
+  }
+
+  /** 列表整体替换（导入/清空）：exitFast 淡出 → 换数据 → standard 淡入（MOTION §3.4）。 */
+  private refreshAnimated(after?: () => void): void {
+    if (this.fadeTimer >= 0) {
+      clearTimeout(this.fadeTimer);
+      this.fadeTimer = -1;
+    }
+    const outMs: number = HgMotion.ms(HgMotion.exitFast);
+    animateTo({ duration: outMs, curve: HgMotion.curve }, () => {
+      this.listFade = 0;
+    });
+    this.fadeTimer = setTimeout(() => {
+      this.fadeTimer = -1;
+      this.refresh();
+      if (after !== undefined) {
+        after();
+      }
+      animateTo({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve }, () => {
+        this.listFade = 1;
+      });
+    }, outMs);
   }
 
   private refresh(): void {
@@ -87,8 +121,9 @@ export struct RecDataPage {
         return;
       }
       const ok: boolean = RecService.importProfileJson(text);
-      this.refresh();
-      this.status = ok ? ('导入成功：' + this.rows.length + ' 个标签（已替换当前画像）') : '导入失败：数据格式不正确';
+      this.refreshAnimated(() => {
+        this.status = ok ? ('导入成功：' + this.rows.length + ' 个标签（已替换当前画像）') : '导入失败：数据格式不正确';
+      });
     } catch (err) {
       this.status = '导入失败，请检查剪贴板内容';
     } finally {
@@ -105,8 +140,9 @@ export struct RecDataPage {
   /** 确认后真正清空。 */
   private clearConfirmed(): void {
     RecService.clearProfile();
-    this.refresh();
-    this.status = '已清空推荐画像与行为事件';
+    this.refreshAnimated(() => {
+      this.status = '已清空推荐画像与行为事件';
+    });
   }
 
   /** 宽屏内容左右额外留白：返回 (W - FORM_MAX)/2，窄屏返回 0。 */
@@ -184,36 +220,52 @@ export struct RecDataPage {
         .layoutWeight(1)
         .width('100%')
         .padding({ left: this.pagePad(), right: this.pagePad() })
+        .opacity(this.listFade)
 
         Column({ space: HgSpace.s }) {
           Row({ space: HgSpace.s }) {
-            Text(this.busy ? '导入中…' : '从剪贴板导入')
-              .fontSize(HgFont.caption)
-              .fontColor(HgColor.accent(this.dark))
+            HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+              Row({ space: HgSpace.xs }) {
+                if (this.busy) {
+                  LoadingProgress()
+                    .width(14)
+                    .height(14)
+                    .color(HgColor.accent(this.dark))
+                }
+                Text(this.busy ? '导入中…' : '从剪贴板导入')
+                  .fontSize(HgFont.caption)
+                  .fontColor(HgColor.accent(this.dark))
+              }
+              .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.s, bottom: HgSpace.s })
               .backgroundColor(HgColor.accentSoft(this.dark))
               .borderRadius(HgRadius.chip)
-              .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.s, bottom: HgSpace.s })
+              .opacity(this.busy ? 0.6 : 1)
               .onClick(() => {
                 this.importProfile();
               })
-            Text('导出到剪贴板')
-              .fontSize(HgFont.caption)
-              .fontColor(HgColor.accent(this.dark))
-              .backgroundColor(HgColor.accentSoft(this.dark))
-              .borderRadius(HgRadius.chip)
-              .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.s, bottom: HgSpace.s })
-              .onClick(() => {
-                this.exportProfile();
-              })
-            Text('清空')
-              .fontSize(HgFont.caption)
-              .fontColor(HgColor.danger(this.dark))
-              .backgroundColor(HgColor.surface3(this.dark))
-              .borderRadius(HgRadius.chip)
-              .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.s, bottom: HgSpace.s })
-              .onClick(() => {
-                this.askClear();
-              })
+            }
+            HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+              Text('导出到剪贴板')
+                .fontSize(HgFont.caption)
+                .fontColor(HgColor.accent(this.dark))
+                .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.s, bottom: HgSpace.s })
+                .backgroundColor(HgColor.accentSoft(this.dark))
+                .borderRadius(HgRadius.chip)
+                .onClick(() => {
+                  this.exportProfile();
+                })
+            }
+            HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+              Text('清空')
+                .fontSize(HgFont.caption)
+                .fontColor(HgColor.danger(this.dark))
+                .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.s, bottom: HgSpace.s })
+                .backgroundColor(HgColor.surface3(this.dark))
+                .borderRadius(HgRadius.chip)
+                .onClick(() => {
+                  this.askClear();
+                })
+            }
           }
           .width('100%')
 
@@ -222,6 +274,7 @@ export struct RecDataPage {
               .width('100%')
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))
+              .transition(HgMotion.fadeIn(HgMotion.fast))
           }
 
           // 本地计算状态：真机验收点（截图需能看到「模型 v2 · 打分 3388」）。
@@ -258,6 +311,7 @@ export struct RecDataPage {
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    .systemTransition(NavigationSystemTransitionType.FADE)
     // 兜底铺满整页背景：页面转场/底部安全区内边距区不露出默认背景（深色下会像一条黑带）。
     .backgroundColor(HgColor.canvas(this.dark))
   }

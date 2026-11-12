@@ -3,6 +3,14 @@ import { UiBus } from '../services/UiBus';
 import { UserPrefs } from '../state/UserPrefs';
 import { LoginResult } from '../models/Types';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
+
+/** 表单/错误出现：fast 140ms 淡入 + 4vp 上移（MOTION §3.7 状态类反馈）。 */
+function appearTransition(): TransitionEffect {
+  const duration: number = HgMotion.ms(HgMotion.fast);
+  return TransitionEffect.OPACITY.animation({ duration: duration, curve: HgMotion.curve })
+    .combine(TransitionEffect.translate({ y: 4 }).animation({ duration: duration, curve: HgMotion.curve }));
+}
 
 /** 登录 / 注册面板（bindSheet 内容）。 */
 @Component
@@ -86,6 +94,7 @@ export struct LoginSheet {
           .backgroundColor(HgColor.surface2(this.dark))
           .borderRadius(HgRadius.control)
           .margin({ top: HgSpace.m })
+          .transition(appearTransition())
           .onChange((value: string) => {
             this.email = value;
           })
@@ -108,22 +117,34 @@ export struct LoginSheet {
           .fontSize(HgFont.caption)
           .fontColor(HgColor.danger(this.dark))
           .margin({ top: HgSpace.s })
+          .transition(appearTransition())
       }
 
-      Button(this.busy ? '请稍候…' : (this.mode === 'login' ? '登录' : '注册'))
-        .width('100%')
-        .height(HgSize.primaryAction)
-        .fontSize(HgFont.rowTitle)
-        .fontWeight(HgFont.weightMedium)
-        .fontColor(HgColor.onAccent(this.dark))
-        .backgroundColor(HgColor.accent(this.dark))
-        .borderRadius(HgRadius.chip)
-        .enabled(!this.busy)
-        .margin({ top: HgSpace.xl })
-        .accessibilityText('提交')
-        .onClick(() => {
-          this.submit();
-        })
+      Button({ type: ButtonType.Capsule }) {
+        Row({ space: HgSpace.s }) {
+          if (this.busy) {
+            LoadingProgress()
+              .width(18)
+              .height(18)
+              .color(HgColor.onAccent(this.dark))
+          }
+          Text(this.busy ? (this.mode === 'login' ? '登录中…' : '注册中…') : (this.mode === 'login' ? '登录' : '注册'))
+            .fontSize(HgFont.rowTitle)
+            .fontWeight(HgFont.weightMedium)
+            .fontColor(HgColor.onAccent(this.dark))
+        }
+        .justifyContent(FlexAlign.Center)
+      }
+      .width('100%')
+      .height(HgSize.primaryAction)
+      .backgroundColor(HgColor.accent(this.dark))
+      .borderRadius(HgRadius.chip)
+      .enabled(!this.busy)
+      .margin({ top: HgSpace.xl })
+      .accessibilityText(this.busy ? '提交中' : '提交')
+      .onClick(() => {
+        this.submit();
+      })
 
       Text('登录后可使用点赞、收藏、评论与关注；账号数据仅保存在本机。')
         .width('100%')
