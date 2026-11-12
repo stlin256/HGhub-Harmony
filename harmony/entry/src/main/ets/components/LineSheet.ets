@@ -62,11 +62,14 @@ export struct LineSheet {
       const result = await Api.lineMirrors();
       this.mirrors = result.items !== undefined && result.items !== null ? result.items : [];
     } catch (err) {
-      this.error = (err as Error).message;
-      // 发布页不可达时用上次缓存的镜像兜底（缓存可能为空，此时只显示错误）。
+      // 发布页不可达时用上次缓存的镜像兜底；已有列表就静默保留（不弹横幅报错），
+      // 只有缓存也为空时才展示错误态，交给用户点「重试」。
       const cached: LineItem[] = Lines.cachedMirrors();
       if (cached.length > 0) {
         this.mirrors = cached;
+        this.error = '';
+      } else {
+        this.error = (err as Error).message;
       }
     } finally {
       this.loading = false;
@@ -102,12 +105,15 @@ export struct LineSheet {
     }
     this.probing = true;
     try {
-      const result: Map<string, number> = await LineAuto.probeLatency(urls);
-      const next: Map<string, number> = new Map<string, number>();
-      result.forEach((ms: number, url: string) => {
+      // 边测边刷：每条线路探测一有结果就更新对应 chip，不再等全部探测完成才整表刷新。
+      await LineAuto.probeLatencyIncremental(urls, (url: string, ms: number): void => {
+        const next: Map<string, number> = new Map<string, number>();
+        this.latency.forEach((value: number, key: string) => {
+          next.set(key, value);
+        });
         next.set(url, ms);
+        this.latency = next;
       });
-      this.latency = next;
     } catch (err) {
     } finally {
       this.probing = false;
@@ -583,9 +589,7 @@ export struct LineSheet {
             } else if (this.mirrors.length === 0) {
               this.MirrorEmpty()
             } else {
-              if (this.error.length > 0) {
-                this.MirrorError()
-              }
+              // 已有镜像列表时刷新失败不再显示横幅报错，静默保留旧列表与延迟结果。
               this.MirrorList()
             }
           }
