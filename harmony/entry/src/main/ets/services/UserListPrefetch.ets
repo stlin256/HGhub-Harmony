@@ -36,7 +36,9 @@ export class UserListPrefetch {
     UserListPrefetch.started = true;
     UserListPrefetch.timer = setTimeout(() => {
       UserListPrefetch.timer = -1;
-      UserListPrefetch.prefetch(UserListPrefetch.localIds()).catch(() => {
+      UserListPrefetch.prefetch(UserListPrefetch.localIds()).then(() => {
+        UserListPrefetch.backfillLatestHistory();
+      }).catch(() => {
       });
     }, WARM_DELAY_MS);
   }
@@ -78,6 +80,39 @@ export class UserListPrefetch {
       }
     }
     return out;
+  }
+
+  /**
+   * 旧历史记录没有 title/cover：用预热拿到的详情补齐最近一条，
+   * 让「继续观看」服务卡片在用户还没重新播放过时也能显示真实剧名/封面。
+   */
+  private static backfillLatestHistory(): void {
+    try {
+      const history: WatchProgress[] = UserPrefs.history();
+      if (history.length === 0) {
+        return;
+      }
+      const last: WatchProgress = history[0];
+      const title: string | undefined = last.title;
+      const cover: string | undefined = last.cover;
+      const hasTitle: boolean = title !== undefined && title !== null && title.length > 0;
+      const hasCover: boolean = cover !== undefined && cover !== null && cover.length > 0;
+      if (hasTitle && hasCover) {
+        return;
+      }
+      const detail: Detail | null = Api.peekVideo(last.id);
+      if (detail === null) {
+        return;
+      }
+      const detailTitle: string = detail.title !== undefined && detail.title !== null ? detail.title : '';
+      const detailCover: string = detail.cover !== undefined && detail.cover !== null ? detail.cover : '';
+      if (detailTitle.length === 0 && detailCover.length === 0) {
+        return;
+      }
+      UserPrefs.addHistory(last.id, last.ep, last.t, last.dur, detailTitle, detailCover);
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'backfill history meta id=%{public}d', last.id);
+    } catch (err) {
+    }
   }
 
   /** 分批并发预取详情：命中 Api 缓存直接返回，失败静默（warmVideo 内部已兜底，不抛异常）。 */

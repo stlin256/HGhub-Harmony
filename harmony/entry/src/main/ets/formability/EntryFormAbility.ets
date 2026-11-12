@@ -15,6 +15,9 @@ interface CardData {
   ep: number;
   percent: number;
   label: string;
+  /** 最近观看剧名 / 封面（旧历史记录可能没有）。 */
+  title: string;
+  cover: string;
 }
 
 /**
@@ -27,7 +30,7 @@ export default class EntryFormAbility extends FormExtensionAbility {
   onAddForm(want: Want): formBindingData.FormBindingData {
     hilog.info(LOG_DOMAIN, LOG_TAG, 'onAddForm');
     // 首次添加卡片时先返回占位数据，随后异步刷新真实进度。
-    const placeholder: CardData = { has: false, ep: 0, percent: 0, label: '暂无观看记录' };
+    const placeholder: CardData = { has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' };
     this.refreshAsync(want);
     return formBindingData.createFormBindingData(placeholder as Object);
   }
@@ -69,11 +72,11 @@ export default class EntryFormAbility extends FormExtensionAbility {
           const text: string = typeof raw === 'string' ? raw : '[]';
           done(EntryFormAbility.parseHistory(text));
         } catch (err) {
-          done({ has: false, ep: 0, percent: 0, label: '暂无观看记录' });
+          done({ has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' });
         }
       })
       .catch(() => {
-        done({ has: false, ep: 0, percent: 0, label: '暂无观看记录' });
+        done({ has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' });
       });
   }
 
@@ -82,15 +85,24 @@ export default class EntryFormAbility extends FormExtensionAbility {
     try {
       const list = JSON.parse(text) as WatchItem[];
       if (list === null || list.length === 0) {
-        return { has: false, ep: 0, percent: 0, label: '暂无观看记录' };
+        return { has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' };
       }
       const last: WatchItem = list[list.length - 1];
       const dur: number = last.dur > 0 ? last.dur : 0;
       const percent: number = dur > 0 ? Math.min(100, Math.round((last.t / dur) * 100)) : 0;
       const ep: number = last.ep > 0 ? last.ep : 1;
-      return { has: true, ep: ep, percent: percent, label: '第 ' + ep + ' 集 · 已看 ' + percent + '%' };
+      const title: string = last.title !== undefined && last.title !== null ? String(last.title) : '';
+      const cover: string = last.cover !== undefined && last.cover !== null ? String(last.cover) : '';
+      return {
+        has: true,
+        ep: ep,
+        percent: percent,
+        label: '第 ' + ep + ' 集 · 已看 ' + percent + '%',
+        title: title.length > 0 ? title : '继续观看',
+        cover: cover
+      };
     } catch (err) {
-      return { has: false, ep: 0, percent: 0, label: '暂无观看记录' };
+      return { has: false, ep: 0, percent: 0, label: '暂无观看记录', title: '', cover: '' };
     }
   }
 }
@@ -102,4 +114,6 @@ interface WatchItem {
   t: number;
   dur: number;
   at: number;
+  title?: string;
+  cover?: string;
 }

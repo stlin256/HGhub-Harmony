@@ -1136,7 +1136,11 @@ export class PlayerService {
     }
     const durSec: number = Math.floor(this.durationMs / 1000);
     const posSec: number = ended ? durSec : Math.floor(this.positionMs / 1000);
-    UserPrefs.addHistory(this.videoId, this.ep, posSec, durSec);
+    // 把剧名/封面一起落盘：服务卡片与「继续观看」需要展示真实内容（不依赖详情缓存）。
+    const meta: SessionMeta | null = this.sessionMetaProvider(this.videoId);
+    const title: string = meta !== null ? meta.title : '';
+    const cover: string = meta !== null ? meta.cover : '';
+    UserPrefs.addHistory(this.videoId, this.ep, posSec, durSec, title, cover);
   }
 
   /** 退出页面兜底：记录进度并释放。 */
