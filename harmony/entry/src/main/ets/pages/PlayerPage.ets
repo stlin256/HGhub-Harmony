@@ -17,6 +17,7 @@ import { RecService } from '../recommend/RecService';
 import { PlayerService } from '../player/PlayerService';
 import { PlayerSeekPolicy } from '../player/PlayerSeekPolicy';
 import { ContinuationState } from '../services/ContinuationState';
+import { AVCastPicker, AVCastPickerColorMode } from '@kit.AVSessionKit';
 import { MediaPrefetch } from '../player/MediaPrefetch';
 import { PlaybackLog } from '../player/PlaybackLog';
 import { PlayerSeekBar } from '../components/player/PlayerSeekBar';
@@ -132,6 +133,8 @@ export struct PlayerPage {
   @State qualityBadge: string = '';
   /** 播放失败自动重试提示（空=未在重试）。 */
   @State retryText: string = '';
+  /** 系统媒体会话就绪后展示投播入口。 */
+  @State castAvailable: boolean = false;
   @State positionMs: number = 0;
   @State durationMs: number = 0;
   @State bufferedMs: number = 0;
@@ -483,6 +486,9 @@ export struct PlayerPage {
     };
     this.service.onRetry = (attempt: number, max: number) => {
       this.retryText = '正在重试（' + attempt + '/' + max + '）…';
+    };
+    this.service.onSessionReady = () => {
+      this.castAvailable = true;
     };
     this.service.onSeekDone = (ms: number) => {
       this.positionMs = ms;
@@ -2390,6 +2396,25 @@ export struct PlayerPage {
               this.toggleQuality();
             })
             .accessibilityText(this.qualityBadge === 'HD' ? '当前高清，点击切换标准' : '当前标准，点击切换高清')
+        }
+
+        if (this.castAvailable) {
+          Stack({ alignContent: Alignment.Center }) {
+            AVCastPicker({
+              normalColor: HgColor.videoInk,
+              activeColor: HgColor.accent(true),
+              colorMode: AVCastPickerColorMode.AUTO,
+              sessionType: 'audio'
+            })
+              .width(24)
+              .height(24)
+          }
+          .width(32)
+          .height(32)
+          .borderRadius(16)
+          .backgroundColor(HgColor.videoChip)
+          .margin({ right: HgSpace.xs })
+          .accessibilityText('投播到其他设备')
         }
 
         Row({ space: 2 }) {
