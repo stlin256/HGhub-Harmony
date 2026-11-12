@@ -3,6 +3,7 @@ import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { display, window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from '../services/AppContext';
+import { WindowChrome } from '../services/WindowChrome';
 import { Api } from '../services/Api';
 import { UserListPrefetch } from '../services/UserListPrefetch';
 import { LineAuto } from '../services/LineAuto';
@@ -63,26 +64,8 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, false);
-    // 兜底：播放页可能为了全屏隐藏了状态栏，退到后台时恢复系统栏，避免系统 UI 异常。
-    this.setSystemBarsVisible(true);
-  }
-
-  /** 恢复系统状态栏 + 导航栏（播放页全屏期间会隐藏状态栏）。 */
-  private setSystemBarsVisible(visible: boolean): void {
-    try {
-      window.getLastWindow(this.context).then((mainWindow: window.Window) => {
-        try {
-          if (visible) {
-            mainWindow.setWindowSystemBarEnable(['status', 'navigation']);
-          } else {
-            mainWindow.setWindowSystemBarEnable(['navigation']);
-          }
-        } catch (err) {
-        }
-      }).catch((err: Object) => {
-      });
-    } catch (err) {
-    }
+    // 兜底：播放页可能为了全屏隐藏了状态栏，退到后台时统一走 WindowChrome 串行队列恢复，避免竞态。
+    WindowChrome.showStatusBar();
   }
 
   private async initServices(systemDark: boolean): Promise<void> {
@@ -197,11 +180,10 @@ export default class EntryAbility extends UIAbility {
       const rect = mainWindow.getWindowProperties().windowRect;
       const density: number = this.density > 0 ? this.density : 3.5;
       if (rect.width > 0 && rect.height > 0) {
+        // 先写窗口宽：Index 的 @Watch 会同步写入正确的 K_NAV_W/K_CONTENT_W（分栏时为实际栏宽），
+        // 这里不要再覆盖左右栏宽度，否则旋转/分屏后分栏布局会被写成整窗宽而错乱。
         AppStorage.setOrCreate<number>(K_WINDOW_W, rect.width / density);
         AppStorage.setOrCreate<number>(K_WINDOW_H, rect.height / density);
-        // 非分栏兜底：左右栏都等于窗口宽（Index 在 Split 模式下会覆盖为实际栏宽）。
-        AppStorage.setOrCreate<number>(K_NAV_W, rect.width / density);
-        AppStorage.setOrCreate<number>(K_CONTENT_W, rect.width / density);
       }
     } catch (err) {
       hilog.warn(DOMAIN, TAG, 'window size failed: %{public}s', JSON.stringify(err));
@@ -227,16 +209,8 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate<number>('bottomInsetPx', navArea.bottomRect.height);
       hilog.info(DOMAIN, TAG, 'avoid areas top=%{public}svp bottom=%{public}svp',
         String(Math.round(topInset)), String(Math.round(bottomInset)));
-      const dark: boolean = UserPrefs.dark();
-      const properties: window.SystemBarProperties = {
-        // 系统栏背景透明：露出页面 canvas（深/浅主题都跟随页面），避免底部出现系统默认近黑色带。
-        statusBarColor: '#00000000',
-        navigationBarColor: '#00000000',
-        statusBarContentColor: dark ? '#FFFFFFFF' : '#FF000000',
-        navigationBarContentColor: dark ? '#FFFFFFFF' : '#FF000000'
-      };
-      mainWindow.setWindowSystemBarProperties(properties).catch((err: Object) => {
-      });
+      // 系统栏配色统一走 WindowChrome（导航栏显式下发 canvas 色，避免 API23/平板深色主题下仍是白条）。
+      WindowChrome.syncSystemBarColors(UserPrefs.dark());
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'avoid area failed: %{public}s', JSON.stringify(err));
     }
@@ -245,6 +219,7 @@ export default class EntryAbility extends UIAbility {
   onConfigurationUpdate(config: Configuration): void {
     const systemDark: boolean = config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     UserPrefs.systemDarkChanged(systemDark);
+    WindowChrome.syncSystemBarColors(UserPrefs.dark());
   }
 
   onDestroy(): void {

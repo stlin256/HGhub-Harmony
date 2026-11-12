@@ -1,6 +1,7 @@
 import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from './AppContext';
+import { HgColor } from '../design/HgTokens';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'HGWnd';
@@ -55,6 +56,38 @@ export class WindowChrome {
       hilog.info(DOMAIN, TAG, 'keep screen on %{public}s', on ? 'on' : 'off');
     } catch (err) {
       hilog.warn(DOMAIN, TAG, 'keep screen on failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /**
+   * 系统状态栏/导航栏配色跟随 App 主题：导航栏背景显式使用页面 canvas 色。
+   * API23/平板在深色主题下系统导航栏默认可能仍是白色，只设透明色并不能保证系统
+   * 绘制出与页面一致的底色，这里直接下发具体 ARGB 色值。
+   */
+  static syncSystemBarColors(dark: boolean, playerDark: boolean = false): void {
+    WindowChrome.queue = WindowChrome.queue.then((): Promise<void> => {
+      return WindowChrome.syncColors(dark, playerDark);
+    }).catch(() => {
+    });
+  }
+
+  private static async syncColors(dark: boolean, playerDark: boolean): Promise<void> {
+    if (!AppContext.isReady()) {
+      return;
+    }
+    try {
+      const win: window.Window = await window.getLastWindow(AppContext.abilityContext());
+      const properties: window.SystemBarProperties = {
+        statusBarColor: '#00000000',
+        // 播放页恒为纯黑，底部导航栏用纯黑；其它页面跟随 App 主题 canvas。
+        navigationBarColor: playerDark ? '#FF000000' : HgColor.canvas(dark),
+        statusBarContentColor: dark ? '#FFFFFFFF' : '#FF000000',
+        navigationBarContentColor: dark ? '#FFFFFFFF' : '#FF000000'
+      };
+      await win.setWindowSystemBarProperties(properties);
+      hilog.info(DOMAIN, TAG, 'system bar colors dark=%{public}s', dark ? 'true' : 'false');
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'system bar colors failed: %{public}s', JSON.stringify(err));
     }
   }
 
