@@ -1,5 +1,5 @@
 import { HgAsyncCover } from './HgAsyncCover';
-import { VideoCard } from '../models/Types';
+import { HgPressable } from './HgPressable';
 import { HgColor, HgFont, HgRadius, HgSpace } from '../design/HgTokens';
 
 /**
@@ -18,8 +18,14 @@ export struct HgVideoGridCard {
   onOpen: () => void = () => {};
 
   build() {
-    Column({ space: HgSpace.xs }) {
-      HgAsyncCover({
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.onOpen();
+      }
+    }) {
+      Column({ space: HgSpace.xs }) {
+        HgAsyncCover({
         url: this.cover,
         dark: this.dark,
         radius: this.radius,
@@ -40,12 +46,10 @@ export struct HgVideoGridCard {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
       }
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .accessibilityText(this.title)
     }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .onClick(() => {
-      this.onOpen();
-    })
-    .accessibilityText(this.title)
   }
 }

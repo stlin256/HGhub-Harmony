@@ -4,7 +4,9 @@ import { Paged, VideoCard } from '../models/Types';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgPosterFlow } from '../components/browse/HgPosterFlow';
 import { HgTopBar } from '../components/HgCommon';
-import { HgColor, HgDuration, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgPressable } from '../components/HgPressable';
+import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { ChannelParam, PlayerParam, ROUTE_PLAYER } from '../state/Routes';
@@ -39,10 +41,6 @@ export struct ChannelPage {
   @State errorText: string = '';
   @State refreshing: boolean = false;
   @State sortKey: string = 'latest';
-  /** 首屏内容淡入透明度（有缓存秒开时也保留一次很轻的 fade，避免硬切）。 */
-  @State private contentFade: number = 1;
-  private contentFadeTimer: number = -1;
-  private contentFadeShown: boolean = false;
   private items: VideoCard[] = [];
   private source: HgListSource<VideoCard> = new HgListSource<VideoCard>();
   private page: number = 0;
@@ -70,40 +68,12 @@ export struct ChannelPage {
         this.pages = cached.pagination !== undefined && cached.pagination.pages > 0 ? cached.pagination.pages : 1;
         this.finished = this.page >= this.pages;
         this.loading = false;
+        // 缓存命中直接显示，不做淡入（MOTION 3.3）。
         this.applySort();
-        this.fadeInFirstContent();
         return;
       }
     }
     this.loadFirst();
-  }
-
-  aboutToDisappear(): void {
-    if (this.contentFadeTimer >= 0) {
-      clearTimeout(this.contentFadeTimer);
-      this.contentFadeTimer = -1;
-    }
-  }
-
-  /**
-   * 首屏数据到达：列表从 62% 透明度 190ms 淡入。
-   * 频道页有缓存时可能无骨架直接出内容，这里保留一次很轻的 fade，避免内容硬切。
-   */
-  private fadeInFirstContent(): void {
-    if (this.contentFadeShown) {
-      return;
-    }
-    this.contentFadeShown = true;
-    this.contentFade = 0.62;
-    if (this.contentFadeTimer >= 0) {
-      clearTimeout(this.contentFadeTimer);
-    }
-    this.contentFadeTimer = setTimeout(() => {
-      this.contentFadeTimer = -1;
-      animateTo({ duration: HgDuration.overlay, curve: Curve.FastOutSlowIn }, () => {
-        this.contentFade = 1;
-      });
-    }, 40);
   }
 
   private async loadFirst(): Promise<void> {
@@ -120,10 +90,8 @@ export struct ChannelPage {
       this.page = 1;
       this.pages = res.pagination !== undefined && res.pagination.pages > 0 ? res.pagination.pages : 1;
       this.finished = list.length === 0 || this.page >= this.pages;
+      // 数据替换走 HgPosterFlow 的 statusTransition 交叉淡入，不再叠加 0.62 半透明起点。
       this.applySort();
-      if (list.length > 0) {
-        this.fadeInFirstContent();
-      }
     } catch (err) {
       if (seq === this.loadSeq) {
         this.errorText = (err as Error).message;
@@ -239,18 +207,24 @@ export struct ChannelPage {
   SortChips() {
     Row({ space: HgSpace.s }) {
       ForEach(SORTS, (option: SortOption) => {
-        Text(option.label)
-          .fontSize(HgFont.secondary)
-          .fontWeight(this.sortKey === option.key ? HgFont.weightMedium : HgFont.weightRegular)
-          .fontColor(this.sortKey === option.key ? HgColor.onAccent(this.dark) : HgColor.textSecondary(this.dark))
-          .height(HgSize.chipHeight)
-          .padding({ left: HgSpace.l, right: HgSpace.l })
-          .backgroundColor(this.sortKey === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
-          .borderRadius(HgRadius.chip)
-          .margin({ top: HgSpace.s, bottom: HgSpace.s })
-          .onClick(() => {
+        HgPressable({
+          dark: this.dark,
+          onTap: () => {
             this.changeSort(option.key);
-          })
+          }
+        }) {
+          Text(option.label)
+            .fontSize(HgFont.secondary)
+            .fontWeight(this.sortKey === option.key ? HgFont.weightMedium : HgFont.weightRegular)
+            .fontColor(this.sortKey === option.key ? HgColor.onAccent(this.dark) : HgColor.textSecondary(this.dark))
+            .height(HgSize.chipHeight)
+            .padding({ left: HgSpace.l, right: HgSpace.l })
+            .backgroundColor(this.sortKey === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
+            .borderRadius(HgRadius.chip)
+            .margin({ top: HgSpace.s, bottom: HgSpace.s })
+            // 选中态颜色/字重按 MOTION fast 140ms 过渡；数据排序本身立即发布（不做搬家动画）。
+            .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
+        }
       }, (option: SortOption) => option.key)
     }
     .height(HgSize.hitTarget)
@@ -299,8 +273,6 @@ export struct ChannelPage {
         }
         .layoutWeight(1)
         .width('100%')
-        // 首屏封面/信息轻微淡入（见 fadeInFirstContent）。
-        .opacity(this.contentFade)
       }
       .width('100%')
       .height('100%')
@@ -308,5 +280,7 @@ export struct ChannelPage {
       .backgroundColor(HgColor.canvas(this.dark))
     }
     .hideTitleBar(true)
+    // 页面转场由 Index 统一口径改为淡入淡出（去掉系统默认右滑横移），页面不自绘转场。
+    .systemTransition(NavigationSystemTransitionType.FADE)
   }
 }

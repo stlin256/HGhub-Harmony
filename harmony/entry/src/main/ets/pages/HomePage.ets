@@ -5,9 +5,12 @@ import { Paged, VideoCard } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgPosterCard } from '../components/HgPosterCard';
 import { HgEmptyState, HgSkeletonGrid } from '../components/HgCommon';
+import { HgPressable } from '../components/HgPressable';
+import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgFeedGrid } from '../components/browse/HgFeedGrid';
-import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
 import { RecService } from '../recommend/RecService';
@@ -20,6 +23,8 @@ import { fmt } from '../utils/Format';
 
 const PAGE_SIZE: number = 14;
 const HERO_COUNT: number = 5;
+/** Hero 自动轮播间隔（ms，业务节奏非动效时长）；切换动画时长统一走 HgMotion.surface。 */
+const HERO_AUTO_PLAY_MS: number = 4200;
 /** Hero 封面解码包围盒（px）：竖版海报 Contain 后显示高度≈700px（宽≈525px），900×1200 足够清晰。 */
 const HERO_DECODE_W: number = 900;
 const HERO_DECODE_H: number = 1200;
@@ -33,12 +38,10 @@ const POOL_MAX: number = 120;
 const POOL_INIT_PAGES: number = 3;
 /** 随机展示条数 = 2 页数量（28 条）：启动「换一批」/下拉刷新都按这个量随机取。 */
 const DISPLAY_SIZE: number = PAGE_SIZE * 2;
-/** 整表替换（换一批/下拉刷新）的淡出时长（ms）：先淡出再替换，避免瞬间闪跳。 */
-const BATCH_FADE_OUT: number = 140;
-/** 整表替换完成后的淡入时长（ms）。 */
-const BATCH_FADE_IN: number = 180;
-/** 淡出时卡片轻微下移量（vp）：给「内容换了一批」一点方向感，不做多余装饰。 */
+/** 整表替换（换一批/切 TAG/下拉刷新）统一走 HgMotion.listSwapOut(120)/listSwapIn(220)。 */
 const BATCH_FADE_LIFT: number = 6;
+/** 动画兜底释放闸门的额外余量（ms）：仅供定时器保险，不参与动画时长。 */
+const BATCH_GUARD_MS: number = 120;
 /** 预取「即将进入视口」的封面行数（按列数 × 该值向后预热），防止底部卡片先白后亮。 */
 const PREFETCH_AHEAD_ROWS: number = 6;
 /** 滚动合并调度延迟（ms）：滚动回调里只登记，到点统一做预取/预挑，避免每帧分配。 */
@@ -49,41 +52,29 @@ const HERO_REFRESH_IDLE: number = 400;
 const CATALOG_INJECT_DELAY: number = 1200;
 const CATALOG_INJECT_COUNT: number = 120;
 
-/** 品牌行图标按钮：自带按压反馈（120ms scale 0.88 + 透明度 0.6），热区保持 44vp。 */
+/** 品牌行图标按钮：统一按压反馈（HgPressable 0.96 / 80-140ms），热区保持 44vp。 */
 @Component
 struct HomeIconAction {
   @Prop icon: Resource = $r('sys.symbol.magnifyingglass');
   @Prop dark: boolean = true;
   onTap: () => void = () => {};
-  @State pressed: boolean = false;
-
-  private setPressed(down: boolean): void {
-    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
-      this.pressed = down;
-    });
-  }
 
   build() {
-    Stack() {
-      SymbolGlyph(this.icon)
-        .fontSize(HgIconSize.control)
-        .fontColor([HgColor.textSecondary(this.dark)])
-    }
-    .width(HgSize.hitTarget)
-    .height(HgSize.hitTarget)
-    .borderRadius(HgSize.hitTarget / 2)
-    .scale({ x: this.pressed ? 0.88 : 1, y: this.pressed ? 0.88 : 1 })
-    .opacity(this.pressed ? 0.6 : 1)
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        this.setPressed(true);
-      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-        this.setPressed(false);
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.onTap();
       }
-    })
-    .onClick(() => {
-      this.onTap();
-    })
+    }) {
+      Stack() {
+        SymbolGlyph(this.icon)
+          .fontSize(HgIconSize.control)
+          .fontColor([HgColor.textSecondary(this.dark)])
+      }
+      .width(HgSize.hitTarget)
+      .height(HgSize.hitTarget)
+      .borderRadius(HgSize.hitTarget / 2)
+    }
   }
 }
 
@@ -141,37 +132,29 @@ struct HomeChip {
   @Prop active: boolean = false;
   @Prop dark: boolean = true;
   onTap: () => void = () => {};
-  @State pressed: boolean = false;
 
   build() {
-    Row() {
-      Text(this.label)
-        .fontSize(HgFont.secondary)
-        .fontWeight(this.active ? HgFont.weightMedium : HgFont.weightRegular)
-        .fontColor(this.active ? HgColor.onAccent(this.dark) : HgColor.textSecondary(this.dark))
-        .height(HgSize.chipHeight)
-        .padding({ left: HgSpace.m, right: HgSpace.m })
-        .backgroundColor(this.active ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
-        .borderRadius(HgRadius.chip)
-    }
-    .height(HgSize.hitTarget)
-    .justifyContent(FlexAlign.Center)
-    .scale({ x: this.pressed ? 0.94 : 1, y: this.pressed ? 0.94 : 1 })
-    .opacity(this.pressed ? 0.82 : 1)
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        animateTo({ duration: HgDuration.press, curve: Curve.FastOutSlowIn }, () => {
-          this.pressed = true;
-        });
-      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-        animateTo({ duration: HgDuration.press, curve: Curve.FastOutSlowIn }, () => {
-          this.pressed = false;
-        });
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.onTap();
       }
-    })
-    .onClick(() => {
-      this.onTap();
-    })
+    }) {
+      Row() {
+        Text(this.label)
+          .fontSize(HgFont.secondary)
+          .fontWeight(this.active ? HgFont.weightMedium : HgFont.weightRegular)
+          .fontColor(this.active ? HgColor.onAccent(this.dark) : HgColor.textSecondary(this.dark))
+          .height(HgSize.chipHeight)
+          .padding({ left: HgSpace.m, right: HgSpace.m })
+          .backgroundColor(this.active ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
+          .borderRadius(HgRadius.chip)
+          // 选中态颜色/字重按 MOTION fast 140ms 过渡。
+          .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
+      }
+      .height(HgSize.hitTarget)
+      .justifyContent(FlexAlign.Center)
+    }
   }
 }
 
@@ -290,9 +273,10 @@ struct HomeHeroSwiper {
       }, (item: VideoCard) => 'hero-' + item.id + '-' + item.title + '-' + item.cover)
     }
     .autoPlay(this.shouldAutoPlay())
-    .interval(4200)
+    .interval(HERO_AUTO_PLAY_MS)
     .loop(this.hero.length > 1)
-    .duration(360)
+    .duration(HgMotion.ms(HgMotion.surface))
+    .curve(HgMotion.curve)
     .cachedCount(1)
     .indicator(new DotIndicator()
       .itemWidth(6)
@@ -349,7 +333,6 @@ export struct HomePage {
   /** 切 TAG / 刷新失败的行内错误（保留旧列表，不整页报错）。 */
   @State cateError: string = '';
   @StorageProp(K_LINE_BASE) @Watch('onLineChanged') lineBase: string = '';
-  @State skeletonPulse: number = 0.45;
   private source: HgListSource<VideoCard> = new HgListSource<VideoCard>();
   private gridScroller: Scroller = new Scroller();
   private page: number = 0;
@@ -400,7 +383,6 @@ export struct HomePage {
   private pendingBatch: VideoCard[] = [];
 
   aboutToAppear(): void {
-    this.skeletonPulse = 1;
     // 页面重新出现（Tab 切回）时恢复可写状态：否则后台补池/淡入动效会被当成已销毁而永久停摆。
     this.pageGone = false;
     this.reload();
@@ -616,8 +598,10 @@ export struct HomePage {
       }
       this.switching = false;
       this.transitionSeq++;
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      // 失败收敛终态：只把透明度/位移复位，不留中间态。
+      animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
         this.listOpacity = 1;
+        this.listOffset = 0;
       });
       if (this.items.length > 0) {
         // 切 TAG / 刷新失败：保留旧列表，只做行内提示，不切整页错误态。
@@ -792,7 +776,7 @@ export struct HomePage {
 
   /**
    * 带淡出/淡入的整表替换（换一批 / 点「为你推荐」/ 下拉刷新 / 切回全部）：
-   * 先 140ms 淡出（同时轻微下移 6vp）→ 替换 items 并回顶 → 180ms 淡入。
+   * 统一 listSwap 口径：先 120ms 淡出（同时轻微下移 6vp）→ 替换 items 并回顶 → 220ms 淡入。
    * 动画期间重复点击直接忽略（合并）；seq 用 transitionSeq 守护，被切分类/换线路打断时安全复位。
    */
   private applyRandomDisplayAnimated(limit: number): void {
@@ -806,16 +790,18 @@ export struct HomePage {
     this.batchAnimating = true;
     const seq: number = ++this.transitionSeq;
     this.batchAnimSeq = seq;
+    const outMs: number = HgMotion.ms(HgMotion.listSwapOut);
+    const inMs: number = HgMotion.ms(HgMotion.listSwapIn);
     // 兜底：即使动画回调被异常打断，也要放开合并闸门，避免「换一批」永久失效。
     setTimeout(() => {
       if (seq === this.batchAnimSeq) {
         this.batchAnimSeq = 0;
         this.batchAnimating = false;
       }
-    }, BATCH_FADE_OUT + BATCH_FADE_IN + 120);
+    }, outMs + inMs + BATCH_GUARD_MS);
     // 替换代次先推进：作废在途的随机追加，避免动画期间列表被 append 打乱。
     this.displaySeq++;
-    animateTo({ duration: BATCH_FADE_OUT, curve: Curve.FastOutSlowIn }, () => {
+    animateTo({ duration: outMs, curve: HgMotion.curve }, () => {
       this.listOpacity = 0;
       this.listOffset = BATCH_FADE_LIFT;
     });
@@ -833,7 +819,7 @@ export struct HomePage {
         return;
       }
       this.applyDisplayList(list);
-      animateTo({ duration: BATCH_FADE_IN, curve: Curve.FastOutSlowIn }, () => {
+      animateTo({ duration: inMs, curve: HgMotion.curve }, () => {
         this.listOpacity = 1;
         this.listOffset = 0;
       });
@@ -842,8 +828,8 @@ export struct HomePage {
           this.batchAnimSeq = 0;
           this.batchAnimating = false;
         }
-      }, BATCH_FADE_IN);
-    }, BATCH_FADE_OUT);
+      }, inMs);
+    }, outMs);
   }
 
   /** 把一份随机结果写进展示：回顶、刷新 Hero、并预取即将进入视口的封面。 */
@@ -1468,15 +1454,16 @@ export struct HomePage {
   /** 轻量切换态：仅卡片压暗到 0.55；作废进行中的淡出/淡入定时器。 */
   private beginCateSwitch(): void {
     this.transitionSeq++;
-    animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+    animateTo({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve }, () => {
       this.listOpacity = 0.55;
     });
   }
 
-  /** 切 TAG 的数据替换：卡片淡出 → 换数据回顶 → 淡入。 */
+  /** 切 TAG 的数据替换：listSwap 淡出（120）→ 换数据回顶 → 淡入（220）。 */
   private replaceListAnimated(list: VideoCard[]): void {
     const seq = ++this.transitionSeq;
-    animateTo({ duration: HgDuration.microExit, curve: Curve.FastOutSlowIn }, () => {
+    const outMs: number = HgMotion.ms(HgMotion.listSwapOut);
+    animateTo({ duration: outMs, curve: HgMotion.curve }, () => {
       this.listOpacity = 0;
     });
     setTimeout(() => {
@@ -1484,10 +1471,10 @@ export struct HomePage {
         return;
       }
       this.applyList(list);
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      animateTo({ duration: HgMotion.ms(HgMotion.listSwapIn), curve: HgMotion.curve }, () => {
         this.listOpacity = 1;
       });
-    }, HgDuration.microExit);
+    }, outMs);
   }
 
   private applyList(list: VideoCard[]): void {
@@ -1631,17 +1618,22 @@ export struct HomePage {
 
       Row() {
         // 标题本身可点：与「换一批」相同（整池真实随机 + 回顶），44 热区但视觉不变。
-        Row() {
-          Text('为你推荐')
-            .fontSize(HgFont.section)
-            .fontWeight(HgFont.weightMedium)
-            .fontColor(HgColor.textPrimary(this.dark))
+        HgPressable({
+          dark: this.dark,
+          onTap: () => {
+            this.nextBatch();
+          }
+        }) {
+          Row() {
+            Text('为你推荐')
+              .fontSize(HgFont.section)
+              .fontWeight(HgFont.weightMedium)
+              .fontColor(HgColor.textPrimary(this.dark))
+          }
+          .height(HgSize.hitTarget)
+          .padding({ right: HgSpace.s })
+          .accessibilityText('为你推荐')
         }
-        .height(HgSize.hitTarget)
-        .accessibilityText('为你推荐')
-        .onClick(() => {
-          this.nextBatch();
-        })
         Blank()
         if (this.switching) {
           LoadingProgress()
@@ -1650,21 +1642,25 @@ export struct HomePage {
             .color(HgColor.accent(this.dark))
             .margin({ right: HgSpace.s })
         }
-        Row({ space: HgSpace.xxs }) {
-          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-            .fontSize(HgIconSize.inline)
-            .fontColor([HgColor.textTertiary(this.dark)])
-          Text('换一批')
-            .fontSize(HgFont.caption)
-            .fontColor(HgColor.textTertiary(this.dark))
+        HgPressable({
+          dark: this.dark,
+          onTap: () => {
+            // 真实随机：整池洗牌后替换展示并回顶，不是重发同一页。
+            this.nextBatch();
+          }
+        }) {
+          Row({ space: HgSpace.xxs }) {
+            SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+              .fontSize(HgIconSize.inline)
+              .fontColor([HgColor.textTertiary(this.dark)])
+            Text('换一批')
+              .fontSize(HgFont.caption)
+              .fontColor(HgColor.textTertiary(this.dark))
+          }
+          .height(HgSize.hitTarget)
+          .padding({ left: HgSpace.s })
+          .accessibilityText('换一批')
         }
-        .height(HgSize.hitTarget)
-        .padding({ left: HgSpace.s })
-        .accessibilityText('换一批')
-        .onClick(() => {
-          // 真实随机：整池洗牌后替换展示并回顶，不是重发同一页。
-          this.nextBatch();
-        })
       }
       .width('100%')
       .height(HgSize.listRow)
@@ -1679,6 +1675,7 @@ export struct HomePage {
         .width('100%')
         .height(HgSize.hitTarget)
         .justifyContent(FlexAlign.Center)
+        .hoverEffect(HoverEffect.Scale)
         .accessibilityText('加载失败，点击重试')
         .onClick(() => {
           this.retryCate();
@@ -1693,19 +1690,24 @@ export struct HomePage {
   GridFooter() {
     Row() {
       if (this.loadingMore) {
-        LoadingProgress()
-          .width(18)
-          .height(18)
-          .color(HgColor.accent(this.dark))
-        Text('加载中…')
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.textTertiary(this.dark))
-          .margin({ left: HgSpace.s })
+        Row() {
+          LoadingProgress()
+            .width(18)
+            .height(18)
+            .color(HgColor.accent(this.dark))
+          Text('加载中…')
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .margin({ left: HgSpace.s })
+        }
+        .transition(HgMotion.fadeIn(HgMotion.fast))
       } else if (this.errorText.length > 0) {
         Text('加载失败，点击重试')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .padding(HgSpace.m)
+          .hoverEffect(HoverEffect.Scale)
+          .transition(HgMotion.fadeIn(HgMotion.fast))
           .accessibilityText('加载失败，点击重试')
           .onClick(() => {
             this.loadMore();
@@ -1714,6 +1716,7 @@ export struct HomePage {
         Text('— 已经到底啦 —')
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
+          .transition(HgMotion.fadeIn(HgMotion.fast))
       }
     }
     .width('100%')
@@ -1725,29 +1728,35 @@ export struct HomePage {
   HomeSkeleton() {
     Scroll() {
       Column({ space: HgSpace.m }) {
-        Column()
-          .width('100%')
-          .aspectRatio(16 / 9)
-          .backgroundColor(HgColor.skeletonBase(this.dark))
-          .borderRadius(HgRadius.hero)
-          .opacity(this.skeletonPulse)
-          .animation({ duration: 900, curve: Curve.EaseInOut, iterations: -1, playMode: PlayMode.Alternate })
+        // Hero 骨架：16:9 容器 + 统一 HgSkeletonBlock（自带 0.88↔1 低对比呼吸/reduced 静态）。
+        Column() {
+          HgSkeletonBlock({
+            dark: this.dark,
+            blockWidth: '100%',
+            blockHeight: '100%',
+            radius: HgRadius.hero
+          })
+        }
+        .width('100%')
+        .aspectRatio(16 / 9)
         Row({ space: HgSpace.s }) {
           ForEach([0, 1, 2, 3, 4], (index: number) => {
-            Column()
-              .width(index === 0 ? 52 : 76)
-              .height(HgSize.chipHeight)
-              .backgroundColor(HgColor.skeletonBase(this.dark))
-              .borderRadius(HgRadius.chip)
+            HgSkeletonBlock({
+              dark: this.dark,
+              blockWidth: index === 0 ? 52 : 76,
+              blockHeight: HgSize.chipHeight,
+              radius: HgRadius.chip
+            })
           }, (index: number) => 'chip-' + index)
         }
         .width('100%')
-        Column()
-          .width(96)
-          .height(HgFont.section)
-          .backgroundColor(HgColor.skeletonBase(this.dark))
-          .borderRadius(4)
-          .margin({ top: HgSpace.s })
+        HgSkeletonBlock({
+          dark: this.dark,
+          blockWidth: 96,
+          blockHeight: HgFont.section,
+          radius: 4
+        })
+        .margin({ top: HgSpace.s })
         // 与真实 Grid 同列（共享骨架支持任意列数），宽屏 3/4 列首屏不跳格。
         HgSkeletonGrid({ dark: this.dark, count: this.skeletonCount(), columns: this.columns() })
       }
@@ -1760,6 +1769,7 @@ export struct HomePage {
     .width('100%')
     .align(Alignment.Top)
     .scrollBar(BarState.Off)
+    .transition(HgMotion.statusTransition())
   }
 
   build() {
@@ -1810,10 +1820,13 @@ export struct HomePage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
         .padding(HgSpace.xxl)
+        .transition(HgMotion.statusTransition())
       } else {
         // 主页瀑布流（Refresh + Grid + LazyForEach + Header/Footer + 曝光）已抽到共享组件，
         // 其它多列视频海报流页面复用同一实现，仅通过列数/留白/Header 等参数微调。
-        HgFeedGrid({
+        // 状态分支统一 statusTransition：骨架/空态 → 列表交叉淡入，避免硬切。
+        Column() {
+          HgFeedGrid({
           source: this.source,
           gridScroller: this.gridScroller,
           dark: this.dark,
@@ -1850,7 +1863,11 @@ export struct HomePage {
           onImpression: (videoId: number) => {
             this.recordImpression(videoId);
           }
-        })
+          })
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .transition(HgMotion.statusTransition())
       }
     }
     .width('100%')

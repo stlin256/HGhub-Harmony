@@ -596,6 +596,7 @@ export struct PostContent {
         .backgroundColor(HgColor.accentSoft(this.dark))
         .borderRadius(HgRadius.chip)
         .margin({ right: HgSpace.s, top: HgSpace.xs })
+        .hoverEffect(HoverEffect.Scale)
         .onClick(() => {
           Api.openUrl(link);
         })

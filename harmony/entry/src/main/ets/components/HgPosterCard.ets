@@ -1,5 +1,6 @@
 import { HgAsyncCover } from './HgAsyncCover';
-import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgPressable } from './HgPressable';
+import { HgColor, HgFont, HgRadius, HgSpace } from '../design/HgTokens';
 
 /** 海报卡：3:4 封面 + 两行标题 + 评分/集数元信息。 */
 @Component
@@ -14,8 +15,14 @@ export struct HgPosterCard {
   onOpen: (id: number) => void = () => {};
 
   build() {
-    Column() {
-      Stack({ alignContent: Alignment.BottomEnd }) {
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.onOpen(this.videoId);
+      }
+    }) {
+      Column() {
+        Stack({ alignContent: Alignment.BottomEnd }) {
         HgAsyncCover({
           url: this.coverUrl,
           dark: this.dark,
@@ -63,10 +70,8 @@ export struct HgPosterCard {
       .width('100%')
       .margin({ top: 2 })
     }
-    .width(this.cardWidth)
-    .alignItems(HorizontalAlign.Start)
-    .onClick(() => {
-      this.onOpen(this.videoId);
-    })
+      .width(this.cardWidth)
+      .alignItems(HorizontalAlign.Start)
+    }
   }
 }

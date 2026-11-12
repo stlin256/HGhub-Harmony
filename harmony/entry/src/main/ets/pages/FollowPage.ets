@@ -4,6 +4,7 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgVideoGridCard } from '../components/HgVideoGridCard';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
@@ -168,12 +169,14 @@ export struct FollowPage {
           }
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
+          .transition(HgMotion.statusTransition())
         } else if (this.loading) {
           Column() {
             HgSkeletonGrid({ dark: this.dark, count: this.columns() * 2, columns: this.columns() })
           }
           .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m })
           .layoutWeight(1)
+          .transition(HgMotion.statusTransition())
         } else if (this.errorText.length > 0) {
           Column() {
             HgEmptyState({
@@ -188,28 +191,37 @@ export struct FollowPage {
           }
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
+          .transition(HgMotion.statusTransition())
         } else if (this.videos.length === 0) {
           Column() {
             HgEmptyState({ dark: this.dark, title: '还没有关注动态', description: '去详情页关注喜欢的作者' })
           }
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
+          .transition(HgMotion.statusTransition())
         } else {
-          Grid() {
-            ForEach(this.videos, (item: VideoCard) => {
-              GridItem() {
-                this.VideoCardItem(item)
-              }
-            }, (item: VideoCard) => 'fv-' + item.id)
+          Column() {
+            Grid() {
+              ForEach(this.videos, (item: VideoCard) => {
+                GridItem() {
+                  this.VideoCardItem(item)
+                }
+                .transition(HgMotion.appendTransition())
+              }, (item: VideoCard) => 'fv-' + item.id)
+            }
+            .columnsTemplate(this.gridTemplate())
+            .columnsGap(HgSpace.m)
+            .rowsGap(HgSpace.l)
+            .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m, bottom: this.bottomInset + HgSpace.l })
+            .width('100%')
+            .height('100%')
+            .onReachEnd(() => {
+              this.loadMore();
+            })
           }
-          .columnsTemplate(this.gridTemplate())
-          .columnsGap(HgSpace.m)
-          .rowsGap(HgSpace.l)
-          .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m, bottom: this.bottomInset + HgSpace.l })
           .layoutWeight(1)
-          .onReachEnd(() => {
-            this.loadMore();
-          })
+          .width('100%')
+          .transition(HgMotion.statusTransition())
         }
       }
       .width('100%')
@@ -217,5 +229,6 @@ export struct FollowPage {
       .backgroundColor(HgColor.pageBackground(this.dark))
     }
     .hideTitleBar(true)
+    .systemTransition(NavigationSystemTransitionType.FADE)
   }
 }

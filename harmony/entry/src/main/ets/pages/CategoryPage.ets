@@ -3,7 +3,10 @@ import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { CateInfo, CategoryCatalog } from '../services/CategoryCatalog';
 import { Paged, Post, VideoCard } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
-import { HgColor, HgDuration, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgPressable } from '../components/HgPressable';
+import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import {
@@ -278,54 +281,80 @@ export struct CategoryPage {
     this.rowError = next;
   }
 
+  private setRowOpacityAt(index: number, value: number): void {
+    if (index < 0 || index >= this.rowOpacity.length) {
+      return;
+    }
+    const next: number[] = this.rowOpacity.slice(0);
+    next[index] = value;
+    this.rowOpacity = next;
+  }
+
   private setRowData(route: string, value: VideoCard[]): void {
     const index: number = this.channelIndex(route);
     if (index < 0 || index >= this.rowData.length) {
       return;
     }
-    const next: VideoCard[][] = this.rowData.slice(0);
-    next[index] = value;
-    // 先归零再落数据：新内容从 0 → 1 淡入（140ms），骨架→内容/刷新都不硬切。
-    this.flashRow(index);
-    this.rowData = next;
-  }
-
-  /** 横向卡片行内容替换后淡入。 */
-  private flashRow(index: number): void {
-    const nextOpacity: number[] = this.rowOpacity.slice(0);
-    nextOpacity[index] = 0;
-    this.rowOpacity = nextOpacity;
+    const applyData = (): void => {
+      const next: VideoCard[][] = this.rowData.slice(0);
+      next[index] = value;
+      this.rowData = next;
+    };
+    // 首次/骨架→内容：直接落数据（缓存命中不淡入），由分支 statusTransition 交叉淡入。
+    if (this.rowData[index].length === 0 || HgMotion.reduced()) {
+      applyData();
+      this.setRowOpacityAt(index, 1);
+      return;
+    }
+    // 已有内容被替换（刷新/回源更新）：listSwap 口径，先 120ms 淡出 → 替换 → 220ms 淡入。
+    const outMs: number = HgMotion.ms(HgMotion.listSwapOut);
     if (this.rowFadeTimers[index] > 0) {
       clearTimeout(this.rowFadeTimers[index]);
+      this.rowFadeTimers[index] = 0;
     }
+    animateTo({ duration: outMs, curve: HgMotion.curve }, () => {
+      this.setRowOpacityAt(index, 0);
+    });
     this.rowFadeTimers[index] = setTimeout(() => {
       this.rowFadeTimers[index] = 0;
-      if (this.pageGone || index >= this.rowOpacity.length) {
+      if (this.pageGone || index >= this.rowData.length) {
         return;
       }
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
-        const op: number[] = this.rowOpacity.slice(0);
-        op[index] = 1;
-        this.rowOpacity = op;
+      applyData();
+      animateTo({ duration: HgMotion.ms(HgMotion.listSwapIn), curve: HgMotion.curve }, () => {
+        this.setRowOpacityAt(index, 1);
       });
-    }, 40);
+    }, outMs);
   }
 
-  /** 吃瓜横向行内容替换后淡入。 */
-  private flashPosts(): void {
-    this.postOpacity = 0;
+  /** 吃瓜预览行：已有内容走 listSwap（120/220），首次/缓存命中直接显示不淡入。 */
+  private swapPosts(value: Post[]): void {
+    const applyData = (): void => {
+      this.posts = value;
+    };
     if (this.postFadeTimer >= 0) {
       clearTimeout(this.postFadeTimer);
+      this.postFadeTimer = -1;
     }
+    if (this.posts.length === 0 || HgMotion.reduced()) {
+      applyData();
+      this.postOpacity = 1;
+      return;
+    }
+    const outMs: number = HgMotion.ms(HgMotion.listSwapOut);
+    animateTo({ duration: outMs, curve: HgMotion.curve }, () => {
+      this.postOpacity = 0;
+    });
     this.postFadeTimer = setTimeout(() => {
       this.postFadeTimer = -1;
       if (this.pageGone) {
         return;
       }
-      animateTo({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }, () => {
+      applyData();
+      animateTo({ duration: HgMotion.ms(HgMotion.listSwapIn), curve: HgMotion.curve }, () => {
         this.postOpacity = 1;
       });
-    }, 40);
+    }, outMs);
   }
 
   private async fetchCate(route: string, skeleton: boolean): Promise<void> {
@@ -390,8 +419,9 @@ export struct CategoryPage {
       if (warm !== null) {
         const warmList: Post[] = warm.items !== undefined && warm.items !== null ? warm.items : [];
         if (warmList.length > 0) {
-          this.flashPosts();
+          // 缓存命中直接显示，不做淡入（MOTION 3.3）。
           this.posts = warmList.length > PREVIEW_SIZE ? warmList.slice(0, PREVIEW_SIZE) : warmList;
+          this.postOpacity = 1;
           this.postsLoading = false;
           return;
         }
@@ -403,8 +433,7 @@ export struct CategoryPage {
         return;
       }
       const list: Post[] = res.items !== undefined && res.items !== null ? res.items : [];
-      this.flashPosts();
-      this.posts = list;
+      this.swapPosts(list);
     } catch (err) {
       if (this.pageGone) {
         return;
@@ -467,9 +496,15 @@ export struct CategoryPage {
 
   @Builder
   RankEntry() {
-    Row({ space: HgSpace.m }) {
-      Stack() {
-        SymbolGlyph($r('sys.symbol.bolt_fill'))
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.navStack.pushPathByName(ROUTE_RANKS, null);
+      }
+    }) {
+      Row({ space: HgSpace.m }) {
+        Stack() {
+          SymbolGlyph($r('sys.symbol.bolt_fill'))
           .fontSize(HgIconSize.emphasis)
           .fontColor([HgColor.accent(this.dark)])
       }
@@ -497,19 +532,21 @@ export struct CategoryPage {
     .width('100%')
     .height(72)
     .padding({ left: HgSpace.m, right: HgSpace.m })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
-    .accessibilityText('热播榜 · 推荐榜 · 潜力榜')
-    .onClick(() => {
-      this.navStack.pushPathByName(ROUTE_RANKS, null);
-    })
+        .backgroundColor(HgColor.surface1(this.dark))
+        .borderRadius(HgRadius.group)
+        .accessibilityText('热播榜 · 推荐榜 · 潜力榜')
+      }
   }
 
   @Builder
   SectionTitle(icon: Resource, title: string, desc: string, action: () => void) {
-    Row({ space: HgSpace.s }) {
-      Stack() {
-        SymbolGlyph(icon)
+    HgPressable({
+      dark: this.dark,
+      onTap: action
+    }) {
+      Row({ space: HgSpace.s }) {
+        Stack() {
+          SymbolGlyph(icon)
           .fontSize(HgIconSize.control)
           .fontColor([HgColor.accent(this.dark)])
       }
@@ -545,17 +582,21 @@ export struct CategoryPage {
       .height(HgSize.hitTarget)
       .padding({ left: HgSpace.s })
     }
-    .width('100%')
-    .height(52)
-    .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
-    .accessibilityText('全部')
-    .onClick(action)
+      .width('100%')
+      .height(52)
+      .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
+      .accessibilityText('全部')
+    }
   }
 
   @Builder
-  RowCard(item: VideoCard) {
-    Column({ space: HgSpace.xs }) {
-      Stack({ alignContent: Alignment.BottomEnd }) {
+  RowCard(item: VideoCard, onOpen: () => void) {
+    HgPressable({
+      dark: this.dark,
+      onTap: onOpen
+    }) {
+      Column({ space: HgSpace.xs }) {
+        Stack({ alignContent: Alignment.BottomEnd }) {
         HgAsyncCover({
           url: item.cover,
           dark: this.dark,
@@ -595,14 +636,21 @@ export struct CategoryPage {
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
-    .width(this.rowCardW())
-    .alignItems(HorizontalAlign.Start)
+      .width(this.rowCardW())
+      .alignItems(HorizontalAlign.Start)
+    }
   }
 
   @Builder
   PostCard(item: Post) {
-    Column({ space: HgSpace.xs }) {
-      Stack({ alignContent: Alignment.BottomStart }) {
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.openPost(item);
+      }
+    }) {
+      Column({ space: HgSpace.xs }) {
+        Stack({ alignContent: Alignment.BottomStart }) {
         HgAsyncCover({
           url: item.cover,
           dark: this.dark,
@@ -625,14 +673,11 @@ export struct CategoryPage {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .padding(HgSpace.s)
       }
-      .width(this.rowCardW())
-      .height(this.rowCardH())
-      .borderRadius(HgRadius.row)
-      .clip(true)
-      .onClick(() => {
-        this.openPost(item);
-      })
-      Row({ space: HgSpace.xxs }) {
+        .width(this.rowCardW())
+        .height(this.rowCardH())
+        .borderRadius(HgRadius.row)
+        .clip(true)
+        Row({ space: HgSpace.xxs }) {
         SymbolGlyph($r('sys.symbol.bolt_fill'))
           .fontSize(HgFont.nano)
           .fontColor([HgColor.textTertiary(this.dark)])
@@ -644,22 +689,25 @@ export struct CategoryPage {
     .width(this.rowCardW())
     .alignItems(HorizontalAlign.Start)
   }
+  }
 
   @Builder
   RowSkeleton() {
     Row({ space: HgSpace.m }) {
       ForEach([0, 1, 2], (index: number) => {
         Column({ space: HgSpace.xs }) {
-          Column()
-            .width(this.rowCardW())
-            .height(this.rowCardH())
-            .backgroundColor(HgColor.skeletonBase(this.dark))
-            .borderRadius(HgRadius.row)
-          Column()
-            .width(this.rowCardW() - 28)
-            .height(HgFont.body)
-            .backgroundColor(HgColor.skeletonBase(this.dark))
-            .borderRadius(4)
+          HgSkeletonBlock({
+            dark: this.dark,
+            blockWidth: this.rowCardW(),
+            blockHeight: this.rowCardH(),
+            radius: HgRadius.row
+          })
+          HgSkeletonBlock({
+            dark: this.dark,
+            blockWidth: this.rowCardW() - 28,
+            blockHeight: HgFont.body,
+            radius: 4
+          })
         }
         .width(this.rowCardW())
         .alignItems(HorizontalAlign.Start)
@@ -683,6 +731,7 @@ export struct CategoryPage {
         .fontColor(HgColor.accent(this.dark))
         .height(HgSize.hitTarget)
         .padding({ left: HgSpace.s })
+        .hoverEffect(HoverEffect.Scale)
         .accessibilityText('重试')
         .onClick(() => {
           if (index >= 0 && index < this.channels.length) {
@@ -706,13 +755,13 @@ export struct CategoryPage {
           this.RowSkeleton()
         }
         .width('100%')
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       } else if (this.rowError[index].length > 0 && this.rowData[index].length === 0) {
         Column() {
           this.InlineError(index)
         }
         .width('100%')
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       } else if (this.rowData[index].length === 0) {
         Text('暂无内容')
           .width('100%')
@@ -720,17 +769,16 @@ export struct CategoryPage {
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))
           .textAlign(TextAlign.Center)
-          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+          .transition(HgMotion.statusTransition())
       } else {
         List({ space: HgSpace.m }) {
           ForEach(this.rowData[index], (item: VideoCard, itemIndex: number) => {
             ListItem() {
-              this.RowCard(item)
+              this.RowCard(item, () => {
+                this.openRow(index, itemIndex);
+              })
             }
-            .accessibilityText('暂无内容')
-            .onClick(() => {
-              this.openRow(index, itemIndex);
-            })
+            .accessibilityText(item.title)
           }, (item: VideoCard) => 'cate-' + item.id)
         }
         .listDirection(Axis.Horizontal)
@@ -741,7 +789,7 @@ export struct CategoryPage {
         .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
         // 数据替换时轻微淡入（140ms），骨架 → 内容也有透明度过渡。
         .opacity(this.rowOpacity[index])
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       }
     }
     .width('100%')
@@ -750,19 +798,25 @@ export struct CategoryPage {
 
   @Builder
   TopicsEntry() {
-    Row({ space: HgSpace.m }) {
-      Stack() {
-        Row()
-          .width(36)
-          .height(36)
-          .backgroundColor(HgColor.accentSoft(this.dark))
-          .borderRadius(18)
-        SymbolGlyph($r('sys.symbol.square_grid_2x2'))
-          .fontSize(HgFont.section)
-          .fontColor([HgColor.accent(this.dark)])
+    HgPressable({
+      dark: this.dark,
+      onTap: () => {
+        this.navStack.pushPathByName(ROUTE_TOPICS, null);
       }
-      .width(36)
-      .height(36)
+    }) {
+      Row({ space: HgSpace.m }) {
+        Stack() {
+          Row()
+            .width(36)
+            .height(36)
+            .backgroundColor(HgColor.accentSoft(this.dark))
+            .borderRadius(18)
+          SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+            .fontSize(HgFont.section)
+            .fontColor([HgColor.accent(this.dark)])
+        }
+        .width(36)
+        .height(36)
 
       Column({ space: 2 }) {
         Text('专题')
@@ -779,16 +833,13 @@ export struct CategoryPage {
         .fontSize(HgFont.caption)
         .fontColor(HgColor.accent(this.dark))
     }
-    .width('100%')
-    .height(64)
-    .padding({ left: HgSpace.m, right: HgSpace.m })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
-    .accessibilityText('查看全部 ›')
-    .onClick(() => {
-      this.navStack.pushPathByName(ROUTE_TOPICS, null);
-    })
-    .accessibilityText('专题，查看全部')
+      .width('100%')
+      .height(64)
+      .padding({ left: HgSpace.m, right: HgSpace.m })
+      .backgroundColor(HgColor.surface1(this.dark))
+      .borderRadius(HgRadius.group)
+      .accessibilityText('专题，查看全部')
+    }
   }
 
   @Builder
@@ -802,7 +853,7 @@ export struct CategoryPage {
           this.RowSkeleton()
         }
         .width('100%')
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       } else if (this.postsError.length > 0 && this.posts.length === 0) {
         Row() {
           Text(this.postsError)
@@ -816,6 +867,7 @@ export struct CategoryPage {
             .fontColor(HgColor.accent(this.dark))
             .height(HgSize.hitTarget)
             .padding({ left: HgSpace.s })
+            .hoverEffect(HoverEffect.Scale)
             .accessibilityText('重试')
             .onClick(() => {
               this.fetchPosts(true);
@@ -824,7 +876,7 @@ export struct CategoryPage {
         .width('100%')
         .height(80)
         .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       } else if (this.posts.length === 0) {
         Text('暂无内容')
           .width('100%')
@@ -832,7 +884,7 @@ export struct CategoryPage {
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))
           .textAlign(TextAlign.Center)
-          .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+          .transition(HgMotion.statusTransition())
       } else {
         List({ space: HgSpace.m }) {
           ForEach(this.posts, (item: Post) => {
@@ -848,7 +900,7 @@ export struct CategoryPage {
         .cachedCount(3)
         .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
         .opacity(this.postOpacity)
-        .transition(TransitionEffect.OPACITY.animation({ duration: HgDuration.micro, curve: Curve.FastOutSlowIn }))
+        .transition(HgMotion.statusTransition())
       }
     }
     .width('100%')

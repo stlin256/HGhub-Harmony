@@ -4,6 +4,7 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgVideoGridCard } from '../components/HgVideoGridCard';
 import { HgEmptyState, HgSkeletonGrid, HgTopBar } from '../components/HgCommon';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
@@ -179,13 +180,15 @@ export struct UserPage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        Button(this.following ? '已关注' : '关注')
+        Button(this.followBusy ? '处理中…' : (this.following ? '已关注' : '关注'))
           .fontSize(HgFont.secondary)
           .fontColor(this.following ? HgColor.textSecondary(this.dark) : '#FFFFFFFF')
           .backgroundColor(this.following ? HgColor.cardBackground(this.dark) : HgColor.accent(this.dark))
           .height(32)
           .borderRadius(16)
           .enabled(!this.followBusy)
+          // 关注/取消关注状态色按 MOTION fast 140ms 过渡；处理中禁用并显示进行态。
+          .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
           .onClick(() => {
             this.toggleFollow();
           })
@@ -259,6 +262,7 @@ export struct UserPage {
           }
           .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m })
           .layoutWeight(1)
+          .transition(HgMotion.statusTransition())
         } else if (this.errorText.length > 0) {
           Column() {
             HgEmptyState({
@@ -273,6 +277,7 @@ export struct UserPage {
           }
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
+          .transition(HgMotion.statusTransition())
         } else {
           List() {
             ListItem() {
@@ -282,18 +287,25 @@ export struct UserPage {
 
             ListItem() {
               if (this.videos.length === 0) {
-                HgEmptyState({ dark: this.dark, title: '暂无作品', description: '' })
-              } else {
-                Grid() {
-                  ForEach(this.videos, (item: VideoCard) => {
-                    GridItem() {
-                      this.VideoCardItem(item)
-                    }
-                  }, (item: VideoCard) => 'uv-' + item.id)
+                Column() {
+                  HgEmptyState({ dark: this.dark, title: '暂无作品', description: '' })
                 }
-                .columnsTemplate(this.gridTemplate())
-                .columnsGap(HgSpace.m)
-                .rowsGap(HgSpace.l)
+                .transition(HgMotion.statusTransition())
+              } else {
+                Column() {
+                  Grid() {
+                    ForEach(this.videos, (item: VideoCard) => {
+                      GridItem() {
+                        this.VideoCardItem(item)
+                      }
+                      .transition(HgMotion.appendTransition())
+                    }, (item: VideoCard) => 'uv-' + item.id)
+                  }
+                  .columnsTemplate(this.gridTemplate())
+                  .columnsGap(HgSpace.m)
+                  .rowsGap(HgSpace.l)
+                }
+                .transition(HgMotion.statusTransition())
               }
             }
             .padding({ left: this.sideInset(), right: this.sideInset(), top: HgSpace.m })
@@ -303,6 +315,7 @@ export struct UserPage {
           .onReachEnd(() => {
             this.loadMore();
           })
+          .transition(HgMotion.statusTransition())
         }
       }
       .width('100%')
@@ -310,5 +323,6 @@ export struct UserPage {
       .backgroundColor(HgColor.pageBackground(this.dark))
     }
     .hideTitleBar(true)
+    .systemTransition(NavigationSystemTransitionType.FADE)
   }
 }
