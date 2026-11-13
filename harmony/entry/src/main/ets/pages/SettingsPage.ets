@@ -1,5 +1,6 @@
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
 import { K_LINE_BASE, Lines } from '../services/Lines';
@@ -17,36 +18,20 @@ import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
 import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
-import { ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_ABOUT } from '../state/Routes';
+import {
+  DynamicPageParam, ROUTE_ABOUT, ROUTE_DYNAMIC_PAGE, ROUTE_REC_DATA, ROUTE_REC_HOW
+} from '../state/Routes';
+import {
+  SettingsAction, SettingsBusy, SettingsItem, SettingsItemType, SettingsOption, SettingsSchema,
+  SettingsSchemaData, SettingsSection, SettingsSubtitle, SettingsTone, SettingsValue
+} from '../state/SettingsSchema';
 import { hostOf } from '../utils/Format';
 import { I18n } from '../utils/I18n';
 
-interface ThemeOption {
-  key: string;
-  label: string;
-}
-
-interface ScaleOption {
-  key: string;
-  label: string;
-  desc: string;
-}
-
-const THEME_OPTIONS: ThemeOption[] = [
-  { key: 'system', label: '跟随系统' },
-  { key: 'dark', label: '深色' },
-  { key: 'light', label: '浅色' }
-];
-
-/** 画面比例：contain=适应（默认，完整不裁切）/ fill=拉伸铺满 / cover=裁切铺满。 */
-const SCALE_OPTIONS: ScaleOption[] = [
-  { key: 'contain', label: '适应', desc: '适应（推荐）：完整显示画面，不裁切；比例不符时留黑边' },
-  { key: 'fill', label: '拉伸', desc: '拉伸：铺满屏幕，画面可能被拉伸变形' },
-  { key: 'cover', label: '裁切', desc: '裁切：保持画面比例铺满屏幕，裁掉超出画面的边缘' }
-];
-
 /** 减少动态效果开关的 AppStorage 键：与 HgMotion.reduced() 共用，全局生效。 */
 const K_REDUCE_MOTION: string = 'hgReduceMotion';
+/** 远程新增滑杆行宽度（vp）。 */
+const SLIDER_WIDTH: number = 140;
 
 @Component
 export struct SettingsPage {
@@ -56,6 +41,11 @@ export struct SettingsPage {
   /** 窗口宽度（vp，旋转/分屏实时更新）：宽屏时设置内容限宽 760vp 居中。 */
   @StorageProp(K_CONTENT_W) windowW: number = 400;
   @StorageProp(K_VIDEO_SCALE) videoScale: string = 'contain';
+
+  /** 设置页数据（编译期默认 + 远程增量覆盖）：aboutToAppear 构建，build 只读。 */
+  private schema: SettingsSchemaData = SettingsSchema.default();
+  /** 远程新增行的本地覆盖值（ConfigRegistry 本地覆盖层的 UI 镜像，整体替换以触发刷新）。 */
+  @State remoteValues: Map<string, boolean | number> = new Map<string, boolean | number>();
   @State themeMode: string = 'system';
   @State muteOnStartup: boolean = true;
   /** 优先高清（HEVC）：有高清源时优先播放。 */
@@ -128,6 +118,8 @@ export struct SettingsPage {
     this.recEnabled = RecService.enabled();
     this.recTagCount = RecService.profileEntries().length;
     this.reduceMotion = AppStorage.get<boolean>(K_REDUCE_MOTION) ?? false;
+    // 设置页数据：编译期默认 + 远程 settings 段增量覆盖（无下发时与改造前完全一致）。
+    this.schema = SettingsSchema.merge(ConfigRegistry.settingsSchema());
   }
 
   aboutToDisappear(): void {
@@ -390,8 +382,298 @@ export struct SettingsPage {
     }
   }
 
+  /* ── schema 渲染辅助（数据驱动：所有行按 item.type 选 builder）── */
+
+  /** 可见分组：远程隐藏的分组 / 行不渲染；组内行全隐藏时整组不渲染。 */
+  private shownSections(): SettingsSection[] {
+    const out: SettingsSection[] = [];
+    for (let i = 0; i < this.schema.sections.length; i++) {
+      const section: SettingsSection = this.schema.sections[i];
+      if (!section.visible || this.shownItems(section).length === 0) {
+        continue;
+      }
+      out.push(section);
+    }
+    return out;
+  }
+
+  /** 分组内可见行。 */
+  private shownItems(section: SettingsSection): SettingsItem[] {
+    const out: SettingsItem[] = [];
+    for (let i = 0; i < section.items.length; i++) {
+      if (section.items[i].visible) {
+        out.push(section.items[i]);
+      }
+    }
+    return out;
+  }
+
+  /** 行是否有副标题（静态 subtitle 或动态 subtitleKind 任一存在）。 */
+  private hasSubtitle(item: SettingsItem): boolean {
+    if (item.subtitle !== undefined) {
+      return true;
+    }
+    return item.subtitleKind !== undefined && item.subtitleKind.length > 0;
+  }
+
+  /** 副标题：静态文案或按页面状态实时计算（与改造前逐行一致）。 */
+  private subtitleOf(item: SettingsItem): ResourceStr {
+    const kind: string = item.subtitleKind ?? '';
+    if (kind === SettingsSubtitle.LINE_HOST) {
+      return this.lineHost;
+    }
+    if (kind === SettingsSubtitle.FAV_HISTORY) {
+      return $r('app.string.fmt_fav_history', this.favCount, this.historyCount);
+    }
+    if (kind === SettingsSubtitle.SEARCH_COUNT) {
+      return $r('app.string.fmt_search_records', this.searchHistCount);
+    }
+    if (kind === SettingsSubtitle.PROFILE_TAGS) {
+      return $r('app.string.fmt_profile_tags', this.recTagCount);
+    }
+    if (kind === SettingsSubtitle.VERSION) {
+      return $r('app.string.fmt_version_license', Api.appVersion());
+    }
+    if (kind === SettingsSubtitle.STARTUP_MS) {
+      return this.startupMs > 0 ? $r('app.string.fmt_last_startup', this.startupMs) :
+        $r('app.string.ui_300ee3de');
+    }
+    if (kind === SettingsSubtitle.CRASH_EXPORT) {
+      const crashPrefix: string = this.crashCount > 0 ?
+        I18n.fmt1($r('app.string.fmt_crash_count_prefix'), this.crashCount) : '';
+      return this.exporting ? '正在打包…' : crashPrefix + '打包播放/统计/设置/线路/性能为 zip';
+    }
+    if (kind === SettingsSubtitle.UPDATE_CHECK) {
+      return this.checking ? $r('app.string.fmt_checking_version') :
+        $r('app.string.fmt_current_version_vs', Api.appVersion());
+    }
+    return item.subtitle ?? '';
+  }
+
+  /** 动态右侧数值（缓存占用）。 */
+  private rowValue(item: SettingsItem): string {
+    return item.valueKind === SettingsValue.CACHE_USAGE ? this.cacheUsageText() : '';
+  }
+
+  /** 行是否处于忙碌态（行尾 spinner + 0.6 透明度）。 */
+  private isBusy(item: SettingsItem): boolean {
+    if (item.busyKind === SettingsBusy.UPDATE) {
+      return this.checking;
+    }
+    if (item.busyKind === SettingsBusy.CACHE) {
+      return this.clearing;
+    }
+    return false;
+  }
+
+  /** 行高：远程可覆盖；未覆盖时双行 64vp、单行 52vp（与改造前一致）。 */
+  private rowHeight(item: SettingsItem): number {
+    if (item.rowHeight !== undefined && item.rowHeight > 0) {
+      return item.rowHeight;
+    }
+    return this.hasSubtitle(item) ? HgSize.listRowDouble : HgSize.listRow;
+  }
+
+  /** 开关当前值：编译期行读页面状态，远程新增行读 ConfigRegistry（本地覆盖层）。 */
+  private switchValue(item: SettingsItem): boolean {
+    const key: string = item.key ?? '';
+    if (key === ConfigKey.REDUCE_MOTION) {
+      return this.reduceMotion;
+    }
+    if (key === ConfigKey.MUTE_ON_STARTUP) {
+      return this.muteOnStartup;
+    }
+    if (key === ConfigKey.PREFER_HEVC) {
+      return this.preferHevc;
+    }
+    if (key === ConfigKey.SUPER_RESOLUTION) {
+      return this.superResolution;
+    }
+    if (key === ConfigKey.MULTI_SOURCE) {
+      return this.multiSource;
+    }
+    if (key === ConfigKey.IPV6_PREFER) {
+      return this.ipv6Prefer;
+    }
+    if (key === ConfigKey.RECOMMEND_ENABLED) {
+      return this.recEnabled;
+    }
+    const cached: boolean | number | undefined = this.remoteValues.get(key);
+    return typeof cached === 'boolean' ? cached : ConfigRegistry.getBool(key);
+  }
+
+  /** 开关变更：编译期行走既有持久化路径，远程新增行走 ConfigRegistry 本地覆盖。 */
+  private onSwitch(item: SettingsItem, isOn: boolean): void {
+    const key: string = item.key ?? '';
+    if (key === ConfigKey.REDUCE_MOTION) {
+      this.reduceMotion = isOn;
+      AppStorage.setOrCreate<boolean>(K_REDUCE_MOTION, isOn);
+      return;
+    }
+    if (key === ConfigKey.MUTE_ON_STARTUP) {
+      this.muteOnStartup = isOn;
+      UserPrefs.setMuteOnStartup(isOn);
+      return;
+    }
+    if (key === ConfigKey.PREFER_HEVC) {
+      this.preferHevc = isOn;
+      UserPrefs.setPreferHevc(isOn);
+      return;
+    }
+    if (key === ConfigKey.SUPER_RESOLUTION) {
+      this.superResolution = isOn;
+      UserPrefs.setSuperResolution(isOn);
+      // 立即重算并让当前播放器生效（省电/低电量时仍保持关闭）。
+      PowerGuard.refresh(true);
+      return;
+    }
+    if (key === ConfigKey.MULTI_SOURCE) {
+      this.multiSource = isOn;
+      UserPrefs.setMultiSource(isOn);
+      return;
+    }
+    if (key === ConfigKey.IPV6_PREFER) {
+      this.ipv6Prefer = isOn;
+      Ipv6Preference.setEnabled(isOn);
+      return;
+    }
+    if (key === ConfigKey.RECOMMEND_ENABLED) {
+      this.recEnabled = isOn;
+      RecService.setEnabled(isOn);
+      if (isOn) {
+        RecService.syncNow(false);
+        UiBus.toastOk('已开启个性化推荐');
+      } else {
+        UiBus.toastOk('已关闭个性化推荐（回退随机/热门）');
+      }
+      return;
+    }
+    // 远程新增开关：写 ConfigRegistry 本地覆盖层，并镜像到状态以触发刷新。
+    this.setRemoteValue(key, isOn);
+  }
+
+  /** 行内动作分发：编译期行为白名单 + 远程新增 link 的二级页跳转。 */
+  private runAction(item: SettingsItem): void {
+    const action: string = item.action ?? '';
+    if (action === SettingsAction.LINES) {
+      UiBus.openLines();
+      return;
+    }
+    if (action === SettingsAction.UPDATE) {
+      this.checkUpdate();
+      return;
+    }
+    if (action === SettingsAction.EXPORT) {
+      this.exportDiagLog();
+      return;
+    }
+    if (action === SettingsAction.FEEDBACK) {
+      this.openFeedback();
+      return;
+    }
+    if (action === SettingsAction.ABOUT) {
+      this.navStack.pushPathByName(ROUTE_ABOUT, null);
+      return;
+    }
+    if (action === SettingsAction.REC_DATA) {
+      this.navStack.pushPathByName(ROUTE_REC_DATA, null);
+      return;
+    }
+    if (action === SettingsAction.REC_HOW) {
+      this.navStack.pushPathByName(ROUTE_REC_HOW, null);
+      return;
+    }
+    if (action === SettingsAction.CLEAR_CACHE) {
+      this.clearCache();
+      return;
+    }
+    if (action === SettingsAction.CLEAR_HISTORY) {
+      this.clearHistory();
+      return;
+    }
+    if (action === SettingsAction.CLEAR_SEARCH) {
+      this.clearSearchHistory();
+      return;
+    }
+    // 远程新增 link：打开远程声明的二级页（pageId 已在 schema 层校验存在）。
+    const pageId: string = item.pageId ?? '';
+    if (pageId.length > 0) {
+      const param: DynamicPageParam = { pageId: pageId };
+      this.navStack.pushPathByName(ROUTE_DYNAMIC_PAGE, param);
+    }
+  }
+
+  /** chips 当前选中值。 */
+  private chipsValue(item: SettingsItem): string {
+    if (item.key === ConfigKey.THEME_MODE) {
+      return this.themeMode;
+    }
+    if (item.key === ConfigKey.VIDEO_SCALE) {
+      return this.videoScale;
+    }
+    return '';
+  }
+
+  /** chips 选中：主题 / 画面比例走既有切换逻辑（含动效与 Toast）。 */
+  private onChipSelect(item: SettingsItem, option: SettingsOption): void {
+    if (item.key === ConfigKey.THEME_MODE) {
+      this.setTheme(option.value);
+      return;
+    }
+    if (item.key === ConfigKey.VIDEO_SCALE) {
+      this.setScale(option.value, option.label);
+    }
+  }
+
+  /** chips 是否带逐项说明（画面比例行）。 */
+  private hasOptionDesc(item: SettingsItem): boolean {
+    const options: SettingsOption[] = item.options ?? [];
+    return options.length > 0 && options[0].desc !== undefined;
+  }
+
+  /** 滑杆当前值（远程新增行，读 ConfigRegistry 并裁剪到 min/max）。 */
+  private sliderValue(item: SettingsItem): number {
+    const key: string = item.key ?? '';
+    const min: number = item.min ?? 0;
+    const max: number = item.max ?? 100;
+    const cached: boolean | number | undefined = this.remoteValues.get(key);
+    let value: number = typeof cached === 'number' ? cached : ConfigRegistry.getNumber(key);
+    if (value < min) {
+      value = min;
+    }
+    if (value > max) {
+      value = max;
+    }
+    return value;
+  }
+
+  /** 滑杆变更：写 ConfigRegistry 本地覆盖层，并镜像到状态以触发刷新。 */
+  private onSliderChange(item: SettingsItem, value: number): void {
+    const key: string = item.key ?? '';
+    if (key.length === 0) {
+      return;
+    }
+    this.setRemoteValue(key, value);
+  }
+
+  /** 远程新增行的本地覆盖值：写 ConfigRegistry + 整体替换状态（触发 UI 刷新）。 */
+  private setRemoteValue(key: string, value: boolean | number): void {
+    if (key.length === 0) {
+      return;
+    }
+    const next: Map<string, boolean | number> = new Map<string, boolean | number>();
+    this.remoteValues.forEach((cached: boolean | number, mapKey: string) => {
+      next.set(mapKey, cached);
+    });
+    next.set(key, value);
+    this.remoteValues = next;
+    ConfigRegistry.setLocalOverride(key, value);
+  }
+
+  /* ── 通用渲染件 ─────────────────────────────────── */
+
   @Builder
-  GroupTitle(title: string) {
+  GroupTitle(title: ResourceStr) {
     Text(title)
       .width('100%')
       .fontSize(HgFont.micro)
@@ -412,6 +694,14 @@ export struct SettingsPage {
     .backgroundColor(HgColor.accentSoft(this.dark))
   }
 
+  /** 远程新增行可能没有图标：有才画（编译期行全部有）。 */
+  @Builder
+  RowIconIf(item: SettingsItem) {
+    if (item.icon !== undefined) {
+      this.RowIcon(item.icon)
+    }
+  }
+
   @Builder
   Chevron() {
     SymbolGlyph($r('sys.symbol.chevron_right'))
@@ -419,12 +709,288 @@ export struct SettingsPage {
       .fontColor([HgColor.textTertiary(this.dark)])
   }
 
+  /** 分组卡片：行之间统一 0.5vp 分隔线（与改造前一致）。 */
   @Builder
-  ThemeGroup() {
+  GroupCard(section: SettingsSection) {
+    Column() {
+      ForEach(this.shownItems(section), (item: SettingsItem, index: number) => {
+        if (index > 0) {
+          Divider()
+            .width('100%')
+            .strokeWidth(0.5)
+            .color(HgColor.hairline(this.dark))
+        }
+        this.ItemRow(item)
+      }, (item: SettingsItem) => section.id + '-' + item.id)
+    }
+    .width('100%')
+    .padding({ left: HgSpace.l, right: HgSpace.l })
+    .backgroundColor(HgColor.surface1(this.dark))
+    .borderRadius(HgRadius.group)
+  }
+
+  /** 行分发：每种 item type 一个 builder。 */
+  @Builder
+  ItemRow(item: SettingsItem) {
+    if (item.type === SettingsItemType.SWITCH) {
+      this.SwitchRow(item)
+    } else if (item.type === SettingsItemType.LINK) {
+      this.LinkRow(item)
+    } else if (item.type === SettingsItemType.ACTION) {
+      this.ActionRow(item)
+    } else if (item.type === SettingsItemType.TEXT) {
+      this.TextRow(item)
+    } else if (item.type === SettingsItemType.SLIDER) {
+      this.SliderRow(item)
+    } else if (item.type === SettingsItemType.CHIPS) {
+      this.ChipsRow(item)
+    }
+  }
+
+  /* ── switch：开关行 ─────────────────────────────── */
+
+  @Builder
+  SwitchContent(item: SettingsItem) {
+    this.RowIconIf(item)
+    if (this.hasSubtitle(item)) {
+      Column({ space: 2 }) {
+        Text(item.title)
+          .fontSize(HgFont.rowTitle)
+          .fontColor(HgColor.textPrimary(this.dark))
+        Text(this.subtitleOf(item))
+          .fontSize(HgFont.micro)
+          .fontColor(HgColor.textTertiary(this.dark))
+          .maxLines(2)
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    } else {
+      Text(item.title)
+        .fontSize(HgFont.rowTitle)
+        .fontColor(HgColor.textPrimary(this.dark))
+        .layoutWeight(1)
+    }
+    Toggle({ type: ToggleType.Switch, isOn: this.switchValue(item) })
+      .selectedColor(HgColor.accent(this.dark))
+      .onChange((isOn: boolean) => {
+        this.onSwitch(item, isOn);
+      })
+  }
+
+  @Builder
+  SwitchRow(item: SettingsItem) {
+    if (item.accessibility !== undefined) {
+      Row({ space: HgSpace.m }) {
+        this.SwitchContent(item)
+      }
+      .width('100%')
+      .height(this.rowHeight(item))
+      .accessibilityText(item.accessibility)
+    } else {
+      Row({ space: HgSpace.m }) {
+        this.SwitchContent(item)
+      }
+      .width('100%')
+      .height(this.rowHeight(item))
+    }
+  }
+
+  /* ── link：整行可点（chevron / 忙碌态 spinner）────── */
+
+  @Builder
+  LinkRow(item: SettingsItem) {
+    HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+      Row({ space: HgSpace.m }) {
+        this.RowIconIf(item)
+        Column({ space: 2 }) {
+          Text(item.title)
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          if (this.hasSubtitle(item)) {
+            // 未配置 maxLines 时用 99 行（等价不限，保持与改造前一致）。
+            Text(this.subtitleOf(item))
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.textTertiary(this.dark))
+              .maxLines(item.subtitleMaxLines !== undefined ? item.subtitleMaxLines : 99)
+          }
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        if (this.isBusy(item)) {
+          LoadingProgress()
+            .width(16)
+            .height(16)
+            .color(HgColor.accent(this.dark))
+        } else {
+          this.Chevron()
+        }
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+      .opacity(this.isBusy(item) ? 0.6 : 1)
+      .accessibilityText(item.accessibility ?? item.title)
+      .onClick(() => {
+        this.runAction(item);
+      })
+    }
+  }
+
+  /* ── action：右侧文字按钮行 ─────────────────────── */
+
+  @Builder
+  ActionButton(item: SettingsItem) {
+    HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+      if (item.busyKind === SettingsBusy.CACHE) {
+        Row({ space: HgSpace.xs }) {
+          if (this.isBusy(item)) {
+            LoadingProgress()
+              .width(16)
+              .height(16)
+              .color(HgColor.accent(this.dark))
+          }
+          Text(this.isBusy(item) ? '清理中…' : (item.actionLabel ?? ''))
+            .fontSize(HgFont.caption)
+            .fontColor(HgColor.accent(this.dark))
+            .height(HgSize.hitTarget)
+            .padding({ left: HgSpace.s })
+            .opacity(this.isBusy(item) ? 0.6 : 1)
+        }
+        .accessibilityText(item.accessibility ?? item.title)
+        .onClick(() => {
+          if (!this.isBusy(item)) {
+            this.runAction(item);
+          }
+        })
+      } else {
+        Text(item.actionLabel ?? '')
+          .fontSize(HgFont.caption)
+          .fontColor(item.tone === SettingsTone.DANGER ? HgColor.danger(this.dark) :
+            HgColor.accent(this.dark))
+          .height(HgSize.hitTarget)
+          .padding({ left: HgSpace.s })
+          .accessibilityText(item.accessibility ?? item.title)
+          .onClick(() => {
+            this.runAction(item);
+          })
+      }
+    }
+  }
+
+  @Builder
+  ActionRow(item: SettingsItem) {
+    if (item.valueKind !== undefined && item.valueKind.length > 0) {
+      // 缓存占用行：标题 + 右侧数值 + 清理按钮。
+      Row({ space: HgSpace.m }) {
+        this.RowIconIf(item)
+        Text(item.title)
+          .fontSize(HgFont.rowTitle)
+          .fontColor(HgColor.textPrimary(this.dark))
+          .layoutWeight(1)
+        Text(this.rowValue(item))
+          .fontSize(HgFont.caption)
+          .fontColor(HgColor.textTertiary(this.dark))
+          .maxLines(1)
+          .opacity(this.valueOpacity)
+        this.ActionButton(item)
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+    } else {
+      Row({ space: HgSpace.m }) {
+        this.RowIconIf(item)
+        Column({ space: 2 }) {
+          Text(item.title)
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          if (this.hasSubtitle(item)) {
+            Text(this.subtitleOf(item))
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.textTertiary(this.dark))
+              .opacity(item.valueFade === true ? this.valueOpacity : 1)
+          }
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        this.ActionButton(item)
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+    }
+  }
+
+  /* ── text：纯展示行 ─────────────────────────────── */
+
+  @Builder
+  TextRow(item: SettingsItem) {
+    Row({ space: HgSpace.m }) {
+      this.RowIconIf(item)
+      if (this.hasSubtitle(item)) {
+        Column({ space: 2 }) {
+          Text(item.title)
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text(this.subtitleOf(item))
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+      } else {
+        Text(item.title)
+          .fontSize(HgFont.rowTitle)
+          .fontColor(HgColor.textPrimary(this.dark))
+          .layoutWeight(1)
+      }
+    }
+    .width('100%')
+    .height(this.rowHeight(item))
+  }
+
+  /* ── slider：数值滑杆行（远程新增）──────────────── */
+
+  @Builder
+  SliderRow(item: SettingsItem) {
+    Row({ space: HgSpace.m }) {
+      this.RowIconIf(item)
+      Column({ space: 2 }) {
+        Text(item.title)
+          .fontSize(HgFont.rowTitle)
+          .fontColor(HgColor.textPrimary(this.dark))
+        if (this.hasSubtitle(item)) {
+          Text(this.subtitleOf(item))
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(2)
+        }
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      Slider({
+        value: this.sliderValue(item),
+        min: item.min ?? 0,
+        max: item.max ?? 100,
+        step: item.step ?? 1,
+        style: SliderStyle.OutSet
+      })
+        .width(SLIDER_WIDTH)
+        .selectedColor(HgColor.accent(this.dark))
+        .trackColor(HgColor.surface3(this.dark))
+        .onChange((value: number) => {
+          this.onSliderChange(item, value);
+        })
+    }
+    .width('100%')
+    .height(HgSize.listRowDouble)
+  }
+
+  /* ── chips：横向选项行（主题 / 画面比例）────────── */
+
+  @Builder
+  ChipsRow(item: SettingsItem) {
     Column() {
       Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.gearshape'))
-        Text($r('app.string.ui_e848ddd4'))
+        this.RowIconIf(item)
+        Text(item.title)
           .fontSize(HgFont.rowTitle)
           .fontColor(HgColor.textPrimary(this.dark))
           .layoutWeight(1)
@@ -433,650 +999,47 @@ export struct SettingsPage {
       .height(HgSize.listRow)
 
       Row({ space: HgSpace.s }) {
-        ForEach(THEME_OPTIONS, (option: ThemeOption) => {
+        ForEach(item.options ?? [], (option: SettingsOption) => {
           Text(option.label)
             .fontSize(HgFont.caption)
-            .fontWeight(this.themeMode === option.key ? HgFont.weightMedium : HgFont.weightRegular)
-            .fontColor(this.themeMode === option.key ? HgColor.onAccent(this.dark) : HgColor.textSecondary(this.dark))
+            .fontWeight(this.chipsValue(item) === option.value ? HgFont.weightMedium :
+              HgFont.weightRegular)
+            .fontColor(this.chipsValue(item) === option.value ? HgColor.onAccent(this.dark) :
+              HgColor.textSecondary(this.dark))
             .height(HgSize.chipHeight)
             .padding({ left: HgSpace.m, right: HgSpace.m })
-            .backgroundColor(this.themeMode === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
+            .backgroundColor(this.chipsValue(item) === option.value ? HgColor.accent(this.dark) :
+              HgColor.surface3(this.dark))
             .borderRadius(HgRadius.chip)
             .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-            .accessibilityText($r('app.string.ui_e848ddd4'))
+            .accessibilityText(item.accessibility ?? item.title)
             .onClick(() => {
-              this.setTheme(option.key);
+              this.onChipSelect(item, option);
             })
-        }, (option: ThemeOption) => option.key)
+        }, (option: SettingsOption) => item.id + '-chip-' + option.value)
       }
       .width('100%')
-      .padding({ bottom: HgSpace.m })
+      .padding({ bottom: this.hasOptionDesc(item) ? HgSpace.s : HgSpace.m })
 
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.bolt_fill'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_ad25121b'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.ui_27054dfb'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-            .maxLines(2)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        Toggle({ type: ToggleType.Switch, isOn: this.reduceMotion })
-          .selectedColor(HgColor.accent(this.dark))
-          .onChange((isOn: boolean) => {
-            this.reduceMotion = isOn;
-            AppStorage.setOrCreate<boolean>(K_REDUCE_MOTION, isOn);
-          })
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-    }
-    .width('100%')
-    .padding({ left: HgSpace.l, right: HgSpace.l })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
-  }
-
-  @Builder
-  PlayGroup() {
-    Column() {
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.speaker_slash'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_d5a1c832'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.ui_355e7cca'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-            .maxLines(2)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        Toggle({ type: ToggleType.Switch, isOn: this.muteOnStartup })
-          .selectedColor(HgColor.accent(this.dark))
-          .onChange((isOn: boolean) => {
-            this.muteOnStartup = isOn;
-            UserPrefs.setMuteOnStartup(isOn);
-          })
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.aspect_ratio'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_167667a8'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.ui_72429b8a'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-            .maxLines(2)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        Toggle({ type: ToggleType.Switch, isOn: this.preferHevc })
-          .selectedColor(HgColor.accent(this.dark))
-          .onChange((isOn: boolean) => {
-            this.preferHevc = isOn;
-            UserPrefs.setPreferHevc(isOn);
-          })
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.sparkles'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_1ac5f1f7'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.ui_191e4ae3'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-            .maxLines(2)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        Toggle({ type: ToggleType.Switch, isOn: this.superResolution })
-          .selectedColor(HgColor.accent(this.dark))
-          .onChange((isOn: boolean) => {
-            this.superResolution = isOn;
-            UserPrefs.setSuperResolution(isOn);
-            // 立即重算并让当前播放器生效（省电/低电量时仍保持关闭）。
-            PowerGuard.refresh(true);
-          })
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-      .accessibilityText($r('app.string.ui_1ac5f1f7'))
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Column() {
-        Row({ space: HgSpace.m }) {
-          this.RowIcon($r('sys.symbol.aspect_ratio'))
-          Text($r('app.string.ui_f07fc510'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .height(HgSize.listRow)
-
-        Row({ space: HgSpace.s }) {
-          ForEach(SCALE_OPTIONS, (option: ScaleOption) => {
-            Text(option.label)
-              .fontSize(HgFont.caption)
-              .fontWeight(this.videoScale === option.key ? HgFont.weightMedium : HgFont.weightRegular)
-              .fontColor(this.videoScale === option.key ? HgColor.onAccent(this.dark) : HgColor.textSecondary(this.dark))
-              .height(HgSize.chipHeight)
-              .padding({ left: HgSpace.m, right: HgSpace.m })
-              .backgroundColor(this.videoScale === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
-              .borderRadius(HgRadius.chip)
-              .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-              .accessibilityText($r('app.string.ui_f07fc510'))
-              .onClick(() => {
-                this.setScale(option.key, option.label);
-              })
-          }, (option: ScaleOption) => 'scale-' + option.key)
-        }
-        .width('100%')
-        .padding({ bottom: HgSpace.s })
-
+      if (this.hasOptionDesc(item)) {
         Column({ space: HgSpace.xxs }) {
-          ForEach(SCALE_OPTIONS, (option: ScaleOption) => {
-            Text(option.desc)
+          ForEach(item.options ?? [], (option: SettingsOption) => {
+            Text(option.desc ?? '')
               .width('100%')
               .fontSize(HgFont.micro)
               .lineHeight(HgFont.lineMicro)
-              .fontColor(this.videoScale === option.key ? HgColor.textSecondary(this.dark) : HgColor.textTertiary(this.dark))
+              .fontColor(this.chipsValue(item) === option.value ? HgColor.textSecondary(this.dark) :
+                HgColor.textTertiary(this.dark))
               .maxLines(2)
-          }, (option: ScaleOption) => 'desc-' + option.key)
+          }, (option: SettingsOption) => item.id + '-desc-' + option.value)
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
         .padding({ bottom: HgSpace.m })
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
-    .padding({ left: HgSpace.l, right: HgSpace.l })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
-  }
-
-  @Builder
-  NetworkGroup() {
-    Column() {
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.arrow_clockwise'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_19fd6a38'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.ui_f31811ba'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-            .maxLines(2)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        Toggle({ type: ToggleType.Switch, isOn: this.multiSource })
-          .selectedColor(HgColor.accent(this.dark))
-          .onChange((isOn: boolean) => {
-            this.multiSource = isOn;
-            UserPrefs.setMultiSource(isOn);
-          })
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.arrowshape_turn_up_right'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_f2b50920'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.ui_3a711aad'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-            .maxLines(2)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        Toggle({ type: ToggleType.Switch, isOn: this.ipv6Prefer })
-          .selectedColor(HgColor.accent(this.dark))
-          .onChange((isOn: boolean) => {
-            this.ipv6Prefer = isOn;
-            Ipv6Preference.setEnabled(isOn);
-          })
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-      .accessibilityText($r('app.string.ui_f2b50920'))
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-        Row({ space: HgSpace.m }) {
-          this.RowIcon($r('sys.symbol.speaker_wave_2'))
-          Column({ space: 2 }) {
-            Text($r('app.string.ui_5922d95f'))
-              .fontSize(HgFont.rowTitle)
-              .fontColor(HgColor.textPrimary(this.dark))
-            Text(this.lineHost)
-              .fontSize(HgFont.micro)
-              .fontColor(HgColor.textTertiary(this.dark))
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          this.Chevron()
-        }
-        .width('100%')
-        .height(HgSize.listRowDouble)
-        .accessibilityText($r('app.string.ui_5922d95f'))
-        .onClick(() => {
-          UiBus.openLines();
-        })
-      }
-    }
-    .width('100%')
-    .padding({ left: HgSpace.l, right: HgSpace.l })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
-  }
-
-  @Builder
-  LocalGroup() {
-    Column() {
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.square_grid_2x2'))
-        Text($r('app.string.ui_cecaaf5b'))
-          .fontSize(HgFont.rowTitle)
-          .fontColor(HgColor.textPrimary(this.dark))
-          .layoutWeight(1)
-        // 只显示占用空间（内存 + 磁盘合计），不再显示张数；aboutToAppear/清理后刷新。
-        Text(this.cacheUsageText())
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.textTertiary(this.dark))
-          .maxLines(1)
-          // 清理后数值轻淡入（只做透明度，简洁不夸张）。
-          .opacity(this.valueOpacity)
-        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-          Row({ space: HgSpace.xs }) {
-            if (this.clearing) {
-              LoadingProgress()
-                .width(16)
-                .height(16)
-                .color(HgColor.accent(this.dark))
-            }
-            Text(this.clearing ? '清理中…' : '清理')
-              .fontSize(HgFont.caption)
-              .fontColor(HgColor.accent(this.dark))
-              .height(HgSize.hitTarget)
-              .padding({ left: HgSpace.s })
-              .opacity(this.clearing ? 0.6 : 1)
-          }
-          .accessibilityText($r('app.string.ui_cecaaf5b'))
-          .onClick(() => {
-            if (!this.clearing) {
-              this.clearCache();
-            }
-          })
-        }
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.heart'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_5fc8f9d0'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.fmt_fav_history', this.favCount, this.historyCount))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-            .opacity(this.valueOpacity)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-          Text($r('app.string.ui_578bbcfa'))
-            .fontSize(HgFont.caption)
-            .fontColor(HgColor.danger(this.dark))
-            .height(HgSize.hitTarget)
-            .padding({ left: HgSpace.s })
-            .accessibilityText($r('app.string.ui_578bbcfa'))
-            .onClick(() => {
-              this.clearHistory();
-            })
-        }
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.magnifyingglass'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_adf6d73a'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.fmt_search_records', this.searchHistCount))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-            .opacity(this.valueOpacity)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-          Text($r('app.string.ui_84fcd70d'))
-            .fontSize(HgFont.caption)
-            .fontColor(HgColor.danger(this.dark))
-            .height(HgSize.hitTarget)
-            .padding({ left: HgSpace.s })
-            .accessibilityText($r('app.string.ui_84fcd70d'))
-            .onClick(() => {
-              this.clearSearchHistory();
-            })
-        }
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-    }
-    .width('100%')
-    .padding({ left: HgSpace.l, right: HgSpace.l })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
-  }
-
-  @Builder
-  RecGroup() {
-    Column() {
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.star'))
-        Text($r('app.string.ui_9f1e3081'))
-          .fontSize(HgFont.rowTitle)
-          .fontColor(HgColor.textPrimary(this.dark))
-          .layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.recEnabled })
-          .selectedColor(HgColor.accent(this.dark))
-          .onChange((isOn: boolean) => {
-            this.recEnabled = isOn;
-            RecService.setEnabled(isOn);
-            if (isOn) {
-              RecService.syncNow(false);
-              UiBus.toastOk('已开启个性化推荐');
-            } else {
-              UiBus.toastOk('已关闭个性化推荐（回退随机/热门）');
-            }
-          })
-      }
-      .width('100%')
-      .height(HgSize.hitTarget + HgSpace.m)
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.person'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_1c5c171f'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.fmt_profile_tags', this.recTagCount))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-          Text($r('app.string.ui_4989b5cf'))
-            .fontSize(HgFont.caption)
-            .fontColor(HgColor.accent(this.dark))
-            .height(HgSize.hitTarget)
-            .padding({ left: HgSpace.s })
-            .accessibilityText($r('app.string.ui_4989b5cf'))
-            .onClick(() => {
-              this.navStack.pushPathByName(ROUTE_REC_DATA, null);
-            })
-        }
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.heart'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_bc86f4f4'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text($r('app.string.ui_e10f8bfd'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-          Text($r('app.string.ui_f7acefd2'))
-            .fontSize(HgFont.caption)
-            .fontColor(HgColor.accent(this.dark))
-            .height(HgSize.hitTarget)
-            .padding({ left: HgSpace.s })
-            .accessibilityText($r('app.string.ui_f7acefd2'))
-            .onClick(() => {
-              this.navStack.pushPathByName(ROUTE_REC_HOW, null);
-            })
-        }
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-    }
-    .width('100%')
-    .padding({ left: HgSpace.l, right: HgSpace.l })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
-  }
-
-  @Builder
-  OtherGroup() {
-    Column() {
-      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-        Row({ space: HgSpace.m }) {
-          this.RowIcon($r('sys.symbol.arrow_clockwise'))
-          Column({ space: 2 }) {
-            Text($r('app.string.ui_a6df3858'))
-              .fontSize(HgFont.rowTitle)
-              .fontColor(HgColor.textPrimary(this.dark))
-            Text(this.checking ? $r('app.string.fmt_checking_version') :
-              $r('app.string.fmt_current_version_vs', Api.appVersion()))
-              .fontSize(HgFont.micro)
-              .fontColor(HgColor.textTertiary(this.dark))
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          if (this.checking) {
-            LoadingProgress()
-              .width(16)
-              .height(16)
-              .color(HgColor.accent(this.dark))
-          } else {
-            this.Chevron()
-          }
-        }
-        .width('100%')
-        .height(HgSize.listRowDouble)
-        .opacity(this.checking ? 0.6 : 1)
-        .accessibilityText($r('app.string.ui_a6df3858'))
-        .onClick(() => {
-          this.checkUpdate();
-        })
-      }
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-        Row({ space: HgSpace.m }) {
-          this.RowIcon($r('sys.symbol.exclamationmark_triangle'))
-          Column({ space: 2 }) {
-            Text($r('app.string.ui_5c37f0c6'))
-              .fontSize(HgFont.rowTitle)
-              .fontColor(HgColor.textPrimary(this.dark))
-            Text(this.exporting ? '正在打包…' :
-              (this.crashCount > 0 ? I18n.fmt1($r('app.string.fmt_crash_count_prefix'), this.crashCount) : '') +
-              '打包播放/统计/设置/线路/性能为 zip')
-              .fontSize(HgFont.micro)
-              .fontColor(HgColor.textTertiary(this.dark))
-              .maxLines(2)
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          this.Chevron()
-        }
-        .width('100%')
-        .height(HgSize.listRowDouble)
-        .accessibilityText($r('app.string.ui_5c37f0c6'))
-        .onClick(() => {
-          this.exportDiagLog();
-        })
-      }
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-        Row({ space: HgSpace.m }) {
-          this.RowIcon($r('sys.symbol.message'))
-          Column({ space: 2 }) {
-            Text($r('app.string.ui_42a36e94'))
-              .fontSize(HgFont.rowTitle)
-              .fontColor(HgColor.textPrimary(this.dark))
-            Text($r('app.string.ui_7b09aa5e'))
-              .fontSize(HgFont.micro)
-              .fontColor(HgColor.textTertiary(this.dark))
-              .maxLines(2)
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          this.Chevron()
-        }
-        .width('100%')
-        .height(HgSize.listRowDouble)
-        .accessibilityText($r('app.string.ui_705090b2'))
-        .onClick(() => {
-          this.openFeedback();
-        })
-      }
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      Row({ space: HgSpace.m }) {
-        this.RowIcon($r('sys.symbol.bolt_fill'))
-        Column({ space: 2 }) {
-          Text($r('app.string.ui_60192f6f'))
-            .fontSize(HgFont.rowTitle)
-            .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.startupMs > 0 ? $r('app.string.fmt_last_startup', this.startupMs) :
-              $r('app.string.ui_300ee3de'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.textTertiary(this.dark))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-      }
-      .width('100%')
-      .height(HgSize.listRowDouble)
-
-      Divider()
-        .width('100%')
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(this.dark))
-
-      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-        Row({ space: HgSpace.m }) {
-          this.RowIcon($r('sys.symbol.message'))
-          Column({ space: 2 }) {
-            Text($r('app.string.ui_efb28fde'))
-              .fontSize(HgFont.rowTitle)
-              .fontColor(HgColor.textPrimary(this.dark))
-            Text($r('app.string.fmt_version_license', Api.appVersion()))
-              .fontSize(HgFont.micro)
-              .fontColor(HgColor.textTertiary(this.dark))
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          this.Chevron()
-        }
-        .width('100%')
-        .height(HgSize.listRowDouble)
-        .accessibilityText($r('app.string.ui_15dbaa78'))
-        .onClick(() => {
-          this.navStack.pushPathByName(ROUTE_ABOUT, null);
-        })
-      }
-    }
-    .width('100%')
-    .padding({ left: HgSpace.l, right: HgSpace.l })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.group)
+    .alignItems(HorizontalAlign.Start)
   }
 
   build() {
@@ -1093,65 +1056,17 @@ export struct SettingsPage {
           })
           Column() {
             List() {
-              ListItem() {
-                Column() {
-                  this.GroupTitle('外观')
-                  this.ThemeGroup()
+              ForEach(this.shownSections(), (section: SettingsSection) => {
+                ListItem() {
+                  Column() {
+                    this.GroupTitle(section.title)
+                    this.GroupCard(section)
+                  }
+                  .width('100%')
+                  .alignItems(HorizontalAlign.Start)
                 }
                 .width('100%')
-                .alignItems(HorizontalAlign.Start)
-              }
-              .width('100%')
-
-              ListItem() {
-                Column() {
-                  this.GroupTitle('播放')
-                  this.PlayGroup()
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-              }
-              .width('100%')
-
-              ListItem() {
-                Column() {
-                  this.GroupTitle('网络')
-                  this.NetworkGroup()
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-              }
-              .width('100%')
-
-              ListItem() {
-                Column() {
-                  this.GroupTitle('推荐')
-                  this.RecGroup()
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-              }
-              .width('100%')
-
-              ListItem() {
-                Column() {
-                  this.GroupTitle('本地数据')
-                  this.LocalGroup()
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-              }
-              .width('100%')
-
-              ListItem() {
-                Column() {
-                  this.GroupTitle('其他')
-                  this.OtherGroup()
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-              }
-              .width('100%')
+              }, (section: SettingsSection) => section.id)
 
               ListItem() {
                 Text($r('app.string.fmt_app_footer_license', Api.appVersion()))

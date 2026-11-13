@@ -19,6 +19,8 @@ export const ROUTE_USER: string = 'user';
 export const ROUTE_FOLLOW: string = 'follow';
 /** 关于项目（二级页面）。 */
 export const ROUTE_ABOUT: string = 'about';
+/** 远程下发的声明式二级页（blocks 白名单渲染，无代码执行；SPEC §13.3）。 */
+export const ROUTE_DYNAMIC_PAGE: string = 'dynamicPage';
 
 export interface ChannelParam {
   cate: string;
@@ -40,6 +42,11 @@ export interface TopicParam {
 
 export interface UserParam {
   uid: number;
+}
+
+/** 远程二级页参数：pageId 对应远程 settings.pages[].id。 */
+export interface DynamicPageParam {
+  pageId: string;
 }
 
 /** 播放页上下文：一个 id 列表 + 起点，对应 Web 版 store.tsx 的 FeedContext。 */
