@@ -364,8 +364,13 @@ function parseDay(value) {
   return DAY_RE.test(String(n)) ? n : 0;
 }
 
-/** 安全取整：非数字/NaN 返回 fallback，再夹到 [min, max]。 */
+/** 安全取整：缺省/非数字/NaN 返回 fallback，再夹到 [min, max]。 */
 function toSafeInt(value, fallback, min, max) {
+  // 注意 Number(null) === 0、Number('') === 0，必须先把「没传」和「传了 0」区分开，
+  // 否则 ?days 缺省时会被夹成 min（1 天）而不是默认值。
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) {
     return fallback;
