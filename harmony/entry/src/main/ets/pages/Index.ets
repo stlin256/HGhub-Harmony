@@ -34,12 +34,13 @@ import { TopicsPage } from './TopicsPage';
 import { TopicDetailPage } from './TopicDetailPage';
 import { UserPage } from './UserPage';
 import { FollowPage } from './FollowPage';
+import { AboutPage } from './AboutPage';
 import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
 import { TabletNoticeDialog } from '../components/TabletNoticeDialog';
 import {
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
-  ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC, ROUTE_USER, ROUTE_FOLLOW,
+  ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC, ROUTE_USER, ROUTE_FOLLOW, ROUTE_ABOUT,
   PlayerParam, ChannelParam, PostParam, VideoParam, TopicParam, UserParam
 } from '../state/Routes';
 
@@ -466,6 +467,8 @@ struct Index {
       UserPage({ params: param as UserParam })
     } else if (name === ROUTE_FOLLOW) {
       FollowPage()
+    } else if (name === ROUTE_ABOUT) {
+      AboutPage()
     }
   }
 
