@@ -1,0 +1,24 @@
+name = "hghub-telemetry"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+account_id = "3c4ca6657b57bd72ce62e0518e8aeb95"
+workers_dev = true
+
+# 可选：自定义域名（workers.dev 在国内可能不可达）
+# routes = [
+#   { pattern = "telemetry.example.com", custom_domain = true }
+# ]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hghub_telemetry"
+# 执行 `wrangler d1 create hghub_telemetry` 后把返回的 database_id 填到这里
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[vars]
+# 哈希盐：建议用 `openssl rand -hex 32` 生成后替换，并通过 wrangler secret 管理更安全
+HASH_SALT = "REPLACE_WITH_RANDOM_SALT"
+
+# 以下两个通过 `wrangler secret put` 配置，不要写进仓库：
+#   SHARED_SECRET  可选，配置后启用 HMAC 校验
+#   STATS_KEY      必填，/stats 查询口令
