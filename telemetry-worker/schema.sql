@@ -169,3 +169,14 @@ CREATE TABLE IF NOT EXISTS config_applies (
 
 CREATE INDEX IF NOT EXISTS idx_config_applies_version ON config_applies(config_version);
 CREATE INDEX IF NOT EXISTS idx_config_applies_last_at ON config_applies(last_at);
+
+-- 更新闸门（P4 / SPEC §5.2）：单行版本信息，/admin/release 覆盖式写入
+CREATE TABLE IF NOT EXISTS app_release (
+  id TEXT PRIMARY KEY,
+  latest TEXT NOT NULL,
+  min_version TEXT NOT NULL,
+  rollout_pct INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  url TEXT,
+  updated_at INTEGER NOT NULL
+);
