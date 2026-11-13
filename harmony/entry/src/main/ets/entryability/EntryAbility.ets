@@ -9,6 +9,7 @@ import { UserListPrefetch } from '../services/UserListPrefetch';
 import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { LineAuto } from '../services/LineAuto';
 import { CrashGuard } from '../services/CrashGuard';
+import { Net } from '../services/Net';
 import { PerfMark } from '../utils/PerfMark';
 import { ContinuationState } from '../services/ContinuationState';
 import { WidgetRefresher } from '../services/WidgetRefresher';
@@ -301,6 +302,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    // 释放 HTTP 连接池（按 host 复用的 HttpRequest 实例）。
+    Net.dispose();
     hilog.info(DOMAIN, TAG, 'EntryAbility destroyed');
   }
 }

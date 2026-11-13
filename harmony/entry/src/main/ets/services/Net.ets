@@ -105,6 +105,61 @@ function hostOfUrl(raw: string): string {
  * - 日志/错误只出现 method/opPath/host 与脱敏后的文本，不出现 token/auth_key/完整签名 URL。
  */
 export class Net {
+  /**
+   * 连接池：按 host 复用同一个 http.HttpRequest 实例。
+   *
+   * 平台行为：HttpRequest 内部持有 TCP/TLS 连接池，请求结束后连接不会立即关闭；
+   * 但如果每次请求都 createHttp() + destroy()，连接池随之销毁，复用失效。
+   * 因此这里按 host 缓存实例，请求结束不 destroy，应用退出时统一 dispose()。
+   */
+  private static pool: Map<string, http.HttpRequest> = new Map<string, http.HttpRequest>();
+  /** 池上限（按 host 计）；超出按插入顺序淘汰最旧的。 */
+  private static readonly POOL_MAX: number = 8;
+
+  /** 取（或创建）该 host 对应的 HttpRequest。 */
+  private static httpFor(host: string): http.HttpRequest {
+    const cached: http.HttpRequest | undefined = Net.pool.get(host);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (Net.pool.size >= Net.POOL_MAX) {
+      const keys: string[] = [];
+      Net.pool.forEach((_value: http.HttpRequest, key: string) => {
+        keys.push(key);
+      });
+      if (keys.length > 0) {
+        const oldest: string = keys[0];
+        const old: http.HttpRequest | undefined = Net.pool.get(oldest);
+        Net.pool.delete(oldest);
+        if (old !== undefined) {
+          try {
+            old.destroy();
+          } catch (err) {
+          }
+        }
+      }
+    }
+    const created: http.HttpRequest = http.createHttp();
+    Net.pool.set(host, created);
+    return created;
+  }
+
+  /** 释放全部连接（应用退出时调用）。 */
+  static dispose(): void {
+    Net.pool.forEach((value: http.HttpRequest) => {
+      try {
+        value.destroy();
+      } catch (err) {
+      }
+    });
+    Net.pool.clear();
+  }
+
+  /** 当前池内 host 数（诊断用）。 */
+  static poolSize(): number {
+    return Net.pool.size;
+  }
+
   static errorText(err: Object): string {
     const be = err as BusinessError;
     const message: string | undefined = be.message;
@@ -173,45 +228,49 @@ export class Net {
     if (parseHttpsUrl(url) === null) {
       throw new Error('仅支持 HTTPS 请求');
     }
-    const request = http.createHttp();
-    try {
-      const options: http.HttpRequestOptions = {
-        method: method,
-        header: headers,
-        connectTimeout: 10000,
-        readTimeout: timeoutMs,
-        expectDataType: asBytes ? http.HttpDataType.ARRAY_BUFFER : http.HttpDataType.STRING,
-        // 响应体上限：系统栈超限直接失败，避免把超大响应读进内存。
-        maxLimit: asBytes ? RESPONSE_MAX_BINARY_BYTES : RESPONSE_MAX_TEXT_BYTES
-      };
-      if (body.length > 0) {
-        options.extraData = body;
+    const host: string = hostOfUrl(url);
+    return await Net.requestOnce(url, host, method, headers, body, timeoutMs, asBytes);
+  }
+
+  /** 单次请求：复用该 host 的 HttpRequest（连接池），按传入地址族解析。 */
+  private static async requestOnce(url: string, host: string,
+    method: http.RequestMethod, headers: Record<string, string>,
+    body: string, timeoutMs: number, asBytes: boolean): Promise<RawText | RawBytes> {
+    const request: http.HttpRequest = Net.httpFor(host);
+    const options: http.HttpRequestOptions = {
+      method: method,
+      header: headers,
+      connectTimeout: 10000,
+      readTimeout: timeoutMs,
+      expectDataType: asBytes ? http.HttpDataType.ARRAY_BUFFER : http.HttpDataType.STRING,
+      // 响应体上限：系统栈超限直接失败，避免把超大响应读进内存。
+      maxLimit: asBytes ? RESPONSE_MAX_BINARY_BYTES : RESPONSE_MAX_TEXT_BYTES
+    };
+    if (body.length > 0) {
+      options.extraData = body;
+    }
+    const response: http.HttpResponse = await request.request(url, options);
+    const code: number = response.responseCode;
+    const contentType = headerValue(response.header, 'content-type');
+    if (asBytes) {
+      let bytes = new Uint8Array(0);
+      if (response.result instanceof ArrayBuffer) {
+        bytes = new Uint8Array(response.result as ArrayBuffer);
       }
-      const response: http.HttpResponse = await request.request(url, options);
-      const code: number = response.responseCode;
-      const contentType = headerValue(response.header, 'content-type');
-      if (asBytes) {
-        let bytes = new Uint8Array(0);
-        if (response.result instanceof ArrayBuffer) {
-          bytes = new Uint8Array(response.result as ArrayBuffer);
-        }
-        if (bytes.length > RESPONSE_MAX_BINARY_BYTES) {
-          throw new Error('响应内容过大');
-        }
-        return new RawBytes(code, bytes, contentType);
-      }
-      let text = '';
-      if (typeof response.result === 'string') {
-        text = response.result as string;
-      }
-      // 部分平台实现超过 maxLimit 时可能截断而非报错，这里再做一次明确校验。
-      if (text.length > RESPONSE_MAX_TEXT_BYTES) {
+      if (bytes.length > RESPONSE_MAX_BINARY_BYTES) {
         throw new Error('响应内容过大');
       }
-      return new RawText(code, text, contentType);
-    } finally {
-      request.destroy();
+      return new RawBytes(code, bytes, contentType);
     }
+    let text = '';
+    if (typeof response.result === 'string') {
+      text = response.result as string;
+    }
+    // 部分平台实现超过 maxLimit 时可能截断而非报错，这里再做一次明确校验。
+    if (text.length > RESPONSE_MAX_TEXT_BYTES) {
+      throw new Error('响应内容过大');
+    }
+    return new RawText(code, text, contentType);
   }
 
   /** 原始 GET 文本（发布页 / GitHub API / 线路探测）。 */
