@@ -20,6 +20,7 @@ import { PlayerService, SessionMeta } from '../player/PlayerService';
 import { PlayerSeekPolicy } from '../player/PlayerSeekPolicy';
 import { ContinuationState } from '../services/ContinuationState';
 import { PiPController } from '../player/PiPController';
+import { Analytics } from '../services/Analytics';
 import {
   AVCastPicker, AVCastPickerColorMode, AVCastPickerState, AVCastPickerStyle
 } from '@kit.AVSessionKit';
@@ -376,6 +377,8 @@ export struct PlayerPage {
   }
 
   aboutToAppear(): void {
+    // 匿名统计：播放页访问计数。
+    Analytics.countPage('player');
     let ids = this.params.videoIds;
     if (ids === undefined || ids === null || ids.length === 0) {
       ids = [0];

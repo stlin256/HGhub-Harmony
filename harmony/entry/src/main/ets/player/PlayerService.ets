@@ -321,6 +321,8 @@ export class PlayerService {
     if (url.length === 0) {
       throw new Error('暂无播放地址');
     }
+    // 匿名统计：本次实际取的是高清还是标准（只记计数，不记内容）。
+    Analytics.countQuality(preferHevc && PlayerQuality.hasHevc(info));
     this.cache.set(key, new PlayCacheEntry(info, Date.now()));
     return info;
   }
@@ -620,6 +622,8 @@ export class PlayerService {
     this.state = 'error';
     this.onState('error');
     PlaybackLog.warn('play.error', message + ' code=' + code);
+    // 匿名统计：播放失败按错误码分桶（不含任何内容信息）。
+    Analytics.countPlayFail(code, message);
     this.onError(message, code);
   }
 
@@ -728,6 +732,7 @@ export class PlayerService {
       } else if (state === 'completed') {
         this.saveHistory(true, true);
         this.onState('completed');
+        Analytics.countPlayComplete();
         this.onCompleted();
       } else if (state === 'stopped') {
         this.onState('stopped');
@@ -739,6 +744,8 @@ export class PlayerService {
     player.on('superResolutionChanged', (enabled: boolean) => {
       this.srActive = enabled;
       PlaybackLog.info('sr.changed', enabled ? 'on' : 'off');
+      // 匿名统计：记录设备是否支持超分、本次是否开启（每次状态变化记一次）。
+      Analytics.setSuperResolution(enabled, this.srCapable);
       this.onSuperResolutionChanged(enabled, this.srCapable);
     });
 

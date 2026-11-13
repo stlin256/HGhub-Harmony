@@ -13,6 +13,7 @@ import { Prefs } from '../services/Prefs';
 import { Api } from '../services/Api';
 import { ContinuationState, ContinuePayload } from '../services/ContinuationState';
 import { UpdateChecker } from '../services/UpdateChecker';
+import { Analytics } from '../services/Analytics';
 import { UpdateInfo } from '../models/Types';
 import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgColor, HgFont, HgSize } from '../design/HgTokens';
@@ -134,6 +135,7 @@ struct Index {
     };
     UiBus.switchTab = (index: number) => {
       this.activeIndex = index;
+      Analytics.countPage(Index.pageNameOf(index));
       try {
         this.tabsController.changeIndex(index);
       } catch (err) {
@@ -185,6 +187,20 @@ struct Index {
     WindowChrome.syncSystemBarColors(this.dark);
     this.syncNavMode();
     this.maybeShowTabletNotice();
+  }
+
+  /** Tab 下标 → 匿名统计用的页面名。 */
+  private static pageNameOf(index: number): string {
+    if (index === 1) {
+      return 'search';
+    }
+    if (index === 2) {
+      return 'category';
+    }
+    if (index === 3) {
+      return 'profile';
+    }
+    return 'home';
   }
 
   /** 弹出更新弹窗：每次冷启动至多一次。 */
@@ -436,6 +452,7 @@ struct Index {
       // 先更新高亮，再交给 controller 做 240ms 页面切换动画。
       this.activeIndex = index;
       this.tabsController.changeIndex(index);
+      Analytics.countPage(Index.pageNameOf(index));
     })
   }
 
