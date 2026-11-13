@@ -54,8 +54,6 @@ Comfortable to watch, and steady:
 | Dark is the design baseline; the player stays dark and text on video keeps scrim contrast | Line latency is visible; consecutive failures switch lines automatically, and mirrors can return to the primary |
 | Floating immersive tab bar with system material; content extends behind it | Crash / playback / performance diagnostics stay on-device and export as a zip for issues |
 
-> **AI super resolution note**: the toggle and the in-player hint are kept for the experience only; actual system super resolution is temporarily disabled because it corrupts the picture on some devices.
-
 **Also included**: sharing goes through the system share sheet (falling back to copying the link), and a shared link in the clipboard can launch playback in one tap. The network layer reuses connections per host to cut TCP/TLS handshakes and prefers IPv6 when the target supports it. An `HD`/`SD` badge appears next to the title when an HEVC source exists — tap to switch while keeping your position. Dragging the progress bar to the end auto-plays the next episode. The lock screen and Control Center can control playback, and picture-in-picture keeps it going on the desktop. Playback context can continue onto another HarmonyOS device, and same-network devices support casting. Home-screen cards cover 2×2 continue-watching (large cover with a top label) and a 2×4 favorites shelf (3:4 portrait covers). Topic collections, live trending searches, a follow feed and user profiles are all in place. On cold start the app checks for updates in the background and shows a single dialog when one is found — tap "Open download link" to go straight to the release page.
 
 ## Tablet / landscape / split view
@@ -104,8 +102,6 @@ To see how it works, open **Settings → Recommendations**: "Recommendation data
 | The HdsTabs bar animates page switches over 240ms, and player chrome fades in/out over 140/120ms. | Full-screen playback hides the status bar and restores it on exit; safe areas and immersive layout are handled uniformly. |
 
 > Main interactive elements carry accessibility labels (`accessibilityText`) and work with screen readers and system accessibility services.
-
-> **Remote delivery**: feature flags, thresholds, copy, UI parameters, settings structure and notices can be delivered from the server and rolled out per device; without a payload the app keeps its default behavior. See [REMOTE-CONFIG-SPEC](docs/harmony/REMOTE-CONFIG-SPEC.md).
 
 ## Tech stack
 
