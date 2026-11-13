@@ -71,6 +71,29 @@ CREATE TABLE IF NOT EXISTS daily_stats (
 
 CREATE INDEX IF NOT EXISTS idx_daily_stats_day ON daily_stats(day);
 
+-- 崩溃堆栈聚合（按指纹去重）
+CREATE TABLE IF NOT EXISTS crash_groups (
+  fingerprint      TEXT PRIMARY KEY,
+  type             TEXT NOT NULL,
+  reason           TEXT,
+  message          TEXT,
+  stack            TEXT,
+  thread           TEXT,
+  count            INTEGER NOT NULL DEFAULT 1,
+  first_seen_epoch INTEGER NOT NULL,
+  last_seen_epoch  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_crash_groups_count     ON crash_groups(count);
+CREATE INDEX IF NOT EXISTS idx_crash_groups_last_seen ON crash_groups(last_seen_epoch);
+
+CREATE TABLE IF NOT EXISTS crash_versions (
+  fingerprint TEXT NOT NULL,
+  version     TEXT NOT NULL,
+  count       INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (fingerprint, version)
+);
+
 -- 限流桶：bucket = 'ip:<sha256(ip+salt)>:<小时>' 或 'dev:<id_hash>:<天>'
 CREATE TABLE IF NOT EXISTS rate_limits (
   bucket     TEXT PRIMARY KEY,
