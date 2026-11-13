@@ -12,6 +12,8 @@ import { CrashGuard } from '../services/CrashGuard';
 import { PowerGuard } from '../services/PowerGuard';
 import { Analytics } from '../services/Analytics';
 import { PlaybackLog } from '../player/PlaybackLog';
+import { ClipboardLink } from '../services/ClipboardLink';
+import { UiBus } from '../services/UiBus';
 import { Net } from '../services/Net';
 import { PerfMark } from '../utils/PerfMark';
 import { ContinuationState } from '../services/ContinuationState';
@@ -139,6 +141,15 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
     Analytics.onForeground();
+    // 剪贴板快捷拉起：延迟读取，避开首帧；内部有 2 分钟节流与同链接去重。
+    setTimeout(() => {
+      ClipboardLink.detect().then((videoId: number) => {
+        if (videoId > 0) {
+          UiBus.onClipboardLink(videoId);
+        }
+      }).catch(() => {
+      });
+    }, 1200);
   }
 
   onBackground(): void {
