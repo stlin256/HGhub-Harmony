@@ -77,6 +77,8 @@ interface RemotePayload {
   settings?: Object | null;
   /** 远程通知数组（SPEC §12，原样透传）。 */
   notices?: Object[] | null;
+  /** 关于页远程内容（原样透传，AboutContent 校验）。 */
+  about?: Object | null;
   assets?: Object | null;
   sig?: string;
 }
@@ -369,7 +371,8 @@ export class RemoteConfig {
       configVersion: configVersion,
       ui: payload.ui,
       settings: payload.settings,
-      notices: payload.notices
+      notices: payload.notices,
+      about: payload.about
     };
     ConfigRegistry.applyRemote(values, meta, recordChanges);
   }

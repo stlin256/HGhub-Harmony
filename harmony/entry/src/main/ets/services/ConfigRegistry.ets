@@ -101,6 +101,8 @@ export interface RemoteConfigMeta {
   settings?: Object | null;
   /** 远程通知数组（原样保留，P10 消费）。 */
   notices?: Object[] | null;
+  /** 关于页内容段（原样保留，AboutContent 消费）。 */
+  about?: Object | null;
 }
 
 /**
@@ -178,6 +180,7 @@ export class ConfigKey {
   static readonly CATALOG_INJECT_DELAY_MS: string = 'catalog_inject_delay_ms';
   static readonly CATALOG_INJECT_COUNT: string = 'catalog_inject_count';
   static readonly LOAD_MORE_THRESHOLD: string = 'load_more_threshold';
+  static readonly NOTICE_DELAY_MS: string = 'notice_delay_ms';
 }
 
 /** 本地覆盖持久化键（测试变体调试菜单写入）。 */
@@ -321,7 +324,9 @@ const DEFS: ConfigDef[] = [
     '随包目录注入延迟（毫秒，HomePage.CATALOG_INJECT_DELAY）'),
   threshold(ConfigKey.CATALOG_INJECT_COUNT, 120, 0, 500, '随包目录一次注入条数（HomePage.CATALOG_INJECT_COUNT）'),
   threshold(ConfigKey.LOAD_MORE_THRESHOLD, 300, 0, 2000,
-    '距列表底部触发加载更多的阈值（vp，ProfilePage.LOAD_MORE_THRESHOLD）')
+    '距列表底部触发加载更多的阈值（vp，ProfilePage.LOAD_MORE_THRESHOLD）'),
+  threshold(ConfigKey.NOTICE_DELAY_MS, 2000, 0, 60000,
+    '启动远程通知延迟（毫秒，Index 默认 2000）')
 ];
 
 /** key → 定义索引（模块加载时构建一次）。 */
@@ -418,6 +423,8 @@ export class ConfigRegistry {
   private static settingsValue: Object | null = null;
   /** 远程通知数组（原样保留）。 */
   private static noticeList: Object[] = [];
+  /** 关于页远程内容（原样保留，由 AboutContent 校验/合并）。 */
+  private static aboutValue: Object | null = null;
   /** 待上报的配置变化记录（FIFO，上限 MAX_CHANGES）。 */
   private static changes: ConfigChange[] = [];
 
@@ -629,6 +636,7 @@ export class ConfigRegistry {
     ConfigRegistry.uiEntries = {};
     ConfigRegistry.settingsValue = null;
     ConfigRegistry.noticeList = [];
+    ConfigRegistry.aboutValue = null;
   }
 
   /** 取走待上报的配置变化记录（取走即清空，供 P13 上报）。 */
@@ -664,6 +672,10 @@ export class ConfigRegistry {
   }
 
   /** 远程通知数组（原样返回副本；未下发返回空数组）。 */
+  static about(): Object | null {
+    return ConfigRegistry.aboutValue;
+  }
+
   static notices(): Object[] {
     return ConfigRegistry.noticeList.slice(0);
   }
@@ -687,6 +699,7 @@ export class ConfigRegistry {
     ConfigRegistry.uiEntries = {};
     ConfigRegistry.settingsValue = null;
     ConfigRegistry.noticeList = [];
+    ConfigRegistry.aboutValue = null;
     if (meta === undefined || meta === null) {
       return;
     }
@@ -703,6 +716,10 @@ export class ConfigRegistry {
     const notices: Object[] | null | undefined = meta.notices;
     if (notices !== undefined && notices !== null && Array.isArray(notices)) {
       ConfigRegistry.noticeList = notices.slice(0);
+    }
+    const about: Object | null | undefined = meta.about;
+    if (about !== undefined && about !== null && typeof about === 'object' && !Array.isArray(about)) {
+      ConfigRegistry.aboutValue = about;
     }
   }
 
