@@ -5,6 +5,7 @@ import { PerfMark } from '../utils/PerfMark';
 import { K_LINE_BASE, Lines } from '../services/Lines';
 import { Ipv6Preference } from '../services/Ipv6Preference';
 import { PowerGuard } from '../services/PowerGuard';
+import { DiagExport } from '../services/DiagExport';
 import { ImageCache } from '../services/ImageCache';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
@@ -62,6 +63,8 @@ export struct SettingsPage {
   @State superResolution: boolean = true;
   /** 匿名使用统计开关（默认开）。 */
   @State analytics: boolean = true;
+  /** 诊断日志导出中（防连点）。 */
+  @State exporting: boolean = false;
   @State multiSource: boolean = true;
   /** IPv6 优先（默认开）。 */
   @State ipv6Prefer: boolean = true;
@@ -270,15 +273,39 @@ export struct SettingsPage {
     );
   }
 
-  /** 复制本地崩溃记录到剪贴板（不上报，仅便于反馈）。 */
-  private async copyCrashLog(): Promise<void> {
-    const text: string = CrashGuard.exportText();
+  /** 导出全量诊断日志压缩包（崩溃/播放/统计/设置/线路/性能），供用户上传到 issue。 */
+  private async exportDiagLog(): Promise<void> {
+    if (this.exporting) {
+      return;
+    }
+    this.exporting = true;
     try {
-      const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
-      await pasteboard.getSystemPasteboard().setData(data);
-      UiBus.toastOk(this.crashCount > 0 ? '崩溃日志已复制' : '暂无崩溃记录');
+      const path: string = await DiagExport.exportZip();
+      if (path.length > 0) {
+        UiBus.toastOk('诊断日志已导出');
+      } else {
+        UiBus.toast('已取消导出');
+      }
     } catch (err) {
-      UiBus.toast('复制失败，请稍后重试');
+      UiBus.toast('导出失败，请稍后重试');
+    } finally {
+      this.exporting = false;
+    }
+  }
+
+  /** 反馈：打开项目 Issue 页并复制链接。 */
+  private openFeedback(): void {
+    const url: string = 'https://github.com/stlin256/HGhub-Harmony/issues/new';
+    Api.openUrl(url);
+    try {
+      const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, url);
+      pasteboard.getSystemPasteboard().setData(data).then(() => {
+        UiBus.toastOk('前往 Issue 反馈（链接已复制）');
+      }).catch(() => {
+        UiBus.toastOk('前往 Issue 反馈');
+      });
+    } catch (err) {
+      UiBus.toastOk('前往 Issue 反馈');
     }
   }
 
@@ -973,12 +1000,15 @@ export struct SettingsPage {
         Row({ space: HgSpace.m }) {
           this.RowIcon($r('sys.symbol.exclamationmark_triangle'))
           Column({ space: 2 }) {
-            Text('崩溃日志')
+            Text('导出诊断日志')
               .fontSize(HgFont.rowTitle)
               .fontColor(HgColor.textPrimary(this.dark))
-            Text(this.crashCount > 0 ? this.crashCount + ' 条本地记录 · 点击复制' : '暂无记录 · 仅存本机')
+            Text(this.exporting ? '正在打包…' :
+              (this.crashCount > 0 ? this.crashCount + ' 条崩溃 · ' : '') +
+              '打包播放/统计/设置/线路/性能为 zip')
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))
+              .maxLines(2)
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
@@ -986,9 +1016,38 @@ export struct SettingsPage {
         }
         .width('100%')
         .height(HgSize.listRowDouble)
-        .accessibilityText('崩溃日志')
+        .accessibilityText('导出诊断日志')
         .onClick(() => {
-          this.copyCrashLog();
+          this.exportDiagLog();
+        })
+      }
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
+        Row({ space: HgSpace.m }) {
+          this.RowIcon($r('sys.symbol.message'))
+          Column({ space: 2 }) {
+            Text('反馈')
+              .fontSize(HgFont.rowTitle)
+              .fontColor(HgColor.textPrimary(this.dark))
+            Text('打开项目 Issue 页（链接会复制到剪贴板）')
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.textTertiary(this.dark))
+              .maxLines(2)
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          this.Chevron()
+        }
+        .width('100%')
+        .height(HgSize.listRowDouble)
+        .accessibilityText('反馈，打开 Issue 页面')
+        .onClick(() => {
+          this.openFeedback();
         })
       }
 

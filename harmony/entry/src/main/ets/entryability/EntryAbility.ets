@@ -11,6 +11,7 @@ import { LineAuto } from '../services/LineAuto';
 import { CrashGuard } from '../services/CrashGuard';
 import { PowerGuard } from '../services/PowerGuard';
 import { Analytics } from '../services/Analytics';
+import { PlaybackLog } from '../player/PlaybackLog';
 import { Net } from '../services/Net';
 import { PerfMark } from '../utils/PerfMark';
 import { ContinuationState } from '../services/ContinuationState';
@@ -144,6 +145,8 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, false);
     // 结算本次前台时长（匿名统计，设置页可关）。
     Analytics.onBackground();
+    // 播放诊断日志落盘（避免频繁写 preferences，只在后台时写一次）。
+    PlaybackLog.persist();
     // 兜底：播放页可能为了全屏隐藏了状态栏，退到后台时统一走 WindowChrome 串行队列恢复，避免竞态。
     WindowChrome.showStatusBar();
   }
@@ -161,6 +164,8 @@ export default class EntryAbility extends UIAbility {
       CrashGuard.init();
       // 电源守卫：跟踪省电模式与电量，供 AI 超分自动降级。
       PowerGuard.init();
+      // 播放诊断日志：恢复上次缓冲（导出诊断包时用）。
+      PlaybackLog.restore();
       // 匿名使用统计：随机 UUID + 版本/型号 + 当日聚合（设置页可关）。
       Analytics.onLaunch();
       // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
