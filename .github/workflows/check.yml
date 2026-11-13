@@ -67,5 +67,5 @@ jobs:
       - name: 变体检查（禁止测试变体入库）
         run: python3 scripts/check/variant_check.py
 
-      - name: 配置覆盖率检查（未注册常量告警）
-        run: python3 scripts/check/config_coverage.py
+      - name: 配置覆盖率检查（未注册常量即失败）
+        run: python3 scripts/check/config_coverage.py --strict

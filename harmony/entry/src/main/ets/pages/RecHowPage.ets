@@ -20,6 +20,7 @@ const REC_HOW_STEPS: RecHowStep[] = [
 ];
 
 /** 「推荐说明」编号圆点 / 连接线的尺寸（vp）。 */
+// @config-exempt: UI 尺寸（推荐说明步骤圆点 vp）
 const REC_STEP_DOT: number = 24;
 const REC_STEP_LINE: number = 2;
 

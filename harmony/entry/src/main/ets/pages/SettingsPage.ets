@@ -31,6 +31,7 @@ import { I18n } from '../utils/I18n';
 /** 减少动态效果开关的 AppStorage 键：与 HgMotion.reduced() 共用，全局生效。 */
 const K_REDUCE_MOTION: string = 'hgReduceMotion';
 /** 远程新增滑杆行宽度（vp）。 */
+// @config-exempt: UI 尺寸（设置页滑杆宽度 vp）
 const SLIDER_WIDTH: number = 140;
 
 @Component

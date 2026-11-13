@@ -23,9 +23,8 @@ import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 // @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 12;
 const FETCH_CONCURRENCY: number = 4;
-/** 距列表底部小于该值（vp）时触发加载更多。 */
-const LOAD_MORE_THRESHOLD: number = 300;
 /** 换数据后等一帧再对齐滚动位置（此时列表透明度仍很低，校正不可见）。 */
+// @config-exempt: UI 调度（换数据后滚动位置校正延迟），非业务阈值
 const SCROLL_RESTORE_DELAY_MS: number = 32;
 
 /** 我的：资料卡 + 收藏/历史双 Tab（本地数据 + 详情 N+1 并发拉取，失败跳过）+ 设置入口。 */
@@ -575,7 +574,7 @@ export struct ProfilePage {
   }
 
   /**
-   * 滚动接近底部（剩余 < LOAD_MORE_THRESHOLD vp）时加载下一批；
+   * 滚动接近底部（剩余 < load_more_threshold，默认 300vp）时加载下一批；
    * 仅当还有未加载 id、没有并发加载、且不处于切 Tab 过渡/滚动恢复窗口时触发。
    */
   private maybeLoadMore(): void {
@@ -594,7 +593,7 @@ export struct ProfilePage {
     try {
       const y: number = this.scroller.currentOffset().yOffset;
       const remain: number = this.contentHeight - this.viewportHeight - y;
-      if (remain <= LOAD_MORE_THRESHOLD) {
+      if (remain <= ConfigRegistry.getNumber(ConfigKey.LOAD_MORE_THRESHOLD)) {
         this.loadMore();
       }
     } catch (err) {

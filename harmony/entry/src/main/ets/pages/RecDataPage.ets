@@ -13,6 +13,7 @@ import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
 import { I18n } from '../utils/I18n';
 
 /** 剪贴板导入的画像 JSON 大小上限（画像最多 2000 条标签，64KB 足够且防止超大输入拖垮解析）。 */
+// @config-exempt: 安全上限（画像 JSON 解析上限），放宽有风险
 const PROFILE_JSON_MAX: number = 64 * 1024;
 
 /**

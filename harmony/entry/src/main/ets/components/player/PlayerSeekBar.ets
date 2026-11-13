@@ -3,6 +3,7 @@ import { HgMotion } from '../../design/HgMotion';
 import { fmtTime } from '../../utils/Format';
 
 /** seek 松手后防连点窗口（ms）：DESIGN §4.8.5 要求 180ms 内不接受第二次拖动。 */
+// @config-exempt: UI 交互（seek 防连点窗口）
 const SEEK_REARM_MS: number = 180;
 
 /**
