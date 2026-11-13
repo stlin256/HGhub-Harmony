@@ -91,6 +91,10 @@ const ASSET_CACHE_CONTROL = 'public, max-age=300';
 const MAX_ASSET_ADMIN_BODY_BYTES = 1048576;
 const ASSET_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ASSET_SHA_RE = /^[0-9a-f]{64}$/;
+/** 灰度 / A-B（P7 / SPEC §6）：bucket 0-99 分十档统计，A/B 固定 2 组。 */
+const ROLLOUT_BUCKETS = 100;
+const ROLLOUT_BANDS = 10;
+const AB_GROUPS = 2;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VERSION_RE = /^[0-9]{1,3}(\.[0-9]{1,3}){0,3}$/;
@@ -304,10 +308,10 @@ async function handleReport(request, env, ctx) {
            cpu_pct, cpu_peak_pct, thermal_level, power_mw,
            act_share, act_like, act_unlike, act_fav, act_unfav, act_search,
            act_ep_switch, act_rate, act_cast, act_pip, act_comment, act_follow,
-           act_topic, act_user)
+           act_topic, act_user, ab_bucket, ab_group)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(day, id_hash) DO UPDATE SET
            sessions = daily_stats.sessions + excluded.sessions,
            duration_sec = daily_stats.duration_sec + excluded.duration_sec,
@@ -367,7 +371,11 @@ async function handleReport(request, env, ctx) {
            act_comment = daily_stats.act_comment + excluded.act_comment,
            act_follow = daily_stats.act_follow + excluded.act_follow,
            act_topic = daily_stats.act_topic + excluded.act_topic,
-           act_user = daily_stats.act_user + excluded.act_user`
+           act_user = daily_stats.act_user + excluded.act_user,
+           ab_bucket = CASE WHEN daily_stats.ab_bucket >= 0
+                            THEN daily_stats.ab_bucket ELSE excluded.ab_bucket END,
+           ab_group = CASE WHEN daily_stats.ab_group >= 0
+                           THEN daily_stats.ab_group ELSE excluded.ab_group END`
       ).bind(
         stats.day, idHash, stats.sessions, stats.durationSec, stats.vv, stats.crash,
         stats.startupP50, stats.startupP90, stats.startupSum, stats.startupCount,
@@ -382,7 +390,7 @@ async function handleReport(request, env, ctx) {
         stats.cpuPct, stats.cpuPeakPct, stats.thermalLevel, stats.powerMw,
         stats.actShare, stats.actLike, stats.actUnlike, stats.actFav, stats.actUnfav, stats.actSearch,
         stats.actEpSwitch, stats.actRate, stats.actCast, stats.actPip, stats.actComment, stats.actFollow,
-        stats.actTopic, stats.actUser
+        stats.actTopic, stats.actUser, stats.abBucket, stats.abGroup
       ).run();
     }
   } catch {
@@ -1489,6 +1497,137 @@ async function handleStats(url, env, preAuthorized) {
     } catch {
     }
 
+    // 灰度分布 / A-B 对比（P7 / SPEC §6）：迁移 0013 未执行时保持空段，不影响既有统计。
+    let rolloutRows = { results: [] };
+    let abRows = { results: [] };
+    let releaseRow = null;
+    try {
+      rolloutRows = await env.DB.prepare(
+        `SELECT ab_bucket AS bucket, COUNT(DISTINCT id_hash) AS devices
+           FROM daily_stats
+          WHERE day >= ? AND ab_bucket >= 0
+          GROUP BY ab_bucket
+          ORDER BY ab_bucket ASC`
+      ).bind(fromDay).all();
+      abRows = await env.DB.prepare(
+        `SELECT ab_group AS grp,
+                COUNT(DISTINCT id_hash) AS devices,
+                COALESCE(SUM(vv), 0) AS vv,
+                COALESCE(SUM(crash), 0) AS crash,
+                COALESCE(SUM(play_fail), 0) AS play_fail,
+                COALESCE(SUM(duration_sec), 0) AS duration_sec,
+                COALESCE(SUM(startup_ms_sum), 0) AS startup_ms_sum,
+                COALESCE(SUM(startup_ms_count), 0) AS startup_ms_count
+           FROM daily_stats
+          WHERE day >= ? AND ab_group >= 0
+          GROUP BY ab_group
+          ORDER BY ab_group ASC`
+      ).bind(fromDay).all();
+    } catch {
+    }
+    try {
+      releaseRow = await env.DB.prepare(
+        'SELECT rollout_pct FROM app_release WHERE id = ? ORDER BY updated_at DESC LIMIT 1'
+      ).bind(RELEASE_ROW_ID).first();
+    } catch {
+    }
+
+    // 灰度：只返回非零 bucket；十档覆盖度 = 档内设备数 / 有效设备数。
+    const bucketCounts = new Map();
+    let rolloutDevices = 0;
+    const rolloutResultRows = rolloutRows && rolloutRows.results ? rolloutRows.results : [];
+    for (const row of rolloutResultRows) {
+      const bucketNo = toSafeInt(row.bucket, -1, -1, ROLLOUT_BUCKETS - 1);
+      const devices = toSafeInt(row.devices, 0, 0, MAX_COUNTER);
+      if (bucketNo < 0 || devices <= 0) {
+        continue;
+      }
+      bucketCounts.set(bucketNo, devices);
+      rolloutDevices += devices;
+    }
+    const rolloutBuckets = [];
+    for (let i = 0; i < ROLLOUT_BUCKETS; i++) {
+      const devices = bucketCounts.get(i) || 0;
+      if (devices > 0) {
+        rolloutBuckets.push({ bucket: i, devices });
+      }
+    }
+    const bandSize = ROLLOUT_BUCKETS / ROLLOUT_BANDS;
+    const rolloutCoverage = {};
+    for (let band = 0; band < ROLLOUT_BANDS; band++) {
+      const from = band * bandSize;
+      let bandDevices = 0;
+      for (let i = from; i < from + bandSize; i++) {
+        bandDevices += bucketCounts.get(i) || 0;
+      }
+      rolloutCoverage[`${from}-${from + bandSize - 1}`] =
+        rolloutDevices > 0 ? Math.round((bandDevices / rolloutDevices) * 10000) / 10000 : 0;
+    }
+    const currentRolloutPct = releaseRow && typeof releaseRow.rollout_pct === 'number'
+      ? toSafeInt(releaseRow.rollout_pct, 0, 0, 100) : 0;
+    const rollout = {
+      buckets: rolloutBuckets,
+      coverage: rolloutCoverage,
+      current_pct: currentRolloutPct,
+      devices: rolloutDevices,
+    };
+
+    // A/B：两组设备数 / VV / 崩溃 / 失败，以及核心指标对比（B 相对 A 的 delta%）。
+    const abGroupStats = new Map();
+    const abResultRows = abRows && abRows.results ? abRows.results : [];
+    for (const row of abResultRows) {
+      const grp = toSafeInt(row.grp, -1, -1, AB_GROUPS - 1);
+      const devices = toSafeInt(row.devices, 0, 0, MAX_COUNTER);
+      if (grp < 0 || devices <= 0) {
+        continue;
+      }
+      abGroupStats.set(grp, {
+        devices,
+        vv: toSafeInt(row.vv, 0, 0, MAX_COUNTER * 100),
+        crash: toSafeInt(row.crash, 0, 0, MAX_COUNTER * 100),
+        playFail: toSafeInt(row.play_fail, 0, 0, MAX_COUNTER * 100),
+        durationSec: toSafeInt(row.duration_sec, 0, 0, MAX_COUNTER * 100),
+        startupSum: toSafeInt(row.startup_ms_sum, 0, 0, MAX_COUNTER * 100),
+        startupCount: toSafeInt(row.startup_ms_count, 0, 0, MAX_COUNTER * 100),
+      });
+    }
+    const abGroups = [];
+    for (let g = 0; g < AB_GROUPS; g++) {
+      const s = abGroupStats.get(g);
+      if (!s) {
+        continue;
+      }
+      abGroups.push({ group: g, devices: s.devices, vv: s.vv, crash: s.crash, play_fail: s.playFail });
+    }
+    const abCompare = [];
+    const groupA = abGroupStats.get(0);
+    const groupB = abGroupStats.get(1);
+    if (groupA && groupB) {
+      const rate = (a, b) => (b > 0 ? (a / b) * 100 : 0);
+      const perDevice = (v, d) => (d > 0 ? v / d : 0);
+      const startupAvg = (s) => (s.startupCount > 0 ? s.startupSum / s.startupCount : 0);
+      const metricDefs = [
+        { metric: 'vv_per_device', a: perDevice(groupA.vv, groupA.devices), b: perDevice(groupB.vv, groupB.devices), decimals: 1 },
+        { metric: 'crash_rate', a: rate(groupA.crash, groupA.vv), b: rate(groupB.crash, groupB.vv), decimals: 2 },
+        { metric: 'play_fail_rate', a: rate(groupA.playFail, groupA.vv + groupA.playFail), b: rate(groupB.playFail, groupB.vv + groupB.playFail), decimals: 2 },
+        { metric: 'startup_p50_ms', a: startupAvg(groupA), b: startupAvg(groupB), decimals: 0 },
+        { metric: 'duration_per_device', a: perDevice(groupA.durationSec, groupA.devices), b: perDevice(groupB.durationSec, groupB.devices), decimals: 1 },
+      ];
+      for (const m of metricDefs) {
+        const factor = Math.pow(10, m.decimals);
+        const a = Math.round(m.a * factor) / factor;
+        const b = Math.round(m.b * factor) / factor;
+        let deltaPct = 0;
+        if (a > 0) {
+          deltaPct = Math.round(((b - a) / a) * 1000) / 10;
+        } else if (b > 0) {
+          deltaPct = 100;
+        }
+        abCompare.push({ metric: m.metric, a, b, delta_pct: deltaPct });
+      }
+    }
+    const ab = { groups: abGroups, compare: abCompare };
+
     const totalDevices = total ? total.n : 0;
     const sumSessions = totals ? totals.sessions : 0;
     const sumDuration = totals ? totals.duration_sec : 0;
@@ -1674,6 +1813,10 @@ async function handleStats(url, env, preAuthorized) {
         profile: totals ? totals.page_profile : 0,
         player: totals ? totals.page_player : 0,
       },
+      // 灰度分布（C3 / SPEC §6）：bucket 0-99 十档 + 当前放量线
+      rollout,
+      // A/B 对比（C4 / SPEC §6）：两组核心指标并排 + delta%
+      ab,
       avg_duration_sec_per_session: sumSessions > 0 ? Math.round(sumDuration / sumSessions) : 0,
       avg_vv_per_device: totalDevices > 0 ? Math.round((sumVv / totalDevices) * 10) / 10 : 0,
       window_days: days,
@@ -1765,6 +1908,9 @@ function parseStats(raw) {
     actFollow: n(raw.act_follow),
     actTopic: n(raw.act_topic),
     actUser: n(raw.act_user),
+    // 灰度 / A/B（SPEC §6）：-1 表示旧客户端未上报（统计时排除，不落到 bucket 0）。
+    abBucket: toSafeInt(raw.ab_bucket, -1, -1, ROLLOUT_BUCKETS - 1),
+    abGroup: toSafeInt(raw.ab_group, -1, -1, AB_GROUPS - 1),
   };
 }
 

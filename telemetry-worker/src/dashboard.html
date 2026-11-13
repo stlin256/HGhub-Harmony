@@ -188,6 +188,47 @@
   .legend button[aria-pressed="false"]{ opacity:.35; }
   .legend .swatch{ width:10px; height:10px; display:inline-block; }
 
+  /* 灰度分布 */
+  .rollout{ position:relative; padding:8px 0 0; }
+  .rollout-cols{
+    display:flex; align-items:flex-end; gap:6px; height:180px;
+    border-bottom:1px solid var(--rule-strong); position:relative;
+  }
+  .rollout-col{
+    flex:1; display:flex; flex-direction:column; justify-content:flex-end;
+    align-items:center; gap:6px; height:100%; position:relative;
+  }
+  .rollout-col .bar{
+    width:100%; background:var(--accent); min-height:2px;
+    transform-origin:bottom center; animation:growY var(--dur-base) var(--ease) both;
+    transition:opacity var(--dur-fast) var(--ease);
+  }
+  .rollout-col.off .bar{ background:var(--rule); }
+  .rollout-col .cap{ font-size:10px; color:var(--faint); white-space:nowrap; }
+  .rollout-col .val{ font-size:10px; color:var(--muted); position:absolute; top:-2px; }
+  .rollout-line{
+    position:absolute; top:0; bottom:22px; border-left:1px dashed var(--danger);
+    pointer-events:none;
+  }
+  .rollout-line span{
+    position:absolute; top:-2px; left:4px; font-size:10px; color:var(--danger);
+    white-space:nowrap; background:var(--paper); padding:0 2px;
+  }
+  @keyframes growY{ from{ transform:scaleY(0); } to{ transform:scaleY(1); } }
+  .rollout-legend{
+    display:flex; gap:16px; flex-wrap:wrap; margin-top:10px;
+    font-size:11px; color:var(--muted);
+  }
+  .rollout-legend .swatch{ width:10px; height:10px; display:inline-block; margin-right:6px; }
+
+  /* A/B 对比 */
+  .ab-table td, .ab-table th{ text-align:right; }
+  .ab-table td:first-child, .ab-table th:first-child{ text-align:left; }
+  .ab-delta{ font-weight:600; font-variant-numeric:tabular-nums; }
+  .ab-delta.up{ color:var(--ok); }
+  .ab-delta.down{ color:var(--danger); }
+  .ab-delta.flat{ color:var(--faint); }
+
   /* 状态 */
   .state{ padding:64px 0; text-align:center; color:var(--muted); font-size:13px; }
   .state.error{ color:var(--danger); }
@@ -279,6 +320,10 @@
   function fmtExact(n){
     if (n === null || n === undefined || isNaN(n)) return '—';
     return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+  function fmtFixed(n, digits){
+    if (n === null || n === undefined || isNaN(n)) return '—';
+    return Number(n).toFixed(digits === undefined ? 1 : digits);
   }
   function fmtDur(sec){
     if (!sec || sec <= 0) return '0s';
@@ -540,6 +585,16 @@
     var osItems = (d.by_os || []).map(function(r){ return { name: r.os, value: r.n }; });
     grid.appendChild(section('系统版本', osItems.length + ' 种', barList(osItems, { limit: 8 }), 'col-6'));
 
+    /* 灰度分布（C3 / SPEC §6） */
+    var ro = d.rollout || { buckets: [], coverage: {}, current_pct: 0, devices: 0 };
+    grid.appendChild(section('灰度分布',
+      'bucket 0-99 十档 · 有效设备 ' + fmtExact(ro.devices || 0) + ' 台 · 当前放量线 ' +
+        (ro.current_pct || 0) + '%',
+      rolloutPanel(d), 'col-12'));
+
+    /* A/B 对比（C4 / SPEC §6） */
+    grid.appendChild(section('A/B 对比', 'A 组 vs B 组 · Δ 为 B 相对 A', abPanel(d), 'col-12'));
+
     /* 播放失败分桶 */
     var fb = d.playback.fail_breakdown || {};
     var failItems = [
@@ -791,6 +846,105 @@
     html.push('</tbody></table>');
     wrap.innerHTML = html.join('');
     box.appendChild(wrap);
+    return box;
+  }
+
+  /* ── 灰度分布（C3 / SPEC §6）────────────── */
+
+  function rolloutPanel(d){
+    var r = d.rollout || { buckets: [], coverage: {}, current_pct: 0, devices: 0 };
+    var buckets = r.buckets || [];
+    var counts = [];
+    var i;
+    for (i = 0; i < 10; i++){ counts.push(0); }
+    buckets.forEach(function(b){
+      var idx = Math.floor((b.bucket || 0) / 10);
+      if (idx >= 0 && idx < 10){ counts[idx] += (b.devices || 0); }
+    });
+    var max = 1;
+    counts.forEach(function(v){ if (v > max){ max = v; } });
+    var pct = Math.max(0, Math.min(100, r.current_pct || 0));
+    var box = document.createElement('div');
+    box.className = 'rollout';
+    var cols = '<div class="rollout-cols">';
+    for (i = 0; i < 10; i++){
+      var from = i * 10;
+      // 该档起点在放量线内则视为「已放量」；pct=0 表示没有放量线。
+      var active = pct > 0 && from < pct;
+      var h = Math.round((counts[i] / max) * 100);
+      cols += '<div class="rollout-col' + (active ? '' : ' off') +
+        '" title="bucket ' + from + '-' + (from + 9) + '：' + counts[i] + ' 台">' +
+        '<span class="val">' + (counts[i] > 0 ? fmtExact(counts[i]) : '') + '</span>' +
+        '<span class="bar" style="height:' + Math.max(h, 1) + '%"></span>' +
+        '<span class="cap">' + from + '-' + (from + 9) + '</span>' +
+        '</div>';
+    }
+    if (pct > 0){
+      cols += '<div class="rollout-line" style="left:' + pct + '%"><span>放量线 ' + pct + '%</span></div>';
+    }
+    cols += '</div>';
+    var cov = r.coverage || {};
+    var covText = Object.keys(cov).map(function(k){
+      return k + ' ' + fmtFixed((cov[k] || 0) * 100, 1) + '%';
+    }).join(' · ');
+    box.innerHTML = cols +
+      '<div class="rollout-legend">' +
+        '<span><span class="swatch" style="background:var(--accent)"></span>放量线内</span>' +
+        '<span><span class="swatch" style="background:var(--rule)"></span>放量线外</span>' +
+        '<span>有效设备 ' + fmtExact(r.devices || 0) + ' 台</span>' +
+      '</div>' +
+      '<div class="rollout-legend"><span>' + esc(covText || '暂无灰度数据') + '</span></div>';
+    return box;
+  }
+
+  /* ── A/B 对比（C4 / SPEC §6）────────────── */
+
+  var AB_METRICS = {
+    vv_per_device: { label:'人均 VV', unit:'次', better:'up', digits:1 },
+    crash_rate: { label:'崩溃率', unit:'%', better:'down', digits:2 },
+    play_fail_rate: { label:'播放失败率', unit:'%', better:'down', digits:2 },
+    startup_p50_ms: { label:'启动耗时', unit:'ms', better:'down', digits:0 },
+    duration_per_device: { label:'人均时长', unit:'s', better:'up', digits:1 }
+  };
+
+  function abPanel(d){
+    var ab = d.ab || { groups: [], compare: [] };
+    var groups = ab.groups || [];
+    var compare = ab.compare || [];
+    var box = document.createElement('div');
+    if (!groups.length || !compare.length){
+      box.innerHTML = '<div class="state" style="padding:24px 0">暂无 A/B 数据（需客户端上报 ab_bucket / ab_group）</div>';
+      return box;
+    }
+    var g0 = null;
+    var g1 = null;
+    groups.forEach(function(g){
+      if (g.group === 0){ g0 = g; }
+      if (g.group === 1){ g1 = g; }
+    });
+    var html = '<div class="table-wrap"><table class="ab-table"><thead><tr>' +
+      '<th>指标</th><th>A 组</th><th>B 组</th><th>Δ B vs A</th></tr></thead><tbody>';
+    compare.forEach(function(item){
+      var meta = AB_METRICS[item.metric] ||
+        { label:item.metric, unit:'', better:'up', digits:1 };
+      var delta = item.delta_pct || 0;
+      // 指标方向决定着色语义：越高越好时正 Δ 为改善，越低越好时负 Δ 为改善。
+      var improved = meta.better === 'up' ? delta >= 0 : delta <= 0;
+      var colorCls = delta === 0 ? 'flat' : (improved ? 'up' : 'down');
+      var sign = delta > 0 ? '+' : '';
+      html += '<tr><td>' + esc(meta.label) + '</td>' +
+        '<td>' + fmtFixed(item.a, meta.digits) + (meta.unit ? ' ' + esc(meta.unit) : '') + '</td>' +
+        '<td>' + fmtFixed(item.b, meta.digits) + (meta.unit ? ' ' + esc(meta.unit) : '') + '</td>' +
+        '<td><span class="ab-delta ' + colorCls + '">' + sign + fmtFixed(delta, 1) + '%</span></td></tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '<div class="rollout-legend">' +
+      '<span>A 组：' + (g0 ? fmtExact(g0.devices) + ' 台 · VV ' + fmtExact(g0.vv) +
+        ' · 崩溃 ' + fmtExact(g0.crash) : '无数据') + '</span>' +
+      '<span>B 组：' + (g1 ? fmtExact(g1.devices) + ' 台 · VV ' + fmtExact(g1.vv) +
+        ' · 崩溃 ' + fmtExact(g1.crash) : '无数据') + '</span>' +
+      '</div>';
+    box.innerHTML = html;
     return box;
   }
 

@@ -105,6 +105,9 @@ CREATE TABLE IF NOT EXISTS daily_stats (
   act_follow    INTEGER NOT NULL DEFAULT 0,
   act_topic     INTEGER NOT NULL DEFAULT 0,
   act_user      INTEGER NOT NULL DEFAULT 0,
+  -- 灰度 / A-B（P7 / SPEC §6）：-1 表示旧客户端未上报，统计时排除
+  ab_bucket     INTEGER NOT NULL DEFAULT -1,
+  ab_group      INTEGER NOT NULL DEFAULT -1,
   PRIMARY KEY (day, id_hash)
 );
 

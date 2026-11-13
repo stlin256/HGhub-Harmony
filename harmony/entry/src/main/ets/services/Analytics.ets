@@ -9,6 +9,7 @@ import { ActionSnapshot, ActionStats } from './ActionStats';
 import { ConfigChange, ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
+import { abGroup, bucket } from './Rollout';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGAnalytics';
@@ -554,6 +555,10 @@ export class Analytics {
       'day': today
     };
     if (pending !== undefined && pending.day > 0) {
+      // 灰度分桶与 A/B 组（SPEC §6）：同一 install_id 稳定不变，随日聚合一起上报，
+      // 服务端按 (ab_bucket, ab_group) 聚合出灰度分布与分组对比。
+      const deviceBucket: number = bucket(id);
+      const deviceAbGroup: number = abGroup(id, 2);
       const stats: Record<string, number> = {
         'day': pending.day,
         'sessions': pending.sessions,
@@ -614,7 +619,9 @@ export class Analytics {
         'act_comment': pending.actComment,
         'act_follow': pending.actFollow,
         'act_topic': pending.actTopic,
-        'act_user': pending.actUser
+        'act_user': pending.actUser,
+        'ab_bucket': deviceBucket,
+        'ab_group': deviceAbGroup
       };
       payload['stats'] = stats;
     }

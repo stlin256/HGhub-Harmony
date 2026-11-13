@@ -204,6 +204,47 @@ function makeDB() {
             }));
             return { results };
           }
+          if (sql.includes('SELECT ab_bucket AS bucket')) {
+            const from = args[0];
+            const seen = new Map();
+            for (const [key, row] of dailyStats) {
+              const day = Number(key.split(':')[0]);
+              if (day < from || row.ab_bucket < 0) continue;
+              const idHash = key.substring(key.indexOf(':') + 1);
+              if (!seen.has(row.ab_bucket)) seen.set(row.ab_bucket, new Set());
+              seen.get(row.ab_bucket).add(idHash);
+            }
+            const results = [...seen.entries()].sort((a, b) => a[0] - b[0])
+              .map(([bucket, ids]) => ({ bucket, devices: ids.size }));
+            return { results };
+          }
+          if (sql.includes('SELECT ab_group AS grp')) {
+            const from = args[0];
+            const byGroup = new Map();
+            for (const [key, row] of dailyStats) {
+              const day = Number(key.split(':')[0]);
+              if (day < from || row.ab_group < 0) continue;
+              const idHash = key.substring(key.indexOf(':') + 1);
+              const acc = byGroup.get(row.ab_group) || {
+                grp: row.ab_group, ids: new Set(), vv: 0, crash: 0, play_fail: 0,
+                duration_sec: 0, startup_ms_sum: 0, startup_ms_count: 0,
+              };
+              acc.ids.add(idHash);
+              acc.vv += row.vv || 0;
+              acc.crash += row.crash || 0;
+              acc.play_fail += row.play_fail || 0;
+              acc.duration_sec += row.duration_sec || 0;
+              acc.startup_ms_sum += row.startup_ms_sum || 0;
+              acc.startup_ms_count += row.startup_ms_count || 0;
+              byGroup.set(row.ab_group, acc);
+            }
+            const results = [...byGroup.values()].sort((a, b) => a.grp - b.grp).map((g) => ({
+              grp: g.grp, devices: g.ids.size, vv: g.vv, crash: g.crash,
+              play_fail: g.play_fail, duration_sec: g.duration_sec,
+              startup_ms_sum: g.startup_ms_sum, startup_ms_count: g.startup_ms_count,
+            }));
+            return { results };
+          }
           return { results: [] };
         },
         async run() {
@@ -243,12 +284,15 @@ function makeDB() {
               'act_follow',
               'act_topic',
               'act_user',
+              'ab_bucket',
+              'ab_group',
             ];
             const next = { ...cur };
             fields.forEach((f, i) => {
               const v = args[2 + i] || 0;
-              // p50/p90 是设备级快照，覆盖；其余累加
-              next[f] = (f === 'startup_p50_ms' || f === 'startup_p90_ms') ? v : (cur[f] || 0) + v;
+              // p50/p90 是设备级快照，ab_bucket/ab_group 是设备属性：覆盖；其余累加
+              next[f] = (f === 'startup_p50_ms' || f === 'startup_p90_ms' ||
+                f === 'ab_bucket' || f === 'ab_group') ? v : (cur[f] || 0) + v;
             });
             dailyStats.set(k, next);
             return { success: true, meta: { changes: 1 } };
@@ -1809,4 +1853,153 @@ test('资源下载：BLOB 各种返回形态都能正确输出字节', async () 
   e.DB.remoteAssets.set('d', { name: 'd', version: 1, sha256: sha, size: png.length, content: { bad: true } });
   res = await worker.fetch(new Request('https://w/v1/assets/d'), e, ctx);
   assert.equal(res.status, 500);
+});
+
+/* ── 灰度分布 / A-B 对比（P7 / SPEC §6）────────────── */
+
+const UUID_B = '3f2504e0-4f89-41d3-9a0c-0305e82c3302';
+const UUID_C = '3f2504e0-4f89-41d3-9a0c-0305e82c3303';
+
+test('灰度/A-B：ab_bucket / ab_group 写入 daily_stats', async () => {
+  const e = env();
+  const day = todayStamp();
+  const res = await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, ab_bucket: 37, ab_group: 1 },
+  }), e, ctx);
+  assert.equal(res.status, 200);
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.ab_bucket, 37);
+  assert.equal(row.ab_group, 1);
+});
+
+test('/stats：rollout 返回 bucket 分布与十档覆盖度', async () => {
+  const e = env();
+  const day = todayStamp();
+  const ids = [UUID, UUID_B, UUID_C];
+  const buckets = [0, 5, 95];
+  for (let i = 0; i < ids.length; i++) {
+    await worker.fetch(post({
+      id: ids[i], ver: '2.3.0', day,
+      stats: { day, sessions: 1, ab_bucket: buckets[i], ab_group: buckets[i] % 2 },
+    }), e, ctx);
+  }
+  const body = await (await worker.fetch(new Request('https://w/stats?key=k'), e, ctx)).json();
+  assert.equal(body.rollout.devices, 3);
+  assert.deepEqual(body.rollout.buckets, [
+    { bucket: 0, devices: 1 },
+    { bucket: 5, devices: 1 },
+    { bucket: 95, devices: 1 },
+  ]);
+  // 2/3 落在 0-9 档，1/3 落在 90-99 档，其余档为 0。
+  assert.equal(body.rollout.coverage['0-9'], 0.6667);
+  assert.equal(body.rollout.coverage['90-99'], 0.3333);
+  assert.equal(body.rollout.coverage['10-19'], 0);
+  assert.equal(body.rollout.current_pct, 0);
+});
+
+test('/stats：ab 返回两组指标与 delta%', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: {
+      day, sessions: 1, vv: 10, crash: 1, play_fail: 1, duration_sec: 600,
+      startup_ms_sum: 500, startup_ms_count: 1, ab_bucket: 2, ab_group: 0,
+    },
+  }), e, ctx);
+  await worker.fetch(post({
+    id: UUID_B, ver: '2.3.0', day,
+    stats: {
+      day, sessions: 1, vv: 20, crash: 0, play_fail: 0, duration_sec: 1200,
+      startup_ms_sum: 1000, startup_ms_count: 1, ab_bucket: 3, ab_group: 1,
+    },
+  }), e, ctx);
+
+  const body = await (await worker.fetch(new Request('https://w/stats?key=k'), e, ctx)).json();
+  assert.equal(body.ab.groups.length, 2);
+  const g0 = body.ab.groups.find((g) => g.group === 0);
+  const g1 = body.ab.groups.find((g) => g.group === 1);
+  assert.equal(g0.devices, 1);
+  assert.equal(g0.vv, 10);
+  assert.equal(g0.crash, 1);
+  assert.equal(g0.play_fail, 1);
+  assert.equal(g1.vv, 20);
+
+  const byMetric = {};
+  for (const item of body.ab.compare) {
+    byMetric[item.metric] = item;
+  }
+  assert.equal(byMetric.vv_per_device.a, 10);
+  assert.equal(byMetric.vv_per_device.b, 20);
+  assert.equal(byMetric.vv_per_device.delta_pct, 100);
+  assert.equal(byMetric.crash_rate.a, 10);
+  assert.equal(byMetric.crash_rate.b, 0);
+  assert.equal(byMetric.crash_rate.delta_pct, -100);
+  assert.equal(byMetric.play_fail_rate.a, 9.09);
+  assert.equal(byMetric.startup_p50_ms.a, 500);
+  assert.equal(byMetric.startup_p50_ms.b, 1000);
+  assert.equal(byMetric.startup_p50_ms.delta_pct, 100);
+  assert.equal(byMetric.duration_per_device.a, 600);
+  assert.equal(byMetric.duration_per_device.b, 1200);
+});
+
+test('/stats：未上报灰度字段时 rollout/ab 为空段且不崩', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({ id: UUID, ver: '2.3.0', day, stats: { day, sessions: 1 } }), e, ctx);
+  const res = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body.rollout.buckets, []);
+  assert.equal(body.rollout.devices, 0);
+  assert.equal(body.rollout.coverage['0-9'], 0);
+  assert.deepEqual(body.ab.groups, []);
+  assert.deepEqual(body.ab.compare, []);
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.ab_bucket, -1);
+  assert.equal(row.ab_group, -1);
+});
+
+test('灰度/A-B：超范围字段被裁剪', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, ab_bucket: 150, ab_group: 5 },
+  }), e, ctx);
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.ab_bucket, 99);
+  assert.equal(row.ab_group, 1);
+
+  const e2 = env();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, ab_bucket: -5, ab_group: -3 },
+  }), e2, ctx);
+  const row2 = [...e2.DB.dailyStats.values()][0];
+  assert.equal(row2.ab_bucket, -1);
+  assert.equal(row2.ab_group, -1);
+});
+
+test('/stats：迁移未执行（ab 列缺失）时仍 200，rollout/ab 为空段', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, ab_bucket: 10, ab_group: 0 },
+  }), e, ctx);
+  const db = e.DB;
+  const origPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    if (sql.includes('ab_bucket') || sql.includes('ab_group')) {
+      throw new Error('no such column');
+    }
+    return origPrepare(sql);
+  };
+  const res = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body.rollout.buckets, []);
+  assert.deepEqual(body.ab.groups, []);
 });
