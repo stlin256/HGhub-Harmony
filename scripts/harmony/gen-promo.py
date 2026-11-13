@@ -21,6 +21,85 @@ FONT_CN_BOLD = r"C:\Windows\Fonts\msyhbd.ttc"
 FONT_LATIN = r"C:\Windows\Fonts\seguisb.ttf"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ── 多语言文案 ────────────────────────────────────────
+# 用法：python scripts/harmony/gen-promo.py --lang en
+# 输出文件名带 -en 后缀（promo-v1-en.png），中文版保持原文件名不变。
+LANG = "zh"
+
+COPY = {
+    "zh": {
+        "v1_title1": "完全鸿蒙原生",
+        "v1_title2": "HGhub 短剧客户端",
+        "v1_sub": "ArkTS / ArkUI 原生实现 · 无 WebView",
+        "v1_pills": ["平板平行视窗", "线路智能切换", "沉浸式播放", "封面持久化缓存"],
+        "v1_foot": "HarmonyOS 7 · API 26",
+        "v2_title": "完全鸿蒙原生短剧客户端",
+        "v2_sub": "一个 App，完整浏览、选集与沉浸播放。",
+        "v2_pills": ["平行视窗", "智能线路", "沉浸播放"],
+        "v2_foot": "HarmonyOS 7 · ArkTS / ArkUI",
+        "v3_title": "原生 · 沉浸 · 更快",
+        "v3_sub": "HGhub，为 HarmonyOS 重新设计",
+        "v3_feats": [
+            ("平板 / 横屏 / 平行视窗", "左列表 + 右详情，评论侧栏"),
+            ("智能线路", "自动探测可用线路，无感切换"),
+            ("原生播放器", "预加载 + 本地缓存，切集更快"),
+        ],
+        "v3_foot": "HarmonyOS 7 · API 26",
+        "v4_top": "完全鸿蒙原生",
+        "v4_sub": "短剧客户端 · HarmonyOS 7",
+        "v4_line": "平行视窗 / 智能线路 / 沉浸播放 / 评论侧栏",
+        "v4_foot": "ArkTS / ArkUI · 不套 WebView",
+        "v5_accent": "完全鸿蒙原生",
+        "v5_sub": "短剧浏览 · 选集 · 沉浸播放，全部原生实现。",
+        "v5_line": "平板平行视窗 / 智能线路",
+        "v5_foot": "HarmonyOS 7 · API 26",
+        "v6_accent": "鸿蒙原生短剧客户端",
+        "v6_sub": "平板适配 · 平行视窗 · 沉浸播放",
+        "v6_pills": ["ArkTS", "ArkUI", "API 26"],
+        "v6_foot": "HarmonyOS 7",
+    },
+    "en": {
+        "v1_title1": "Fully Native",
+        "v1_title2": "HGhub Drama Client",
+        "v1_sub": "Built with ArkTS / ArkUI · No WebView",
+        "v1_pills": ["Tablet Split View", "Smart Line Switch", "Immersive Play", "Cover Cache"],
+        "v1_foot": "HarmonyOS 7 · API 26",
+        "v2_title": "A Fully Native HarmonyOS Drama Client",
+        "v2_sub": "One app for browsing, episode picking and immersive playback.",
+        "v2_pills": ["Split View", "Smart Lines", "Immersive"],
+        "v2_foot": "HarmonyOS 7 · ArkTS / ArkUI",
+        "v3_title": "Native · Immersive · Faster",
+        "v3_sub": "HGhub, redesigned for HarmonyOS",
+        "v3_feats": [
+            ("Tablet / Landscape / Split", "List left, details right, comments sidebar"),
+            ("Smart Lines", "Auto-detects live lines and switches seamlessly"),
+            ("Native Player", "Preload + local cache for faster switching"),
+        ],
+        "v3_foot": "HarmonyOS 7 · API 26",
+        "v4_top": "Fully Native",
+        "v4_sub": "Drama Client · HarmonyOS 7",
+        "v4_line": "Split View / Smart Lines / Immersive Play / Comments",
+        "v4_foot": "ArkTS / ArkUI · No WebView",
+        "v5_accent": "Fully Native",
+        "v5_sub": "Browsing, episode picking and immersive playback — all native.",
+        "v5_line": "Tablet Split View / Smart Lines",
+        "v5_foot": "HarmonyOS 7 · API 26",
+        "v6_accent": "Native HarmonyOS Drama Client",
+        "v6_sub": "Tablet-ready · Split View · Immersive Play",
+        "v6_pills": ["ArkTS", "ArkUI", "API 26"],
+        "v6_foot": "HarmonyOS 7",
+    },
+}
+
+
+def T(key):
+    """取当前语言的文案。"""
+    return COPY[LANG][key]
+
+
+def is_en():
+    return LANG == "en"
+
 
 def font(size: int, bold: bool = False, latin: bool = False):
     return ImageFont.truetype(FONT_LATIN if latin else (FONT_CN_BOLD if bold else FONT_CN), size)
@@ -170,18 +249,19 @@ def v1(src, logo):
     img.alpha_composite(ph, (104, 46))
     d = ImageDraw.Draw(img)
     brand_hg(img, 840, 186, 44, logo)
-    d.text((840, 292), "完全鸿蒙原生", font=font(66, bold=True), fill=WHITE)
-    d.text((840, 378), "HGhub 短剧客户端", font=font(58, bold=True), fill=rgba(ACCENT))
-    d.text((840, 474), "ArkTS / ArkUI 原生实现 · 无 WebView", font=font(22), fill=(255, 255, 255, 148))
+    d.text((840, 292), T("v1_title1"), font=font(66, bold=True, latin=is_en()), fill=WHITE)
+    d.text((840, 378), T("v1_title2"), font=font(58, bold=True, latin=is_en()), fill=rgba(ACCENT))
+    d.text((840, 474), T("v1_sub"), font=font(22, latin=is_en()), fill=(255, 255, 255, 148))
+    pills = T("v1_pills")
     x = 840
-    for t in ("平板平行视窗", "线路智能切换"):
+    for t in pills[:2]:
         x += pill(img, x, 526, t, 18) + 10
     x = 840
-    for t in ("沉浸式播放", "封面持久化缓存"):
+    for t in pills[2:]:
         x += pill(img, x, 576, t, 18) + 10
     layer_draw(img, lambda dd: dd.rounded_rectangle((840, 644, 1060, 646), radius=2,
                                                     fill=rgba(ACCENT, 205)))
-    d.text((840, 662), "HarmonyOS 7 · API 26", font=font(20), fill=(255, 255, 255, 110))
+    d.text((840, 662), T("v1_foot"), font=font(20, latin=True), fill=(255, 255, 255, 110))
     return img
 
 
@@ -193,12 +273,12 @@ def v2(src, logo):
     d = ImageDraw.Draw(img)
     brand_hg(img, TEXT_X, 116, 30, logo)
     d.text((TEXT_X - 6, 236), "HGhub", font=font(168, bold=True, latin=True), fill=WHITE)
-    d.text((TEXT_X, 440), "完全鸿蒙原生短剧客户端", font=font(34, bold=True), fill=rgba(ACCENT))
-    d.text((TEXT_X + 2, 500), "一个 App，完整浏览、选集与沉浸播放。", font=font(24), fill=(255, 255, 255, 155))
+    d.text((TEXT_X, 440), T("v2_title"), font=font(34, bold=True, latin=is_en()), fill=rgba(ACCENT))
+    d.text((TEXT_X + 2, 500), T("v2_sub"), font=font(24, latin=is_en()), fill=(255, 255, 255, 155))
     x = TEXT_X
-    for t in ("平行视窗", "智能线路", "沉浸播放"):
+    for t in T("v2_pills"):
         x += pill(img, x, 566, t) + 12
-    d.text((TEXT_X + 2, 760), "HarmonyOS 7 · ArkTS / ArkUI", font=font(22),
+    d.text((TEXT_X + 2, 760), T("v2_foot"), font=font(22, latin=True),
            fill=(255, 255, 255, 110))
     return img
 
@@ -210,17 +290,14 @@ def v3(src, logo):
     img.alpha_composite(ph, (-112, 26))
     d = ImageDraw.Draw(img)
     brand_hg(img, TEXT_X, 104, 30, logo)
-    d.text((TEXT_X, 226), "原生 · 沉浸 · 更快", font=font(62, bold=True), fill=WHITE)
-    d.text((TEXT_X + 2, 322), "HGhub，为 HarmonyOS 重新设计", font=font(26), fill=(255, 255, 255, 155))
-    feats = [("平板 / 横屏 / 平行视窗", "左列表 + 右详情，评论侧栏"),
-             ("智能线路", "自动探测可用线路，无感切换"),
-             ("原生播放器", "预加载 + 本地缓存，切集更快")]
+    d.text((TEXT_X, 226), T("v3_title"), font=font(62, bold=True, latin=is_en()), fill=WHITE)
+    d.text((TEXT_X + 2, 322), T("v3_sub"), font=font(26, latin=is_en()), fill=(255, 255, 255, 155))
     y = 412
-    for title, sub in feats:
+    for title, sub in T("v3_feats"):
         chip(img, TEXT_X, y, title, 19)
-        d.text((TEXT_X + 2, y + 40), sub, font=font(21), fill=(255, 255, 255, 150))
+        d.text((TEXT_X + 2, y + 40), sub, font=font(21, latin=is_en()), fill=(255, 255, 255, 150))
         y += 96
-    d.text((TEXT_X + 2, 790), "HarmonyOS 7 · API 26", font=font(22), fill=(255, 255, 255, 100))
+    d.text((TEXT_X + 2, 790), T("v3_foot"), font=font(22, latin=True), fill=(255, 255, 255, 100))
     return img
 
 
@@ -234,15 +311,14 @@ def v4(src, logo):
     shadow(img, ph, (86, 40))
     img.alpha_composite(ph, (90, 36))
     d = ImageDraw.Draw(img)
-    d.text((TEXT_X, 150), "完全鸿蒙原生", font=font(58, bold=True), fill=(255, 255, 255, 225))
+    d.text((TEXT_X, 150), T("v4_top"), font=font(58, bold=True, latin=is_en()), fill=(255, 255, 255, 225))
     brand_hg(img, TEXT_X, 240, 34, logo)
     d.text((TEXT_X - 4, 372), "HGhub", font=font(140, bold=True, latin=True), fill=WHITE)
-    d.text((TEXT_X, 548), "短剧客户端 · HarmonyOS 7", font=font(28), fill=rgba(ACCENT))
-    d.text((TEXT_X + 2, 604), "平行视窗 / 智能线路 / 沉浸播放 / 评论侧栏",
-           font=font(22), fill=(255, 255, 255, 150))
+    d.text((TEXT_X, 548), T("v4_sub"), font=font(28, latin=is_en()), fill=rgba(ACCENT))
+    d.text((TEXT_X + 2, 604), T("v4_line"), font=font(22, latin=is_en()), fill=(255, 255, 255, 150))
     layer_draw(img, lambda dd: dd.rounded_rectangle((TEXT_X, 700, TEXT_X + 360, 703), radius=2,
                                                     fill=rgba(ACCENT, 200)))
-    d.text((TEXT_X + 2, 726), "ArkTS / ArkUI · 不套 WebView", font=font(22),
+    d.text((TEXT_X + 2, 726), T("v4_foot"), font=font(22, latin=True),
            fill=(255, 255, 255, 115))
     return img
 
@@ -257,14 +333,14 @@ def v5(src, logo):
     d = ImageDraw.Draw(img)
     brand_hg(img, TEXT_X + 4, 128, 30, logo)
     d.text((TEXT_X, 292), "HGhub", font=font(150, bold=True, latin=True), fill=WHITE)
-    d.text((TEXT_X, 484), "完全鸿蒙原生", font=font(44, bold=True), fill=rgba(ACCENT))
-    d.text((TEXT_X + 2, 556), "短剧浏览 · 选集 · 沉浸播放，全部原生实现。", font=font(23),
+    d.text((TEXT_X, 484), T("v5_accent"), font=font(44, bold=True, latin=is_en()), fill=rgba(ACCENT))
+    d.text((TEXT_X + 2, 556), T("v5_sub"), font=font(23, latin=is_en()),
            fill=(255, 255, 255, 155))
     layer_draw(img, lambda dd: dd.rounded_rectangle((TEXT_X, 634, TEXT_X + 300, 637), radius=2,
                                                     fill=rgba(ACCENT, 200)))
-    d.text((TEXT_X + 2, 662), "平板平行视窗 / 智能线路", font=font(22),
+    d.text((TEXT_X + 2, 662), T("v5_line"), font=font(22, latin=is_en()),
            fill=(255, 255, 255, 140))
-    d.text((TEXT_X + 2, 706), "HarmonyOS 7 · API 26", font=font(21),
+    d.text((TEXT_X + 2, 706), T("v5_foot"), font=font(21, latin=True),
            fill=(255, 255, 255, 100))
     return img
 
@@ -277,13 +353,13 @@ def v6(src, logo):
     d = ImageDraw.Draw(img)
     brand_hg(img, TEXT_X + 20, 120, 32, logo)
     d.text((TEXT_X + 16, 246), "HGhub", font=font(190, bold=True, latin=True), fill=WHITE)
-    d.text((TEXT_X + 20, 500), "鸿蒙原生短剧客户端", font=font(40, bold=True), fill=rgba(ACCENT))
-    d.text((TEXT_X + 20, 574), "平板适配 · 平行视窗 · 沉浸播放", font=font(24),
+    d.text((TEXT_X + 20, 500), T("v6_accent"), font=font(40, bold=True, latin=is_en()), fill=rgba(ACCENT))
+    d.text((TEXT_X + 20, 574), T("v6_sub"), font=font(24, latin=is_en()),
            fill=(255, 255, 255, 155))
     x = TEXT_X + 20
-    for t in ("ArkTS", "ArkUI", "API 26"):
+    for t in T("v6_pills"):
         x += pill(img, x, 646, t, 20) + 12
-    d.text((TEXT_X + 20, 760), "HarmonyOS 7", font=font(22), fill=(255, 255, 255, 105))
+    d.text((TEXT_X + 20, 760), T("v6_foot"), font=font(22, latin=True), fill=(255, 255, 255, 105))
     return img
 
 
@@ -295,15 +371,20 @@ def main():
     ap.add_argument("--logo", default=os.path.join(ROOT, "public", "logo.png"))
     ap.add_argument("--only", default="",
                     help="只生成指定编号（如 v1），默认生成全部 6 张")
+    ap.add_argument("--lang", default="zh", choices=["zh", "en"],
+                    help="文案语言；en 输出 promo-vN-en.png")
     args = ap.parse_args()
+    global LANG
+    LANG = args.lang
     src = Image.open(args.src).convert("RGB")
     if args.crop_top > 0:
         src = src.crop((0, args.crop_top, src.width, src.height))
     logo = Image.open(args.logo).convert("RGBA").resize((200, 200), Image.LANCZOS)
     variants = {"v1": v1, "v2": v2, "v3": v3, "v4": v4, "v5": v5, "v6": v6}
     targets = {args.only: variants[args.only]} if args.only else variants
+    suffix = "" if LANG == "zh" else f"-{LANG}"
     for key, fn in targets.items():
-        save(fn(src, logo), f"promo-{key}.png", args.out_dir)
+        save(fn(src, logo), f"promo-{key}{suffix}.png", args.out_dir)
 
 
 if __name__ == "__main__":
