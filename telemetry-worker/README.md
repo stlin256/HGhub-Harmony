@@ -174,6 +174,9 @@ npm run deploy
 | 内存 PSS / VSS | `hidebug.getPss()/getVss()`，TaskPool 执行（/proc 读取耗时，不放主线程），30 分钟节流 |
 | 磁盘占用 | `storageStatistics.getCurrentBundleStats()` → appSize / cacheSize / dataSize |
 | 功耗 | 会话开始/结束各读一次 `batteryInfo.batterySOC`，充电中的会话不计入耗电 |
+| CPU 占用 | `hidebug.getCpuUsage()`，与 PSS 同批在 TaskPool 执行（跨进程调用耗时） |
+| 热等级 | `thermal.getThermalLevel()`，会话内取最大值（0 冷 ~ 7 极热） |
+| 瞬时功率 | `batteryInfo.voltage(μV) × nowCurrent(mA) / 1e6` → mW |
 | 电池温度 | `batteryInfo.batteryTemperature`，记录会话内峰值 |
 | 线路请求 | `Net.edge` 成功/失败时按「主站 / 镜像」计数（不记具体域名） |
 | 线路延迟 | `LineAuto.probeLatency` 的探测结果，保留最近 50 个样本算均值与 P90 |

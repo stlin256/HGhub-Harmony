@@ -47,6 +47,7 @@ function makeDB() {
               avg_mem_pss: 0, max_mem_peak: 0, avg_mem_vss: 0,
               avg_disk_app: 0, avg_disk_cache: 0, avg_disk_data: 0,
               avg_temp: 0, max_temp: 0, avg_latency: 0, avg_latency_p90: 0,
+              avg_cpu: 0, max_cpu_peak: 0, max_thermal: 0, avg_power_mw: 0,
             };
             let p50Sum = 0, p50N = 0, p90Sum = 0, p90N = 0;
             for (const v of dailyStats.values()) {
@@ -81,6 +82,15 @@ function makeDB() {
               if (v.mem_peak_kb > acc.max_mem_peak) acc.max_mem_peak = v.mem_peak_kb;
               if (v.temp_max_c > acc.max_temp) acc.max_temp = v.temp_max_c;
             }
+            let cpuSum = 0, cpuN = 0, powerSum = 0, powerN = 0;
+            for (const v of dailyStats.values()) {
+              if (v.cpu_pct > 0) { cpuSum += v.cpu_pct; cpuN += 1; }
+              if (v.cpu_peak_pct > acc.max_cpu_peak) acc.max_cpu_peak = v.cpu_peak_pct;
+              if (v.thermal_level > acc.max_thermal) acc.max_thermal = v.thermal_level;
+              if (v.power_mw > 0) { powerSum += v.power_mw; powerN += 1; }
+            }
+            acc.avg_cpu = cpuN > 0 ? cpuSum / cpuN : 0;
+            acc.avg_power_mw = powerN > 0 ? powerSum / powerN : 0;
             acc.avg_mem_pss = memN > 0 ? memSum / memN : 0;
             acc.avg_mem_vss = vssN > 0 ? vssSum / vssN : 0;
             acc.avg_disk_app = appN > 0 ? appSum / appN : 0;
@@ -142,6 +152,7 @@ function makeDB() {
               'soc_start', 'soc_end', 'temp_max_c', 'charging',
               'line_primary_ok', 'line_primary_fail', 'line_mirror_ok', 'line_mirror_fail',
               'line_switches', 'line_latency_avg_ms', 'line_latency_p90_ms',
+              'cpu_pct', 'cpu_peak_pct', 'thermal_level', 'power_mw',
             ];
             const next = { ...cur };
             fields.forEach((f, i) => {
@@ -750,4 +761,55 @@ test('设备指标超上限被裁剪', async () => {
   assert.equal(row.mem_pss_kb, 16 * 1024 * 1024);
   assert.equal(row.soc_start, 100);
   assert.equal(row.temp_max_c, 0);
+});
+
+/* ── 功耗与性能指标（CPU / 热等级 / 瞬时功率）────────── */
+
+test('CPU / 热等级 / 功率写入并聚合', async () => {
+  const e = env();
+  const day = todayStamp();
+  const stats = {
+    day, sessions: 1,
+    cpu_pct: 18, cpu_peak_pct: 42,
+    thermal_level: 3, power_mw: 1850,
+  };
+  const res = await worker.fetch(post({ id: UUID, ver: '2.3.0', day, stats }), e, ctx);
+  assert.equal(res.status, 200);
+
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.cpu_pct, 18);
+  assert.equal(row.cpu_peak_pct, 42);
+  assert.equal(row.thermal_level, 3);
+  assert.equal(row.power_mw, 1850);
+
+  const sres = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await sres.json();
+  assert.equal(body.device.cpu_avg_pct, 18);
+  assert.equal(body.device.cpu_peak_pct, 42);
+  assert.equal(body.device.thermal_max, 3);
+  assert.equal(body.device.power_mw_avg, 1850);
+});
+
+test('CPU / 热等级 / 功率超范围被裁剪', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, cpu_pct: 999, thermal_level: 99, power_mw: 9e9 },
+  }), e, ctx);
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.cpu_pct, 100);
+  assert.equal(row.thermal_level, 7);
+  assert.equal(row.power_mw, 100000);
+});
+
+test('CPU / 热等级 / 功率缺省为 0', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({ id: UUID, ver: '2.3.0', day, stats: { day, sessions: 1 } }), e, ctx);
+  const sres = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await sres.json();
+  assert.equal(body.device.cpu_avg_pct, 0);
+  assert.equal(body.device.thermal_max, 0);
+  assert.equal(body.device.power_mw_avg, 0);
 });
