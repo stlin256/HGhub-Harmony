@@ -17,6 +17,7 @@ import { UiBus } from '../services/UiBus';
 import { PlayerParam, ROUTE_FOLLOW, ROUTE_PLAYER, ROUTE_RANKS, ROUTE_SETTINGS } from '../state/Routes';
 import { fmt, fmtTime } from '../utils/Format';
 import { I18n } from '../utils/I18n';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 
 /** 首屏 / 每次滚动加载的条数（分页大小）。 */
 const PAGE_SIZE: number = 12;
@@ -1287,7 +1288,9 @@ export struct ProfilePage {
       Scroll(this.scroller) {
         Column({ space: HgSpace.l }) {
           this.ProfileCard()
-          this.FollowEntry()
+          if (ConfigRegistry.getBool(ConfigKey.FOLLOW_ENABLED)) {
+            this.FollowEntry()
+          }
           this.Segmented()
           // 切 Tab 用 exitFast/standard 交叉淡入淡出；数量变化/清空历史用 fast/exitFast，不做位移。
           Column() {

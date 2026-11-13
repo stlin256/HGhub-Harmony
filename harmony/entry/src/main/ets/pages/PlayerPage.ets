@@ -37,6 +37,7 @@ import { I18n } from '../utils/I18n';
 import {
   ActionStats, ACT_CAST, ACT_EP_SWITCH, ACT_FAV, ACT_LIKE, ACT_PIP, ACT_RATE, ACT_SHARE, ACT_UNFAV, ACT_UNLIKE
 } from '../services/ActionStats';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
 const CHROME_HIDE_MS: number = 3000;
@@ -159,7 +160,7 @@ export struct PlayerPage {
   /** 投播入口默认可用（与其它 chrome 一起出现），会话未就绪时系统 picker 自行处理空态。 */
   /** 平行视窗下用户主动全屏：Index 监听该标记后把 Navigation 切回 Stack（满窗），离开播放页复位。 */
   @StorageProp(K_FORCE_FULLSCREEN) forceFullscreen: boolean = false;
-  @State castAvailable: boolean = true;
+  @State castAvailable: boolean = ConfigRegistry.getBool(ConfigKey.CAST_ENABLED);
   /** 系统投播面板是否打开：打开期间禁止 chrome 自动隐藏，否则 picker 随 chrome 卸载而消失。 */
   @State castPanelOpen: boolean = false;
   /** AI 超分提示的透明度（0 隐藏 / 1 显示）。 */
@@ -3803,7 +3804,9 @@ export struct PlayerPage {
       this.MenuActionRow('episodes', '选集')
       this.MenuActionRow('comments', '评论')
       this.MenuActionRow('share', '分享链接')
-      this.MenuActionRow('pip', '画中画')
+      if (ConfigRegistry.getBool(ConfigKey.PIP_ENABLED)) {
+        this.MenuActionRow('pip', '画中画')
+      }
     }
     .width(232)
     .padding({ top: HgSpace.s, bottom: HgSpace.s })
