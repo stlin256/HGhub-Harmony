@@ -9,7 +9,6 @@
     "migrate": "wrangler d1 execute hghub_telemetry --remote --file=./schema.sql"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260601.0",
-    "wrangler": "^4.100.0"
+    "wrangler": "^4.161.0"
   }
 }
