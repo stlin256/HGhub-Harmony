@@ -7,14 +7,14 @@ import { ImageCache } from '../services/ImageCache';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
-import { ConfirmCopy, ConfirmDialog, HgDialogMotion } from '../components/HgConfirmDialog';
+import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgPressable } from '../components/HgPressable';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { RecService } from '../recommend/RecService';
 import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
-import { ROUTE_REC_DATA, ROUTE_REC_HOW } from '../state/Routes';
+import { ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_ABOUT } from '../state/Routes';
 import { hostOf } from '../utils/Format';
 
 interface ThemeOption {
@@ -44,126 +44,6 @@ const SCALE_OPTIONS: ScaleOption[] = [
 /** 减少动态效果开关的 AppStorage 键：与 HgMotion.reduced() 共用，全局生效。 */
 const K_REDUCE_MOTION: string = 'hgReduceMotion';
 
-/**
- * 「关于」自定义弹窗：替代系统 AlertDialog。
- * AlertDialog 的配色跟随系统主题（夜间模式下与 App 深色/浅色主题不一致），
- * 这里用 @CustomDialog + customStyle 完全按 App 主题 token 渲染，深浅色都正常。
- */
-@CustomDialog
-struct AboutDialog {
-  @StorageProp(K_DARK) dark: boolean = true;
-  controller?: CustomDialogController;
-  /** 入场/退场状态：统一弹窗壳动效（260ms 淡入 + 0.96→1；关闭 200ms 退场后再真正 close）。 */
-  @State entered: boolean = false;
-  private started: boolean = false;
-  private closing: boolean = false;
-  private closeTimer: number = -1;
-  private enterTimer: number = -1;
-
-  /** 开始入场动画（幂等）：onAppear 与 aboutToAppear 兜底二选一触发，保证弹窗可见。 */
-  private startEnter(): void {
-    if (this.started) {
-      return;
-    }
-    this.started = true;
-    animateTo({ duration: HgDialogMotion.enterMs(), curve: HgMotion.curve }, () => {
-      this.entered = true;
-    });
-  }
-
-  aboutToAppear(): void {
-    // 首帧后兜底触发；正常情况下 onAppear 已触发（started 会拦掉重复）。
-    this.enterTimer = setTimeout(() => {
-      this.enterTimer = -1;
-      this.startEnter();
-    }, 16);
-  }
-
-  aboutToDisappear(): void {
-    if (this.enterTimer >= 0) {
-      clearTimeout(this.enterTimer);
-      this.enterTimer = -1;
-    }
-    if (this.closeTimer >= 0) {
-      clearTimeout(this.closeTimer);
-      this.closeTimer = -1;
-    }
-  }
-
-  /** 关闭：先播统一退场动画，再真正关闭（点遮罩/返回键仍走系统默认关闭）。 */
-  private dismiss(): void {
-    if (this.closing) {
-      return;
-    }
-    this.closing = true;
-    animateTo({ duration: HgDialogMotion.exitMs(), curve: HgMotion.curve }, () => {
-      this.entered = false;
-    });
-    this.closeTimer = setTimeout(() => {
-      this.closeTimer = -1;
-      try {
-        this.controller?.close();
-      } catch (err) {
-      }
-    }, HgDialogMotion.exitMs());
-  }
-
-  build() {
-    Column({ space: HgSpace.m }) {
-      Text('关于 HGhub')
-        .width('100%')
-        .fontSize(HgFont.section)
-        .fontWeight(HgFont.weightBold)
-        .fontColor(HgColor.textPrimary(this.dark))
-        .textAlign(TextAlign.Center)
-      Text('黄果短剧 · 鸿蒙原生客户端 · v' + Api.appVersion())
-        .width('100%')
-        .fontSize(HgFont.micro)
-        .fontColor(HgColor.textTertiary(this.dark))
-        .textAlign(TextAlign.Center)
-
-      Text('本项目仅供学习与交流，所有内容均来自上游站点，客户端不存储、不分发任何视频内容；请支持正版。')
-        .width('100%')
-        .fontSize(HgFont.secondary)
-        .lineHeight(HgFont.lineSecondary)
-        .fontColor(HgColor.textSecondary(this.dark))
-        .margin({ top: HgSpace.xs })
-
-      Text('许可证：PolyForm Noncommercial 1.0.0（仅限非商业使用）')
-        .width('100%')
-        .fontSize(HgFont.micro)
-        .lineHeight(HgFont.lineMicro)
-        .fontColor(HgColor.textTertiary(this.dark))
-
-      Button('知道了')
-        .width('100%')
-        .height(HgSize.secondaryAction)
-        .fontSize(HgFont.body)
-        .fontWeight(HgFont.weightMedium)
-        .fontColor(HgColor.onAccent(this.dark))
-        .backgroundColor(HgColor.accent(this.dark))
-        .borderRadius(HgRadius.chip)
-        .margin({ top: HgSpace.s })
-        .accessibilityText('知道了，关闭关于')
-        .onClick(() => {
-          this.dismiss();
-        })
-    }
-    .width(320)
-    .padding({ left: HgSpace.xl, right: HgSpace.xl, top: HgSpace.xxl, bottom: HgSpace.xl })
-    .backgroundColor(HgColor.surface1(this.dark))
-    .borderRadius(HgRadius.surface)
-    .border({ width: 1, color: HgColor.hairline(this.dark) })
-    .shadow({ radius: 24, color: HgColor.shadowElev3, offsetX: 0, offsetY: 8 })
-    .opacity(this.entered ? 1 : 0)
-    .scale({ x: this.entered ? 1 : HgDialogMotion.enterScale, y: this.entered ? 1 : HgDialogMotion.enterScale })
-    .onAppear(() => {
-      this.startEnter();
-    })
-  }
-}
-
-/** 设置：外观/播放/网络/本地数据/其他 分组卡片，全部立即生效并持久化。 */
 @Component
 export struct SettingsPage {
   @Consume('hgNavStack') navStack: NavPathStack;
@@ -204,17 +84,6 @@ export struct SettingsPage {
   /** 清理缓存/清空历史后数值的轻淡入（140ms）状态与定时器。 */
   @State valueOpacity: number = 1;
   private valueTimer: number = -1;
-  /**
-   * 「关于」自定义弹窗控制器：customStyle=true 时不使用系统弹窗底色，
-   * 弹窗内容完全按 App 主题色（surface1/textPrimary/accent）绘制，避免夜间模式跟随系统主题。
-   */
-  private aboutController: CustomDialogController = new CustomDialogController({
-    builder: AboutDialog(),
-    autoCancel: true,
-    alignment: DialogAlignment.Center,
-    customStyle: true
-  });
-
   /** 自绘确认弹窗的文案与待执行动作：open 前写入，弹窗 build 时读取，保证每次都是最新内容。 */
   private confirmCopy: ConfirmCopy = new ConfirmCopy('', '', '确定', '取消', false);
   private pendingConfirm: () => void = () => {};
@@ -440,11 +309,6 @@ export struct SettingsPage {
     } finally {
       this.checking = false;
     }
-  }
-
-  /** 「关于」入口：打开跟随 App 主题的自定义弹窗（系统 AlertDialog 会跟随系统主题，夜间模式不适配）。 */
-  private showAbout(): void {
-    this.aboutController.open();
   }
 
   @Builder
@@ -1030,9 +894,9 @@ export struct SettingsPage {
         }
         .width('100%')
         .height(HgSize.listRowDouble)
-        .accessibilityText('关于 HGhub')
+        .accessibilityText('关于 HGhub，打开关于页面')
         .onClick(() => {
-          this.showAbout();
+          this.navStack.pushPathByName(ROUTE_ABOUT, null);
         })
       }
     }
