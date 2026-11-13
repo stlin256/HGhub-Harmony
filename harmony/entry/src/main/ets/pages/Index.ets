@@ -19,7 +19,7 @@ import { emptyNotice, NoticeData, RemoteNotice } from '../services/RemoteNotice'
 import { UpdateInfo } from '../models/Types';
 import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgColor, HgFont, HgSize, UiEntryKey } from '../design/HgTokens';
-import { ConfigRegistry } from '../services/ConfigRegistry';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { HgMotion } from '../design/HgMotion';
 import { HomePage } from './HomePage';
 import { SearchPage } from './SearchPage';
@@ -242,10 +242,11 @@ struct Index {
     this.maybeShowTabletNotice();
     // 摇一摇入口（仅 test 变体；release 下空操作）。
     this.startShakeEntry();
-    // 远程通知：延迟 6s 再挑一条展示（不阻塞首屏；无 notices 时 pick() 立即返回 undefined，零行为）。
+    // 远程通知：延迟可远程设定（默认 2s，不阻塞首屏；无 notices 时 pick() 立即返回 undefined）。
+    const noticeDelay: number = Math.max(0, ConfigRegistry.getNumber(ConfigKey.NOTICE_DELAY_MS));
     setTimeout(() => {
       this.presentRemoteNotice();
-    }, 6000);
+    }, noticeDelay);
   }
 
   /**
