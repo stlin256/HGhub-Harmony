@@ -5,6 +5,7 @@ import { Api } from './Api';
 import { CrashGuard } from './CrashGuard';
 import { DeviceMetrics, DeviceMetricsSnapshot } from './DeviceMetrics';
 import { LineStats, LineStatsSnapshot } from './LineStats';
+import { ActionSnapshot, ActionStats } from './ActionStats';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
 
@@ -96,6 +97,21 @@ interface DayStats {
   cpuPeakPct: number;
   thermalMax: number;
   powerMw: number;
+  // 用户行为计数（只记次数）
+  actShare: number;
+  actLike: number;
+  actUnlike: number;
+  actFav: number;
+  actUnfav: number;
+  actSearch: number;
+  actEpSwitch: number;
+  actRate: number;
+  actCast: number;
+  actPip: number;
+  actComment: number;
+  actFollow: number;
+  actTopic: number;
+  actUser: number;
 }
 
 /**
@@ -140,6 +156,7 @@ export class Analytics {
         // 跨天：线路与功耗计数按日重置（内存/磁盘是快照，不清）。
         LineStats.resetDaily();
         DeviceMetrics.resetDaily();
+        ActionStats.resetDaily();
       }
 
       // 本次启动计入今天的 sessions。
@@ -362,6 +379,7 @@ export class Analytics {
   private static readStats(day: number): DayStats {
     const dm: DeviceMetricsSnapshot = DeviceMetrics.snapshot();
     const ls: LineStatsSnapshot = LineStats.snapshot();
+    const act: ActionSnapshot = ActionStats.snapshot();
     const list: number[] = Analytics.readStartupList();
     const sorted: number[] = list.slice().sort((a: number, b: number) => a - b);
     let sum: number = 0;
@@ -414,7 +432,21 @@ export class Analytics {
       cpuPct: dm.cpuPct,
       cpuPeakPct: dm.cpuPeakPct,
       thermalMax: dm.thermalMax,
-      powerMw: dm.powerMw
+      powerMw: dm.powerMw,
+      actShare: act.share,
+      actLike: act.like,
+      actUnlike: act.unlike,
+      actFav: act.fav,
+      actUnfav: act.unfav,
+      actSearch: act.search,
+      actEpSwitch: act.epSwitch,
+      actRate: act.rate,
+      actCast: act.cast,
+      actPip: act.pip,
+      actComment: act.comment,
+      actFollow: act.follow,
+      actTopic: act.topic,
+      actUser: act.user
     };
   }
 
@@ -527,7 +559,21 @@ export class Analytics {
         'cpu_pct': pending.cpuPct,
         'cpu_peak_pct': pending.cpuPeakPct,
         'thermal_level': pending.thermalMax,
-        'power_mw': pending.powerMw
+        'power_mw': pending.powerMw,
+        'act_share': pending.actShare,
+        'act_like': pending.actLike,
+        'act_unlike': pending.actUnlike,
+        'act_fav': pending.actFav,
+        'act_unfav': pending.actUnfav,
+        'act_search': pending.actSearch,
+        'act_ep_switch': pending.actEpSwitch,
+        'act_rate': pending.actRate,
+        'act_cast': pending.actCast,
+        'act_pip': pending.actPip,
+        'act_comment': pending.actComment,
+        'act_follow': pending.actFollow,
+        'act_topic': pending.actTopic,
+        'act_user': pending.actUser
       };
       payload['stats'] = stats;
     }

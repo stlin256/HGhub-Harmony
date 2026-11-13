@@ -90,6 +90,21 @@ CREATE TABLE IF NOT EXISTS daily_stats (
   cpu_peak_pct   INTEGER NOT NULL DEFAULT 0,
   thermal_level  INTEGER NOT NULL DEFAULT 0,
   power_mw       INTEGER NOT NULL DEFAULT 0,
+  -- 用户行为计数（只记次数，不记内容）
+  act_share     INTEGER NOT NULL DEFAULT 0,
+  act_like      INTEGER NOT NULL DEFAULT 0,
+  act_unlike    INTEGER NOT NULL DEFAULT 0,
+  act_fav       INTEGER NOT NULL DEFAULT 0,
+  act_unfav     INTEGER NOT NULL DEFAULT 0,
+  act_search    INTEGER NOT NULL DEFAULT 0,
+  act_ep_switch INTEGER NOT NULL DEFAULT 0,
+  act_rate      INTEGER NOT NULL DEFAULT 0,
+  act_cast      INTEGER NOT NULL DEFAULT 0,
+  act_pip       INTEGER NOT NULL DEFAULT 0,
+  act_comment   INTEGER NOT NULL DEFAULT 0,
+  act_follow    INTEGER NOT NULL DEFAULT 0,
+  act_topic     INTEGER NOT NULL DEFAULT 0,
+  act_user      INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, id_hash)
 );
 

@@ -11,6 +11,7 @@ import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
 import { ROUTE_PLAYER, UserParam, PlayerParam } from '../state/Routes';
 import { UiBus } from '../services/UiBus';
 import { fmt } from '../utils/Format';
+import { ActionStats, ACT_FOLLOW, ACT_USER } from '../services/ActionStats';
 
 const PAGE_SIZE: number = 20;
 
@@ -37,6 +38,7 @@ export struct UserPage {
   private loadSeq: number = 0;
 
   aboutToAppear(): void {
+    ActionStats.record(ACT_USER);
     this.loadFirst();
   }
 
@@ -115,6 +117,7 @@ export struct UserPage {
   }
 
   private async toggleFollow(): Promise<void> {
+    ActionStats.record(ACT_FOLLOW);
     if (this.followBusy) {
       return;
     }

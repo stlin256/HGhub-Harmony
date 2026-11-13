@@ -214,9 +214,13 @@ async function handleReport(request, env, ctx) {
            soc_start, soc_end, temp_max_c, charging,
            line_primary_ok, line_primary_fail, line_mirror_ok, line_mirror_fail,
            line_switches, line_latency_avg_ms, line_latency_p90_ms,
-           cpu_pct, cpu_peak_pct, thermal_level, power_mw)
+           cpu_pct, cpu_peak_pct, thermal_level, power_mw,
+           act_share, act_like, act_unlike, act_fav, act_unfav, act_search,
+           act_ep_switch, act_rate, act_cast, act_pip, act_comment, act_follow,
+           act_topic, act_user)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(day, id_hash) DO UPDATE SET
            sessions = daily_stats.sessions + excluded.sessions,
            duration_sec = daily_stats.duration_sec + excluded.duration_sec,
@@ -262,7 +266,21 @@ async function handleReport(request, env, ctx) {
            cpu_pct = excluded.cpu_pct,
            cpu_peak_pct = MAX(daily_stats.cpu_peak_pct, excluded.cpu_peak_pct),
            thermal_level = MAX(daily_stats.thermal_level, excluded.thermal_level),
-           power_mw = excluded.power_mw`
+           power_mw = excluded.power_mw,
+           act_share = daily_stats.act_share + excluded.act_share,
+           act_like = daily_stats.act_like + excluded.act_like,
+           act_unlike = daily_stats.act_unlike + excluded.act_unlike,
+           act_fav = daily_stats.act_fav + excluded.act_fav,
+           act_unfav = daily_stats.act_unfav + excluded.act_unfav,
+           act_search = daily_stats.act_search + excluded.act_search,
+           act_ep_switch = daily_stats.act_ep_switch + excluded.act_ep_switch,
+           act_rate = daily_stats.act_rate + excluded.act_rate,
+           act_cast = daily_stats.act_cast + excluded.act_cast,
+           act_pip = daily_stats.act_pip + excluded.act_pip,
+           act_comment = daily_stats.act_comment + excluded.act_comment,
+           act_follow = daily_stats.act_follow + excluded.act_follow,
+           act_topic = daily_stats.act_topic + excluded.act_topic,
+           act_user = daily_stats.act_user + excluded.act_user`
       ).bind(
         stats.day, idHash, stats.sessions, stats.durationSec, stats.vv, stats.crash,
         stats.startupP50, stats.startupP90, stats.startupSum, stats.startupCount,
@@ -274,7 +292,10 @@ async function handleReport(request, env, ctx) {
         stats.socStart, stats.socEnd, stats.tempMaxC, stats.charging,
         stats.linePrimaryOk, stats.linePrimaryFail, stats.lineMirrorOk, stats.lineMirrorFail,
         stats.lineSwitches, stats.lineLatencyAvgMs, stats.lineLatencyP90Ms,
-        stats.cpuPct, stats.cpuPeakPct, stats.thermalLevel, stats.powerMw
+        stats.cpuPct, stats.cpuPeakPct, stats.thermalLevel, stats.powerMw,
+        stats.actShare, stats.actLike, stats.actUnlike, stats.actFav, stats.actUnfav, stats.actSearch,
+        stats.actEpSwitch, stats.actRate, stats.actCast, stats.actPip, stats.actComment, stats.actFollow,
+        stats.actTopic, stats.actUser
       ).run();
     }
   } catch {
@@ -679,6 +700,20 @@ async function handleStats(url, env, preAuthorized) {
               COALESCE(MAX(cpu_peak_pct), 0) AS max_cpu_peak,
               COALESCE(MAX(thermal_level), 0) AS max_thermal,
               COALESCE(AVG(NULLIF(power_mw, 0)), 0) AS avg_power_mw,
+              COALESCE(SUM(act_share), 0) AS act_share,
+              COALESCE(SUM(act_like), 0) AS act_like,
+              COALESCE(SUM(act_unlike), 0) AS act_unlike,
+              COALESCE(SUM(act_fav), 0) AS act_fav,
+              COALESCE(SUM(act_unfav), 0) AS act_unfav,
+              COALESCE(SUM(act_search), 0) AS act_search,
+              COALESCE(SUM(act_ep_switch), 0) AS act_ep_switch,
+              COALESCE(SUM(act_rate), 0) AS act_rate,
+              COALESCE(SUM(act_cast), 0) AS act_cast,
+              COALESCE(SUM(act_pip), 0) AS act_pip,
+              COALESCE(SUM(act_comment), 0) AS act_comment,
+              COALESCE(SUM(act_follow), 0) AS act_follow,
+              COALESCE(SUM(act_topic), 0) AS act_topic,
+              COALESCE(SUM(act_user), 0) AS act_user,
               COALESCE(SUM(page_home), 0) AS page_home,
               COALESCE(SUM(page_search), 0) AS page_search,
               COALESCE(SUM(page_category), 0) AS page_category,
@@ -828,6 +863,23 @@ async function handleStats(url, env, preAuthorized) {
         latency_avg_ms: totals ? Math.round(totals.avg_latency) : 0,
         latency_p90_ms: totals ? Math.round(totals.avg_latency_p90) : 0,
       },
+      // 用户行为计数（区间累计）
+      actions: {
+        share: totals ? totals.act_share : 0,
+        like: totals ? totals.act_like : 0,
+        unlike: totals ? totals.act_unlike : 0,
+        fav: totals ? totals.act_fav : 0,
+        unfav: totals ? totals.act_unfav : 0,
+        search: totals ? totals.act_search : 0,
+        ep_switch: totals ? totals.act_ep_switch : 0,
+        rate: totals ? totals.act_rate : 0,
+        cast: totals ? totals.act_cast : 0,
+        pip: totals ? totals.act_pip : 0,
+        comment: totals ? totals.act_comment : 0,
+        follow: totals ? totals.act_follow : 0,
+        topic: totals ? totals.act_topic : 0,
+        user: totals ? totals.act_user : 0,
+      },
       // 崩溃聚合
       crash: {
         total: crashTotal ? crashTotal.n : 0,
@@ -930,6 +982,21 @@ function parseStats(raw) {
     cpuPeakPct: toSafeInt(raw.cpu_peak_pct, 0, 0, 100),
     thermalLevel: toSafeInt(raw.thermal_level, 0, 0, 7),
     powerMw: toSafeInt(raw.power_mw, 0, 0, 100000),
+    // 用户行为计数
+    actShare: n(raw.act_share),
+    actLike: n(raw.act_like),
+    actUnlike: n(raw.act_unlike),
+    actFav: n(raw.act_fav),
+    actUnfav: n(raw.act_unfav),
+    actSearch: n(raw.act_search),
+    actEpSwitch: n(raw.act_ep_switch),
+    actRate: n(raw.act_rate),
+    actCast: n(raw.act_cast),
+    actPip: n(raw.act_pip),
+    actComment: n(raw.act_comment),
+    actFollow: n(raw.act_follow),
+    actTopic: n(raw.act_topic),
+    actUser: n(raw.act_user),
   };
 }
 

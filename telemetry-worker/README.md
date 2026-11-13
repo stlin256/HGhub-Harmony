@@ -66,6 +66,7 @@ Worker 校验后种一个 **180 天**的 `HttpOnly; Secure; SameSite=Strict` coo
 | 播放质量 | 失败分桶、启动耗时 p50/p90 |
 | 画质与超分 | HD/SD 占比、超分支持率与开启率 |
 | 页面访问 | 首页 / 搜索 / 分类 / 我的 / 播放页 |
+| 用户行为 | 分享 / 点赞 / 取消赞 / 收藏 / 取消收藏 / 搜索 / 切集 / 倍速 / 投播 / 画中画 / 评论 / 关注 / 专题 / 用户主页，**只记次数不记内容** |
 | 设备指标 | 内存 PSS 均值/峰值、VSS、磁盘 安装/缓存/数据、平均耗电、电池温度 |
 | 线路质量 | 主站/镜像请求数与失败率、镜像占比、换线次数、延迟均值/P90 |
 | 崩溃聚合 | 按堆栈指纹分组，显示次数 / 类型 / 原因 / 版本分布 / 最近时间，点击展开堆栈 |
@@ -166,6 +167,21 @@ npm run deploy
 | `playback` | `vv` / `play_fail` / `play_fail_rate` / `play_complete` / `play_complete_rate` / `fail_breakdown` |
 | `quality` | `hd` / `sd` / `hd_ratio` / `sr_on` / `sr_supported` / `sr_support_rate` / `sr_on_rate` |
 | `pages` | `home` / `search` / `category` / `profile` / `player` 访问计数 |
+
+### 用户行为计数
+
+客户端用 `services/ActionStats` 在本地累计动作次数（单个 JSON map，跨天清零），
+随日聚合一起上报到 `daily_stats` 的 `act_*` 列。
+
+| 记录 | 不记录 |
+|---|---|
+| 分享了几次 | 分享到哪个 App、分享了哪部剧 |
+| 搜索了几次 | 搜了什么词 |
+| 切了几次集 | 从第几集切到第几集 |
+| 点了几次赞/收藏 | 点赞/收藏了哪部剧 |
+| 投播/画中画用了几次 | 投到哪台设备 |
+
+> 服务端只能看到「今天搜索 8 次、分享 3 次」这种聚合计数，无法还原任何具体行为。
 
 ### 设备侧与线路指标
 

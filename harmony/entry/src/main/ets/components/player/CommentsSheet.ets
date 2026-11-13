@@ -7,6 +7,7 @@ import { HgMotion } from '../../design/HgMotion';
 import { HgPressable } from '../HgPressable';
 import { HgSkeletonBlock } from '../HgSkeletonBlock';
 import { I18n } from '../../utils/I18n';
+import { ActionStats, ACT_COMMENT } from '../../services/ActionStats';
 
 const PAGE_SIZE: number = 20;
 
@@ -142,6 +143,7 @@ export struct CommentsSheet {
   }
 
   private async send(): Promise<void> {
+    ActionStats.record(ACT_COMMENT);
     const text = this.draft.trim();
     if (text.length === 0 || this.sending) {
       return;

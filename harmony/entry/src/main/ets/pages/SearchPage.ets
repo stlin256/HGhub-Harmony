@@ -14,6 +14,7 @@ import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
 import { I18n } from '../utils/I18n';
+import { ActionStats, ACT_SEARCH } from '../services/ActionStats';
 
 /** idle 热榜展示条数（前 10 条）。 */
 const HOT_RANK_SIZE: number = 10;
@@ -166,6 +167,7 @@ export struct SearchPage {
   }
 
   private submit(text: string): void {
+    ActionStats.record(ACT_SEARCH);
     RecService.recordSearch(text);
     const kw = text.trim();
     if (kw.length === 0) {
