@@ -133,6 +133,10 @@ export class PlayerService {
   private srRetryTimer: number = -1;
   private srTargetW: number = 0;
   private srTargetH: number = 0;
+  /** 超分 5410003 时的编码回退：HEVC 不支持则尝试 H.264 主流，每个视频只回退一次。 */
+  private srCodecFallbackTried: boolean = false;
+  /** 非持久化的画质覆盖（超分编码回退用）：null 表示跟随用户偏好。 */
+  private preferHevcOverride: boolean | null = null;
   /** 当前这条媒体是否已计入一次播放（VV）；切集/切条时重置。 */
   private vvCounted: boolean = false;
   /** 超分状态变化回调（页面用于展示提示）。 */
@@ -477,6 +481,7 @@ export class PlayerService {
     this.serial++;
     const serial = this.serial;
     this.snapshot();
+    const sameMedia: boolean = this.videoId === videoId && this.ep === ep;
     this.videoId = videoId;
     this.ep = ep;
     this.loadedBase = Lines.current();
@@ -485,7 +490,16 @@ export class PlayerService {
     this.positionMs = 0;
     this.durationMs = 0;
     this.bufferedMs = 0;
-    this.preferHevc = UserPrefs.preferHevc();
+    if (!sameMedia) {
+      // 换视频/换集才重置编码回退；画质回退同一集内部重载必须保留覆盖值，否则会无限回退。
+      this.preferHevcOverride = null;
+      this.srCodecFallbackTried = false;
+      this.srRetries = 0;
+      this.srActive = false;
+      this.srLastErrorCode = 0;
+      this.srLastErrorText = '';
+    }
+    this.preferHevc = this.preferHevcOverride !== null ? this.preferHevcOverride : UserPrefs.preferHevc();
     this.currentInfo = undefined;
     this.resetVideoSize();
     this.onTime(0);
@@ -528,6 +542,8 @@ export class PlayerService {
       UserPrefs.setPreferHevc(preferHevc);
     }
     this.preferHevc = preferHevc;
+    // persist=false 用于超分编码回退：保留用户原画质偏好，但本次内部重载使用覆盖值。
+    this.preferHevcOverride = persist ? null : preferHevc;
     this.dropCache(videoId, ep);
     PlaybackLog.info('quality.switch', 'hevc=' + (preferHevc ? '1' : '0') +
       ' pos=' + Math.round(positionSec * 1000) + ' play=' + (wasPlaying ? '1' : '0'));
@@ -679,16 +695,9 @@ export class PlayerService {
    * 失败（设备不支持 / 状态不符）只记日志，不影响播放。
    */
   private static async declareSuperResolution(player: media.AVPlayer): Promise<boolean> {
-    try {
-      const strategy: media.PlaybackStrategy = {
-        enableSuperResolution: true
-      };
-      await player.setPlaybackStrategy(strategy);
-      return true;
-    } catch (err) {
-      PlaybackLog.warn('sr.strategy.fail', PlayerService.errText(err));
-      return false;
-    }
+    // 实际超分线路暂时屏蔽：系统 AVPlayer 超分在上述机型会出现画面崩坏。
+    // 只保留设置项与播放页的“已开启 AI 超分”视觉提示，不再向系统申请超分。
+    return false;
   }
 
   /**
@@ -699,6 +708,16 @@ export class PlayerService {
    * 设备不支持（5410003）时标记 srCapable=false 并静默。
    */
   async applySuperResolution(): Promise<void> {
+    // 实际超分线路暂时屏蔽：不再调用 setPlaybackStrategy/setSuperResolution/setVideoWindowSize，
+    // 避免部分机型出现画面崩坏；设置项保留，播放页继续显示视觉提示。
+    this.srRequested = PowerGuard.superResolutionAllowed();
+    this.srActive = false;
+    this.srLastErrorCode = 0;
+    this.srLastErrorText = '实际超分线路已暂时屏蔽（视觉提示）';
+    return;
+  }
+
+  private async applySuperResolutionLegacy(): Promise<void> {
     const player = this.player;
     if (player === undefined || this.released) {
       return;
@@ -710,11 +729,35 @@ export class PlayerService {
     }
     try {
       if (want) {
+        const state: string = player.state;
+        const usable: boolean = state === 'initialized' || state === 'prepared' || state === 'playing' ||
+          state === 'paused' || state === 'completed' || state === 'stopped';
+        if (!usable) {
+          // setSuperResolution/setVideoWindowSize 在 idle/resolving 状态会抛 5400102，等状态就绪再试。
+          this.srRetries = Math.min(3, this.srRetries + 1);
+          if (this.srRetries <= 3) {
+            this.srRetryTimer = setTimeout(() => {
+              this.srRetryTimer = -1;
+              this.applySuperResolution().catch(() => {
+              });
+            }, 500);
+          }
+          return;
+        }
         // 先声明输出窗口，再开启超分：部分设备要求窗口分辨率先就绪，否则只返回成功但不出效果。
+        this.srLastErrorCode = 0;
+        this.srLastErrorText = '';
         const target = this.superResolutionTarget();
-        this.srTargetW = target[0];
-        this.srTargetH = target[1];
-        await player.setVideoWindowSize(target[0], target[1]);
+        if (target.length === 2) {
+          this.srTargetW = target[0];
+          this.srTargetH = target[1];
+          await player.setVideoWindowSize(target[0], target[1]);
+        } else {
+          // 源尺寸超过输出上限：不设置窗口，避免系统因非法比例拒绝超分。
+          this.srTargetW = this.videoWidth;
+          this.srTargetH = this.videoHeight;
+          PlaybackLog.info('sr.target.skip', this.videoWidth + 'x' + this.videoHeight);
+        }
         await player.setSuperResolution(true);
         this.srCapable = true;
         this.srLastErrorCode = 0;
@@ -728,6 +771,16 @@ export class PlayerService {
       this.srLastErrorCode = code;
       this.srLastErrorText = PlayerService.errText(err);
       if (code === 5410003) {
+        // 部分设备只对 H.264 开放超分：先强制 HEVC→主流一次，再判断是否真的不支持。
+        const info: PlaybackInfo | undefined = this.currentInfo;
+        const mainUrl: string = info !== undefined && info.streams !== undefined &&
+          info.streams.main !== undefined && info.streams.main !== null ? info.streams.main : '';
+        if (!this.srCodecFallbackTried && this.preferHevc && mainUrl.length > 0) {
+          this.srCodecFallbackTried = true;
+          PlaybackLog.info('sr.codec.fallback', 'hevc->main');
+          this.switchQuality(false, this.state === 'playing', false);
+          return;
+        }
         // 设备不支持超分：持久化标记，设置页据此灰置 AI 超分项并提示不支持。
         this.srCapable = false;
         Prefs.putBool('sr_unsupported', true);
@@ -750,9 +803,9 @@ export class PlayerService {
     }
     const scale: number = Math.min(maxW / this.videoWidth, maxH / this.videoHeight);
     if (scale <= 1) {
-      // 源本身已超过 API 输出上限：保持原尺寸，仅让系统做超分处理。
-      return [Math.max(320, Math.min(maxW, this.videoWidth)),
-        Math.max(320, Math.min(maxH, this.videoHeight))];
+      // 源尺寸已超过 API 输出上限（如 1080x1920 竖屏）：再 clamp 会得到错误比例/正方形，
+      // 系统会直接报 5410003。这里跳过 setVideoWindowSize，让 AVPlayer 用默认窗口。
+      return [];
     }
     return [Math.round(this.videoWidth * scale), Math.round(this.videoHeight * scale)];
   }
@@ -779,7 +832,7 @@ export class PlayerService {
 
   /** 超分细粒度诊断（悬浮窗展示）。 */
   superResolutionDebug(): string {
-    return '策略=' + (this.srStrategyDeclared ? '已声明' : '未声明') +
+    return '实际线路=已屏蔽（仅视觉提示） · 策略=' + (this.srStrategyDeclared ? '已声明' : '未声明') +
       ' · 请求=' + (this.srRequested ? '开' : '关') +
       ' · 能力=' + (this.srCapable ? '支持' : '不支持') +
       ' · 生效=' + (this.srActive ? '是' : '否') +
@@ -931,6 +984,13 @@ export class PlayerService {
     player.on('startRenderFrame', () => {
       PlaybackLog.info('firstFrame', '');
       this.onFirstFrame();
+      // 首帧后再尝试一次超分：部分设备在 prepared 阶段 setSuperResolution 会返回成功但不出效果。
+      if (!this.srActive && PowerGuard.superResolutionAllowed()) {
+        setTimeout(() => {
+          this.applySuperResolution().catch(() => {
+          });
+        }, 200);
+      }
     });
 
     player.on('error', (err: BusinessError) => {
