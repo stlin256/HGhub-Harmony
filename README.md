@@ -103,6 +103,8 @@
 
 > 主要交互元素均带无障碍文案（`accessibilityText`），支持读屏与系统无障碍服务。
 
+> **远程下发**：功能开关、阈值、文案、UI 参数、设置页结构与通知均可由服务端下发并按设备灰度；无下发时保持默认行为。设计见 [REMOTE-CONFIG-SPEC](docs/harmony/REMOTE-CONFIG-SPEC.md)。
+
 ## 技术栈
 
 | 层 | 选型 |

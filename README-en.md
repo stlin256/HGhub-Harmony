@@ -103,6 +103,8 @@ To see how it works, open **Settings → Recommendations**: "Recommendation data
 
 > Main interactive elements carry accessibility labels (`accessibilityText`) and work with screen readers and system accessibility services.
 
+> **Remote delivery**: feature flags, thresholds, copy, UI parameters, settings structure and notices can be delivered from the server and rolled out per device; without a payload the app keeps its default behavior. See [REMOTE-CONFIG-SPEC](docs/harmony/REMOTE-CONFIG-SPEC.md).
+
 ## Tech stack
 
 | Layer | Choice |
