@@ -589,6 +589,10 @@ export struct PlayerPage {
       if (!this.swipeAnimating && this.videoDragY !== 0) {
         this.settleVideoDragAfterSwitch();
       }
+      // 实际超分线路暂时屏蔽，但保留“已开启 AI 超分”的视觉提示作为心理安慰。
+      if (UserPrefs.superResolution()) {
+        this.showSrHint();
+      }
     };
     this.service.onState = (state: string) => {
       this.playing = state === 'playing';
@@ -4157,13 +4161,7 @@ export struct PlayerPage {
     if (!enabled) {
       return '配置关闭（super_resolution=false）';
     }
-    if (this.service.isSuperResolutionActive()) {
-      return '已生效';
-    }
-    if (!this.service.isSuperResolutionCapable()) {
-      return '设备不支持（5410003）或尚未尝试';
-    }
-    return '已开启但未生效（电源/系统策略限制）';
+    return '已开启（视觉提示；实际超分线路暂屏蔽）';
   }
 
   private debugLines(): DebugLine[] {
