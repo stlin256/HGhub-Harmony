@@ -3,6 +3,7 @@ import { Api } from '../services/Api';
 import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
 import { K_LINE_BASE, Lines } from '../services/Lines';
+import { Ipv6Preference } from '../services/Ipv6Preference';
 import { ImageCache } from '../services/ImageCache';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
@@ -57,6 +58,8 @@ export struct SettingsPage {
   /** 优先高清（HEVC）：有高清源时优先播放。 */
   @State preferHevc: boolean = false;
   @State multiSource: boolean = true;
+  /** IPv6 优先（默认开）。 */
+  @State ipv6Prefer: boolean = true;
   /** 本地崩溃记录数（进入页面时刷新）。 */
   @State crashCount: number = 0;
   /** 最近一次启动耗时（毫秒，0=无记录）。 */
@@ -105,6 +108,7 @@ export struct SettingsPage {
     this.muteOnStartup = UserPrefs.muteOnStartup();
     this.preferHevc = UserPrefs.preferHevc();
     this.multiSource = UserPrefs.multiSource();
+    this.ipv6Prefer = Ipv6Preference.enabled();
     this.crashCount = CrashGuard.count();
     this.startupMs = PerfMark.lastStartupMs();
     // 只在进入设置页时统计一次占用空间（内存+磁盘合计），build 期间不再同步扫磁盘。
@@ -586,6 +590,35 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(HgSize.listRowDouble)
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.arrowshape_turn_up_right'))
+        Column({ space: 2 }) {
+          Text('IPv6 优先')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text('目标站点有 IPv6 地址时优先走 IPv6（默认开启）')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(2)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.ipv6Prefer })
+          .selectedColor(HgColor.accent(this.dark))
+          .onChange((isOn: boolean) => {
+            this.ipv6Prefer = isOn;
+            Ipv6Preference.setEnabled(isOn);
+          })
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+      .accessibilityText('IPv6 优先')
 
       Divider()
         .width('100%')
