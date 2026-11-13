@@ -19,9 +19,15 @@
  * 端点：
  *   POST /v1/report    上报一次启动 + 上一次的当日聚合（幂等）
  *   POST /v1/install   兼容旧路径，等价 /v1/report
+ *   GET  /v1/config    远程配置下发（HMAC 签名 + 304 短路）
+ *   POST /admin/config 发布远程配置（需要 STATS_KEY）
  *   GET  /badge        shields.io endpoint 格式，只显示安装数
  *   GET  /stats?key=   聚合统计（需要 STATS_KEY）
  *   GET  /health       健康检查
+ *
+ * 远程配置（P1）：
+ *   GET /v1/config 从 D1 remote_config 读最新 payload，附加 HMAC-SHA256 签名后下发；
+ *   未配置 CONFIG_SIGNING_KEY 时返回 503（不发未签名内容）；cfg 与服务端版本相同返回 304。
  */
 
 import DASHBOARD_HTML from './dashboard.generated.js';
@@ -42,6 +48,12 @@ const DASH_COOKIE = 'hg_dash';
 const DASH_COOKIE_MAX_AGE = 180 * 86400;
 /** 单日聚合字段上限，防止异常客户端把数字撑爆。 */
 const MAX_COUNTER = 1000000;
+/** 远程配置下发：响应体上限 16 KB、缓存 5 分钟、版本上限、管理端请求体上限 32 KB。 */
+const CONFIG_MAX_BYTES = 16384;
+const CONFIG_CACHE_CONTROL = 'public, max-age=300';
+const CONFIG_ROW_ID = 'global';
+const MAX_CONFIG_VERSION = 2147483647;
+const MAX_ADMIN_BODY_BYTES = 32768;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VERSION_RE = /^[0-9]{1,3}(\.[0-9]{1,3}){0,3}$/;
@@ -65,6 +77,12 @@ export default {
     }
     if (url.pathname === '/v1/crash' && request.method === 'POST') {
       return withCors(await handleCrash(request, env));
+    }
+    if (url.pathname === '/v1/config' && request.method === 'GET') {
+      return withCors(await handleConfig(url, env));
+    }
+    if (url.pathname === '/admin/config' && request.method === 'POST') {
+      return withCors(await handleAdminConfig(request, env));
     }
     if (url.pathname === '/badge' && request.method === 'GET') {
       return withCors(await handleBadge(env));
@@ -425,6 +443,190 @@ function clipText(value, max) {
   // 去掉控制字符（保留换行/制表）。
   text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
   return text.length > max ? text.substring(0, max) : text;
+}
+
+/* ── 远程配置下发 ──────────────────────────────────── */
+
+/**
+ * GET /v1/config?ver=&bucket=&platform=&cfg=
+ *
+ * 从 D1 读最新一条配置包，附加 HMAC 签名后下发。
+ * - 未配置 CONFIG_SIGNING_KEY → 503（宁可不发，也不发未签名内容）
+ * - cfg 与服务端版本相同 → 304 空 body
+ * - 响应体超过 16 KB → 500
+ *
+ * ver / bucket / platform 预留给后续灰度定向；P1 阶段配置包对所有客户端一致，
+ * 灰度比例由 payload 里的 rollout 字段交给客户端判定。
+ */
+async function handleConfig(url, env) {
+  const signingKey = env.CONFIG_SIGNING_KEY || '';
+  if (signingKey.length === 0) {
+    return json({ error: 'config_unavailable' }, 503);
+  }
+
+  let row;
+  try {
+    row = await env.DB.prepare(
+      'SELECT version, payload, updated_at FROM remote_config ORDER BY version DESC LIMIT 1'
+    ).first();
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  if (!row) {
+    return json({ error: 'config_not_found' }, 404);
+  }
+
+  const version = toSafeInt(row.version, 0, 0, MAX_CONFIG_VERSION);
+  if (version <= 0) {
+    return json({ error: 'storage_failed' }, 500);
+  }
+
+  // 304 短路：客户端已是最新版本，省流量。
+  const clientCfg = toSafeInt(url.searchParams.get('cfg'), 0, 0, MAX_CONFIG_VERSION);
+  if (clientCfg === version) {
+    return new Response(null, {
+      status: 304,
+      headers: { 'cache-control': CONFIG_CACHE_CONTROL },
+    });
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(row.payload);
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return json({ error: 'storage_failed' }, 500);
+  }
+
+  // 只透传 payload 字段；版本与下发时间以 DB 为准，避免 payload 自相矛盾。
+  const config = { ...parsed };
+  delete config.sig;
+  config.config_version = version;
+  config.issued_at = toSafeInt(row.updated_at, 0, 0, Number.MAX_SAFE_INTEGER);
+
+  // 签名覆盖「去掉 sig 的完整响应体」，客户端删掉 sig 后重新序列化即可校验。
+  const unsigned = JSON.stringify(config);
+  const sig = (await hmacSha256Hex(signingKey, unsigned)).slice(0, 32);
+  const body = JSON.stringify({ ...config, sig });
+  if (new TextEncoder().encode(body).length > CONFIG_MAX_BYTES) {
+    return json({ error: 'config_too_large' }, 500);
+  }
+
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': CONFIG_CACHE_CONTROL,
+    },
+  });
+}
+
+/**
+ * POST /admin/config
+ * header: x-admin-key = STATS_KEY
+ * body: { version: 12, payload: { ... } }
+ *
+ * version 必须严格大于当前版本（防回滚）；payload 只要求是 JSON 对象，
+ * 字段不做深度校验（客户端负责合并与类型/范围校验）。
+ */
+async function handleAdminConfig(request, env) {
+  const adminKey = env.STATS_KEY || '';
+  if (adminKey.length === 0) {
+    return json({ error: 'admin_unavailable' }, 503);
+  }
+  if (!timingSafeEqual(request.headers.get('x-admin-key') || '', adminKey)) {
+    return json({ error: 'forbidden' }, 401);
+  }
+
+  const declared = Number(request.headers.get('content-length') || '0');
+  if (declared > MAX_ADMIN_BODY_BYTES) {
+    return json({ error: 'payload_too_large' }, 413);
+  }
+  let raw;
+  try {
+    raw = await request.text();
+  } catch {
+    return json({ error: 'bad_body' }, 400);
+  }
+  if (raw.length === 0 || raw.length > MAX_ADMIN_BODY_BYTES) {
+    return json({ error: 'payload_too_large' }, 413);
+  }
+
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ error: 'bad_json' }, 400);
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return json({ error: 'bad_json' }, 400);
+  }
+
+  const version = body.version;
+  if (typeof version !== 'number' || !Number.isSafeInteger(version) ||
+      version <= 0 || version > MAX_CONFIG_VERSION) {
+    return json({ error: 'bad_version' }, 400);
+  }
+  const payload = body.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return json({ error: 'bad_payload' }, 400);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  // config_version / issued_at 由服务端注入，payload 里的同名字段与 sig 一律忽略。
+  const stored = { config_version: version, issued_at: now };
+  for (const key of Object.keys(payload)) {
+    if (key === 'sig' || key === 'config_version' || key === 'issued_at') {
+      continue;
+    }
+    stored[key] = payload[key];
+  }
+  const payloadText = JSON.stringify(stored);
+
+  // 写入前按最终响应体（含 sig）校验 16 KB，避免存进去却永远发不出去。
+  const finalBytes = new TextEncoder().encode(
+    JSON.stringify({ ...stored, sig: '0'.repeat(32) })
+  ).length;
+  if (finalBytes > CONFIG_MAX_BYTES) {
+    return json({ error: 'payload_too_large' }, 413);
+  }
+
+  // 版本单调：先读当前版本给出明确 409；写入时再用 WHERE 兜住并发竞争。
+  let current = 0;
+  try {
+    const row = await env.DB.prepare(
+      'SELECT MAX(version) AS max_version FROM remote_config'
+    ).first();
+    current = row && typeof row.max_version === 'number' ? row.max_version : 0;
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  if (version <= current) {
+    return json({ error: 'version_conflict' }, 409);
+  }
+
+  let changes = 1;
+  try {
+    const res = await env.DB.prepare(
+      `INSERT INTO remote_config (id, version, payload, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         version = excluded.version,
+         payload = excluded.payload,
+         updated_at = excluded.updated_at
+       WHERE excluded.version > remote_config.version`
+    ).bind(CONFIG_ROW_ID, version, payloadText, now).run();
+    changes = res && res.meta && typeof res.meta.changes === 'number' ? res.meta.changes : 1;
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  if (changes === 0) {
+    return json({ error: 'version_conflict' }, 409);
+  }
+
+  return json({ ok: true, version, updated_at: now }, 200, { 'cache-control': 'no-store' });
 }
 
 /* ── 徽章（只显示安装数）───────────────────────────── */
@@ -1074,6 +1276,16 @@ async function sha256Hex(text) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** HMAC-SHA256(secret, text) → 64 位小写十六进制。 */
+async function hmacSha256Hex(secret, text) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const mac = await crypto.subtle.sign('HMAC', key, enc.encode(text));
+  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function verifySignature(secret, ts, id, version, sig, now) {
   const tsNum = Number(ts);
   if (!Number.isFinite(tsNum) || Math.abs(now - tsNum) > SIG_WINDOW_SEC) {
@@ -1114,10 +1326,10 @@ function withCors(response) {
   const headers = new Headers(response.headers);
   headers.set('access-control-allow-origin', '*');
   headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
-  headers.set('access-control-allow-headers', 'content-type, x-client-ts, x-client-sig');
+  headers.set('access-control-allow-headers', 'content-type, x-client-ts, x-client-sig, x-admin-key');
   headers.set('access-control-max-age', '86400');
   return new Response(response.body, { status: response.status, headers });
 }
 
 // 供单元测试使用（不影响 Worker 运行时）。
-export { sha256Hex, timingSafeEqual, verifySignature, parseStats, parseDay, dayStamp, toSafeInt };
+export { sha256Hex, hmacSha256Hex, timingSafeEqual, verifySignature, parseStats, parseDay, dayStamp, toSafeInt };

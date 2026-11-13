@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import worker, { sha256Hex, timingSafeEqual, verifySignature, parseStats, parseDay, dayStamp, toSafeInt } from '../src/index.js';
+import worker, { sha256Hex, hmacSha256Hex, timingSafeEqual, verifySignature, parseStats, parseDay, dayStamp, toSafeInt } from '../src/index.js';
 
 /** 极简 D1 内存替身：只实现 Worker 实际用到的几条 SQL。 */
 function makeDB() {
@@ -11,6 +11,7 @@ function makeDB() {
   const dailyStats = new Map();
   const crashGroups = new Map();
   const crashVersions = new Map();
+  const remoteConfig = new Map();
   return {
     devices,
     rates,
@@ -18,6 +19,7 @@ function makeDB() {
     dailyStats,
     crashGroups,
     crashVersions,
+    remoteConfig,
     prepare(sql) {
       let args = [];
       const stmt = {
@@ -118,6 +120,20 @@ function makeDB() {
           if (sql.includes('SELECT count, expires_at FROM rate_limits')) {
             const r = rates.get(args[0]);
             return r ? { count: r.count, expires_at: r.expires_at } : null;
+          }
+          if (sql.includes('SELECT version, payload, updated_at FROM remote_config')) {
+            let latest = null;
+            for (const row of remoteConfig.values()) {
+              if (latest === null || row.version > latest.version) latest = row;
+            }
+            return latest ? { ...latest } : null;
+          }
+          if (sql.includes('SELECT MAX(version) AS max_version FROM remote_config')) {
+            let max = null;
+            for (const row of remoteConfig.values()) {
+              if (max === null || row.version > max) max = row.version;
+            }
+            return { max_version: max };
           }
           return null;
         },
@@ -230,6 +246,16 @@ function makeDB() {
             const r = rates.get(args[0]);
             if (r) r.count += 1;
             return { success: true };
+          }
+          if (sql.includes('INSERT INTO remote_config')) {
+            const [id, version, payload, updatedAt] = args;
+            const cur = remoteConfig.get(id);
+            // 模拟 D1 的 ON CONFLICT ... WHERE excluded.version > version：旧版本不覆盖。
+            if (cur && version <= cur.version) {
+              return { success: true, meta: { changes: 0 } };
+            }
+            remoteConfig.set(id, { id, version, payload, updated_at: updatedAt });
+            return { success: true, meta: { changes: 1 } };
           }
           return { success: true };
         },
@@ -892,4 +918,200 @@ test('行为计数超上限被裁剪', async () => {
   const row = [...e.DB.dailyStats.values()][0];
   assert.equal(row.act_share, 1000000);
   assert.equal(row.act_search, 0);
+});
+
+/* ── 远程配置下发（/v1/config）────────────────────── */
+
+const CONFIG_KEY = 'test-config-signing-key';
+
+/** 带签名密钥的环境（STATS_KEY 沿用 env() 的 'k'）。 */
+function configEnv(extra = {}) {
+  return env({ CONFIG_SIGNING_KEY: CONFIG_KEY, ...extra });
+}
+
+/** 直接向 mock D1 写入一条配置（等价于一次成功的 POST /admin/config）。 */
+function seedConfig(db, version, payload, updatedAt = 1731600000) {
+  db.remoteConfig.set('global', {
+    id: 'global',
+    version,
+    payload: JSON.stringify({ config_version: version, issued_at: updatedAt, ...payload }),
+    updated_at: updatedAt,
+  });
+}
+
+const CONFIG_PAYLOAD = {
+  min_client_ver: '2.0.0',
+  flags: { super_resolution: true, inplace_search: false },
+  thresholds: { retry_max: 4, sr_battery_min: 20 },
+  rollout: { inplace_search: 20 },
+  ab: { search_page_size: { A: 20, B: 30 } },
+  copy: {},
+  assets: {},
+};
+
+function configGet(query = '') {
+  return new Request(`https://w/v1/config?${query}`);
+}
+
+function adminPost(body, headers = {}) {
+  return new Request('https://w/admin/config', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+
+test('/v1/config：返回 payload 字段 + config_version + sig', async () => {
+  const e = configEnv();
+  seedConfig(e.DB, 12, CONFIG_PAYLOAD);
+  const res = await worker.fetch(configGet('ver=2.3.0&bucket=37&platform=harmonyos&cfg=11'), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=300');
+  assert.equal(res.headers.get('access-control-allow-origin'), '*');
+  const body = await res.json();
+  assert.equal(body.config_version, 12);
+  assert.equal(body.issued_at, 1731600000);
+  assert.equal(body.min_client_ver, '2.0.0');
+  assert.equal(body.flags.super_resolution, true);
+  assert.equal(body.flags.inplace_search, false);
+  assert.equal(body.thresholds.retry_max, 4);
+  assert.equal(body.rollout.inplace_search, 20);
+  assert.equal(body.ab.search_page_size.B, 30);
+  assert.match(body.sig, /^[0-9a-f]{32}$/);
+});
+
+test('/v1/config：cfg 与服务端版本相同返回 304 空 body', async () => {
+  const e = configEnv();
+  seedConfig(e.DB, 12, CONFIG_PAYLOAD);
+  const res = await worker.fetch(configGet('cfg=12'), e, ctx);
+  assert.equal(res.status, 304);
+  assert.equal(await res.text(), '');
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=300');
+});
+
+test('/v1/config：sig 是 body_without_sig 的 HMAC-SHA256 前 32 hex', async () => {
+  const e = configEnv();
+  seedConfig(e.DB, 12, CONFIG_PAYLOAD);
+  const body = await (await worker.fetch(configGet('cfg=0'), e, ctx)).json();
+  const unsigned = { ...body };
+  delete unsigned.sig;
+  const expected = (await hmacSha256Hex(CONFIG_KEY, JSON.stringify(unsigned))).slice(0, 32);
+  assert.equal(body.sig, expected);
+});
+
+test('/v1/config：payload 被篡改后原签名不再匹配', async () => {
+  const e = configEnv();
+  seedConfig(e.DB, 12, CONFIG_PAYLOAD);
+  const body = await (await worker.fetch(configGet(), e, ctx)).json();
+  const tampered = { ...body, flags: { ...body.flags, inplace_search: true } };
+  delete tampered.sig;
+  const tamperedSig = (await hmacSha256Hex(CONFIG_KEY, JSON.stringify(tampered))).slice(0, 32);
+  assert.notEqual(tamperedSig, body.sig);
+});
+
+test('/v1/config：存储的 payload 超过 16 KB 返回 500', async () => {
+  const e = configEnv();
+  seedConfig(e.DB, 12, { copy: { big: 'A'.repeat(17000) } });
+  const res = await worker.fetch(configGet(), e, ctx);
+  assert.equal(res.status, 500);
+  assert.equal((await res.json()).error, 'config_too_large');
+});
+
+test('/v1/config：未配置 CONFIG_SIGNING_KEY 返回 503', async () => {
+  const e = env();
+  seedConfig(e.DB, 12, CONFIG_PAYLOAD);
+  const res = await worker.fetch(configGet(), e, ctx);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'config_unavailable');
+});
+
+test('/v1/config：未发布配置返回 404', async () => {
+  const e = configEnv();
+  const res = await worker.fetch(configGet(), e, ctx);
+  assert.equal(res.status, 404);
+  assert.equal((await res.json()).error, 'config_not_found');
+});
+
+test('/v1/config：D1 故障返回 500', async () => {
+  const e = configEnv();
+  e.DB = { prepare() { throw new Error('d1 down'); } };
+  const res = await worker.fetch(configGet(), e, ctx);
+  assert.equal(res.status, 500);
+  assert.equal((await res.json()).error, 'storage_failed');
+});
+
+test('/admin/config：鉴权通过后写入并可被 /v1/config 读取', async () => {
+  const e = configEnv();
+  const res = await worker.fetch(adminPost(
+    { version: 12, payload: { flags: { pip: true }, thresholds: { retry_max: 5 } } },
+    { 'x-admin-key': 'k' }), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.version, 12);
+  assert.equal(e.DB.remoteConfig.get('global').version, 12);
+
+  const got = await worker.fetch(configGet('cfg=11'), e, ctx);
+  assert.equal(got.status, 200);
+  const cfg = await got.json();
+  assert.equal(cfg.config_version, 12);
+  assert.equal(cfg.flags.pip, true);
+  assert.equal(cfg.thresholds.retry_max, 5);
+  // issued_at 由服务端注入，与 DB 的 updated_at 一致
+  assert.equal(cfg.issued_at, e.DB.remoteConfig.get('global').updated_at);
+});
+
+test('/admin/config：缺少或错误 x-admin-key 返回 401，未配置 STATS_KEY 返回 503', async () => {
+  const e = configEnv();
+  assert.equal((await worker.fetch(adminPost({ version: 1, payload: {} }), e, ctx)).status, 401);
+  assert.equal((await worker.fetch(
+    adminPost({ version: 1, payload: {} }, { 'x-admin-key': 'wrong' }), e, ctx)).status, 401);
+
+  const noKey = configEnv({ STATS_KEY: '' });
+  assert.equal((await worker.fetch(
+    adminPost({ version: 1, payload: {} }, { 'x-admin-key': '' }), noKey, ctx)).status, 503);
+});
+
+test('/admin/config：version 必须严格递增，否则 409', async () => {
+  const e = configEnv();
+  const h = { 'x-admin-key': 'k' };
+  assert.equal((await worker.fetch(adminPost({ version: 12, payload: { flags: { pip: true } } }, h), e, ctx)).status, 200);
+  assert.equal((await worker.fetch(adminPost({ version: 12, payload: { flags: { pip: false } } }, h), e, ctx)).status, 409);
+  assert.equal((await worker.fetch(adminPost({ version: 11, payload: {} }, h), e, ctx)).status, 409);
+  assert.equal((await worker.fetch(adminPost({ version: 13, payload: { flags: { pip: false } } }, h), e, ctx)).status, 200);
+  assert.equal(e.DB.remoteConfig.get('global').version, 13);
+});
+
+test('/admin/config：非法版本 / payload 被拒', async () => {
+  const e = configEnv();
+  const h = { 'x-admin-key': 'k' };
+  assert.equal((await worker.fetch(adminPost({ version: 0, payload: {} }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(adminPost({ version: 1.5, payload: {} }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(adminPost({ version: '12', payload: {} }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(adminPost({ version: 12, payload: [] }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(adminPost({ version: 12 }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(adminPost('{bad', h), e, ctx)).status, 400);
+});
+
+test('/admin/config：payload 超过 16 KB 被拒 413', async () => {
+  const e = configEnv();
+  const res = await worker.fetch(adminPost(
+    { version: 12, payload: { copy: { big: 'A'.repeat(17000) } } },
+    { 'x-admin-key': 'k' }), e, ctx);
+  assert.equal(res.status, 413);
+  assert.equal(e.DB.remoteConfig.size, 0);
+});
+
+test('/admin/config：payload 里的 config_version / issued_at / sig 被服务端权威值覆盖', async () => {
+  const e = configEnv();
+  await worker.fetch(adminPost({
+    version: 12,
+    payload: { config_version: 99, issued_at: 1, sig: 'deadbeef', flags: { pip: true } },
+  }, { 'x-admin-key': 'k' }), e, ctx);
+  const cfg = await (await worker.fetch(configGet('cfg=0'), e, ctx)).json();
+  assert.equal(cfg.config_version, 12);
+  assert.notEqual(cfg.issued_at, 1);
+  assert.match(cfg.sig, /^[0-9a-f]{32}$/);
+  assert.notEqual(cfg.sig, 'deadbeef');
 });

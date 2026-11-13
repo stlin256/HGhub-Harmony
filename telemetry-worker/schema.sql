@@ -141,3 +141,11 @@ CREATE TABLE IF NOT EXISTS rate_limits (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rate_limits_expires ON rate_limits(expires_at);
+
+-- 远程配置下发（GET /v1/config）：单行配置，version 单调递增
+CREATE TABLE IF NOT EXISTS remote_config (
+  id TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
