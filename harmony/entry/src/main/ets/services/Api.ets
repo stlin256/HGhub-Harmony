@@ -119,7 +119,7 @@ export class Api {
       }
     } catch (err) {
     }
-    return '2.1.0';
+    return '2.2.0';
   }
 
   private static token(): string {
@@ -791,12 +791,12 @@ export class Api {
 
   /* ── 更新检查 ─────────────────────────────────────── */
   static async checkUpdate(): Promise<UpdateInfo> {
-    const raw = await Net.getText('https://api.github.com/repos/Minireel/HGhub/releases/latest',
+    const raw = await Net.getText('https://api.github.com/repos/stlin256/HGhub-Harmony/releases/latest',
       '', 12000);
     if (raw.code === 404) {
       const notFound: UpdateInfo = {
         current: Api.appVersion(), latest: '', has_update: false,
-        url: 'https://github.com/Minireel/HGhub/releases'
+        url: 'https://github.com/stlin256/HGhub-Harmony/releases'
       };
       return notFound;
     }
@@ -819,7 +819,7 @@ export class Api {
       latest: latest,
       tag: tag,
       has_update: latest.length > 0 && compareVersion(latest, Api.appVersion()) > 0,
-      url: isSafeWebUrl(releaseUrl) ? releaseUrl : 'https://github.com/Minireel/HGhub/releases',
+      url: isSafeWebUrl(releaseUrl) ? releaseUrl : 'https://github.com/stlin256/HGhub-Harmony/releases',
       name: release.name,
       published_at: release.published_at,
       notes: release.body !== undefined && release.body !== null ? release.body.substring(0, 800) : ''
