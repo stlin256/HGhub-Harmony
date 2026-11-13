@@ -5,6 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { EdgeRequestBody, Envelope } from '../models/Types';
 import { parseHttpsUrl, redactSensitive } from '../utils/Security';
 import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
+import { Endpoints } from './Endpoints';
 import { Ipv6Preference } from './Ipv6Preference';
 import { LineStats } from './LineStats';
 
@@ -107,8 +108,9 @@ function hostOfUrl(raw: string): string {
  * 网络层：统一封装 @ohos.net.http、边缘信封、错误归一与重试。
  *
  * 安全基线（不要在这里改）：
- * - TLS 证书校验使用系统 http 栈默认实现，不设置 caPath / remoteValidation / certificatePinning，
+ * - TLS 证书校验使用系统 http 栈默认实现，不设置 remoteValidation / certificatePinning，
  *   也不关闭校验（pin 不可行：CDN 证书轮换会直接导致全站不可用）；
+ *   唯一例外：自建遥测服务器使用内置自签 CA（caPath），仅作用于该 host；
  * - 只允许 https URL（系统 URL 解析器判定 scheme），明文 http 在进入请求栈前就被拒绝；
  * - 响应体有明确大小上限（HttpRequestOptions.maxLimit + 收到后再校验）；
  * - 日志/错误只出现 method/opPath/host 与脱敏后的文本，不出现 token/auth_key/完整签名 URL。
@@ -307,6 +309,13 @@ export class Net {
     method: http.RequestMethod, headers: Record<string, string>,
     body: string, timeoutMs: number, asBytes: boolean): Promise<RawText | RawBytes> {
     const request: http.HttpRequest = Net.httpFor(host);
+    // 自建遥测服务器：附加 128 位接入密钥（x-hgub-key）与内置 CA 校验；
+    // 其他 host（业务线路/GitHub 等）完全不受影响。
+    const telemetryHost: string = Endpoints.host();
+    const isTelemetry: boolean = telemetryHost.length > 0 && host === telemetryHost;
+    if (isTelemetry && headers['x-hgub-key'] === undefined) {
+      headers['x-hgub-key'] = Endpoints.clientKey();
+    }
     const options: http.HttpRequestOptions = {
       method: method,
       header: headers,
@@ -318,6 +327,10 @@ export class Net {
       // 地址族：DEFAULT 由系统决定；ONLY_V6 用于 IPv6 优先。
       addressFamily: family
     };
+    if (isTelemetry && Endpoints.caPath().length > 0) {
+      // 自签服务器证书：只对遥测 host 使用内置 CA，其余 host 仍走系统默认校验。
+      options.caPath = Endpoints.caPath();
+    }
     if (body.length > 0) {
       options.extraData = body;
     }

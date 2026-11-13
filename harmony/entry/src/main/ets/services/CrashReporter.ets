@@ -2,14 +2,13 @@ import { deviceInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Api } from './Api';
 import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
+import { Endpoints } from './Endpoints';
 import { CrashGuard, CrashRecord } from './CrashGuard';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGCrashRep';
-/** 上报端点（telemetry-worker）。 */
-const ENDPOINT: string = 'https://hghub-telemetry.stlin256.workers.dev/v1/crash';
 /**
  * 两次上报尝试的最小间隔。
  * @config-exempt: ConfigRegistry 未注册 crash_retry_interval_ms（SPEC §4.4 建议 key 尚未落地），保留硬编码。
@@ -80,7 +79,7 @@ export class CrashReporter {
       'os': CrashReporter.osName(),
       'crashes': crashes
     };
-    const raw = await Net.postJson(ENDPOINT, JSON.stringify(payload), 10000);
+    const raw = await Net.postJson(Endpoints.crashUrl(), JSON.stringify(payload), 10000);
     if (raw.code >= 200 && raw.code < 300) {
       CrashGuard.markUploaded(times);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'reported ' + times.length);

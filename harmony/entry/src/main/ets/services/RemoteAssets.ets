@@ -27,6 +27,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import { AppContext } from './AppContext';
 import { Api } from './Api';
 import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
+import { Endpoints } from './Endpoints';
 import { Net, RawBytes, RawText } from './Net';
 import { Prefs } from './Prefs';
 import { bucket } from './Rollout';
@@ -34,9 +35,6 @@ import { bucket } from './Rollout';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGRemoteAssets';
 
-/** 下发端点（telemetry-worker）。 */
-const ENDPOINT_BASE: string = 'https://hghub-telemetry.stlin256.workers.dev';
-const MANIFEST_URL: string = ENDPOINT_BASE + '/v1/assets/manifest';
 /** 单次请求超时（资源最大 512 KB，15s 足够；失败静默）。 */
 const FETCH_TIMEOUT_MS: number = 15000;
 /** manifest 响应上限（清单本身很小，64 KB 留足余量）。 */
@@ -251,7 +249,7 @@ export class RemoteAssets {
       }
       const installId: string = Prefs.getString('install_id', '');
       const deviceBucket: number = installId.length > 0 ? bucket(installId) : 0;
-      const url: string = MANIFEST_URL + '?ver=' + encodeURIComponent(Api.appVersion()) +
+      const url: string = Endpoints.assetsManifestUrl() + '?ver=' + encodeURIComponent(Api.appVersion()) +
         '&bucket=' + deviceBucket;
       const raw: RawText = await Net.getText(url, '', FETCH_TIMEOUT_MS);
       if (raw.code < 200 || raw.code >= 300) {
@@ -510,7 +508,7 @@ export class RemoteAssets {
   /** 下载单个资源并校验 SHA-256；成功落盘返回 true。 */
   private static async downloadOne(entry: AssetEntry): Promise<boolean> {
     try {
-      const url: string = ENDPOINT_BASE + '/v1/assets/' + encodeURIComponent(entry.name);
+      const url: string = Endpoints.assetsBaseUrl() + '/' + encodeURIComponent(entry.name);
       const raw: RawBytes = await Net.getBytes(url, '', FETCH_TIMEOUT_MS);
       if (raw.code < 200 || raw.code >= 300) {
         hilog.warn(LOG_DOMAIN, LOG_TAG, 'asset http ' + raw.code + ' ' + entry.name);

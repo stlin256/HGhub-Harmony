@@ -30,6 +30,7 @@ import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Api } from './Api';
 import { ConfigKey, ConfigRegistry, ConfigValue, RemoteConfigMeta, RemoteUiOverrides } from './ConfigRegistry';
+import { Endpoints } from './Endpoints';
 import { Net, RawText } from './Net';
 import { Prefs } from './Prefs';
 import { bucket } from './Rollout';
@@ -37,8 +38,6 @@ import { bucket } from './Rollout';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGRemoteConfig';
 
-/** 配置下发端点（telemetry-worker）。 */
-const ENDPOINT: string = 'https://hghub-telemetry.stlin256.workers.dev/v1/config';
 /** 单次拉取超时（配置很小，8s 足够；失败静默）。 */
 const FETCH_TIMEOUT_MS: number = 8000;
 /** 响应体上限：SPEC 约定 16 KB，超限整包丢弃。 */
@@ -220,7 +219,7 @@ export class RemoteConfig {
       const installId: string = Prefs.getString('install_id', '');
       const localVersion: number = Prefs.getNumber(KEY_CACHE_VERSION, 0);
       const deviceBucket: number = installId.length > 0 ? bucket(installId) : 0;
-      const url: string = ENDPOINT + '?ver=' + encodeURIComponent(Api.appVersion()) +
+      const url: string = Endpoints.configUrl() + '?ver=' + encodeURIComponent(Api.appVersion()) +
         '&bucket=' + deviceBucket + '&platform=harmonyos&cfg=' + localVersion;
       const raw: RawText = await Net.getText(url, '', FETCH_TIMEOUT_MS);
       // 304：服务端配置版本与本地一致，省流量短路。

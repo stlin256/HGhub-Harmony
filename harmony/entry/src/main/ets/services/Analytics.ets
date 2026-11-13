@@ -7,6 +7,7 @@ import { DeviceMetrics, DeviceMetricsSnapshot } from './DeviceMetrics';
 import { LineStats, LineStatsSnapshot } from './LineStats';
 import { ActionSnapshot, ActionStats } from './ActionStats';
 import { ConfigChange, ConfigKey, ConfigRegistry } from './ConfigRegistry';
+import { Endpoints } from './Endpoints';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
 import { abGroup, bucket } from './Rollout';
@@ -14,8 +15,6 @@ import { abGroup, bucket } from './Rollout';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGAnalytics';
 
-/** 上报端点（telemetry-worker）。 */
-const ENDPOINT: string = 'https://hghub-telemetry.stlin256.workers.dev/v1/report';
 /** 单次上报最多携带的配置变化条数（SPEC §15.4：超出丢弃最旧的）。 */
 // @config-exempt: SPEC §15.4 固定值（协议常量），不可远程配置。
 const MAX_CONFIG_APPLY: number = 20;
@@ -625,7 +624,7 @@ export class Analytics {
     if (applies.length > 0) {
       payload['config_apply'] = applies;
     }
-    const raw = await Net.postJson(ENDPOINT, JSON.stringify(payload), 8000);
+    const raw = await Net.postJson(Endpoints.reportUrl(), JSON.stringify(payload), 8000);
     if (raw.code >= 200 && raw.code < 300) {
       Prefs.putNumber(KEY_LAST_REPORT, Date.now());
       hilog.info(LOG_DOMAIN, LOG_TAG, 'reported');

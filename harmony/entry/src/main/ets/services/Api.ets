@@ -8,7 +8,7 @@ import { AppContext } from './AppContext';
 import { LineAuto } from './LineAuto';
 import { MultiSource } from './MultiSource';
 import { UserPrefs } from '../state/UserPrefs';
-import { isSafeWebUrl, parseBoundedJson, parseWebUrl } from '../utils/Security';
+import { parseWebUrl } from '../utils/Security';
 import {
   BootInfo, CommentPage, Detail, HotWord, LineMirrors, LineProbe, LoginResult, Paged, PlaybackInfo, PlayInfo, Post,
   RankResult, SearchResult, Topic, TopicDetail, UpdateInfo, User, UserProfile, VideoCard,
@@ -72,10 +72,6 @@ const WARM_HISTORY_CONCURRENCY: number = 3;
 const LINE_RETRY_COOLDOWN_MS: number = 15000;
 const API_LOG_DOMAIN: number = 0x0000;
 const API_LOG_TAG: string = 'HGApi';
-/** GitHub Release 响应的大小上限（标准 JSON 解析前先卡住，防超大响应拖垮解析）。 */
-// @config-exempt: 协议/安全上限（更新接口响应体上限）
-const UPDATE_MAX_BODY_LEN: number = 1024 * 1024;
-
 function requireObject(data: Object | null): Object {
   if (data === null) {
     throw new Error('接口返回为空');
@@ -795,43 +791,6 @@ export class Api {
   }
 
   /* ── 更新检查 ─────────────────────────────────────── */
-  static async checkUpdate(): Promise<UpdateInfo> {
-    const raw = await Net.getText('https://api.github.com/repos/stlin256/HGhub-Harmony/releases/latest',
-      '', 12000);
-    if (raw.code === 404) {
-      const notFound: UpdateInfo = {
-        current: Api.appVersion(), latest: '', has_update: false,
-        url: 'https://github.com/stlin256/HGhub-Harmony/releases'
-      };
-      return notFound;
-    }
-    if (raw.code < 200 || raw.code >= 300) {
-      throw new Error('GitHub 返回 HTTP ' + raw.code);
-    }
-    // 外部响应先卡大小再走标准 JSON 解析；解析失败不向 UI 回显原始内容。
-    const parsed: Object | null = parseBoundedJson(raw.text, UPDATE_MAX_BODY_LEN);
-    if (parsed === null) {
-      throw new Error('更新信息解析失败');
-    }
-    const release = requireObject(parsed) as GitHubRelease;
-    const tag: string = release.tag_name !== undefined && release.tag_name !== null ? release.tag_name : '';
-    const latest = tag.startsWith('v') || tag.startsWith('V') ? tag.substring(1) : tag;
-    // 外链只接受系统 URL 解析器认可的 http/https 地址（开放重定向/伪协议在这里被挡住）。
-    const releaseUrl: string = release.html_url !== undefined && release.html_url !== null
-      ? release.html_url : '';
-    const info: UpdateInfo = {
-      current: Api.appVersion(),
-      latest: latest,
-      tag: tag,
-      has_update: latest.length > 0 && compareVersion(latest, Api.appVersion()) > 0,
-      url: isSafeWebUrl(releaseUrl) ? releaseUrl : 'https://github.com/stlin256/HGhub-Harmony/releases',
-      name: release.name,
-      published_at: release.published_at,
-      notes: release.body !== undefined && release.body !== null ? release.body.substring(0, 800) : ''
-    };
-    return info;
-  }
-
   /**
    * 打开外部链接：只放行 http/https（用 @ohos.url 解析 scheme/host，拒绝 javascript:/file:/intent: 等）。
    * 解析后的 href 作为最终目标，避免大小写/空白绕过；打不开静默失败，不回显内部错误。
@@ -857,14 +816,6 @@ export class Api {
     Api.lineRetryAt = 0;
     ImageCache.clear();
   }
-}
-
-interface GitHubRelease {
-  tag_name?: string;
-  html_url?: string;
-  name?: string;
-  published_at?: string;
-  body?: string;
 }
 
 function compareVersion(left: string, right: string): number {

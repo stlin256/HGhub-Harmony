@@ -11,11 +11,16 @@
      - 未配置 signingConfig：产出 *-unsigned.hap，**算构建成功**（仅编译验证用，无法安装）
      - 配了 signingConfig 但签名失败：给出对应错误码指引（00303074 等）
 
+  服务器参数（-ServerIp / -ServerPort / -ServerKey）在编译前由 set-server.mjs 生成
+  harmony/entry/src/main/ets/services/ServerEndpoint.local.ets（不入库，XOR 混淆）。
+  不传时若已有生成物则复用；既没传也没有生成物则直接报错（避免打出连不上服务器的包）。
+
 .EXAMPLE
   .\scripts\harmony\build.ps1
   .\scripts\harmony\build.ps1 -Product default -BuildMode release
   .\scripts\harmony\build.ps1 -AssembleApp -Product store -BuildMode release
   .\scripts\harmony\build.ps1 -DevEcoHome 'C:\...\DevEcoStudio-26.0.0' -SkipOhpmInstall
+  .\scripts\harmony\build.ps1 -ServerIp 1.2.3.4 -ServerPort 8443 -ServerKey <32位hex>
 #>
 param(
   [string]$DevEcoHome = '',
@@ -25,7 +30,10 @@ param(
   [switch]$AssembleApp,
   [switch]$SkipOhpmInstall,
   [switch]$UseDaemon,
-  [string]$LogDir = ''
+  [string]$LogDir = '',
+  [string]$ServerIp = '',
+  [int]$ServerPort = 0,
+  [string]$ServerKey = ''
 )
 
 . (Join-Path $PSScriptRoot 'env.ps1') -DevEcoHome $DevEcoHome -Quiet
@@ -36,6 +44,26 @@ if (-not $LogDir) {
   $LogDir = Join-Path $PSScriptRoot '.local\logs'
 }
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+# 编译期注入服务器端点：IP / 端口 / 128 位接入密钥都不入库，由参数传入。
+$serverOut = Join-Path $repoRoot 'harmony\entry\src\main\ets\services\ServerEndpoint.local.ets'
+if ($ServerIp -or $ServerPort -gt 0 -or $ServerKey) {
+  if (-not $ServerIp -or $ServerPort -le 0 -or -not $ServerKey) {
+    throw '必须同时提供 -ServerIp、-ServerPort、-ServerKey（128 位密钥，32 位十六进制）'
+  }
+  Write-Host '[0/2] 生成编译期服务器端点（set-server.mjs）' -ForegroundColor Yellow
+  $genOutput = & $toolchain.NodeExe (Join-Path $PSScriptRoot 'set-server.mjs') `
+    --ip $ServerIp --port $ServerPort --key $ServerKey 2>&1
+  $genExit = $LASTEXITCODE
+  Write-Host (($genOutput | Out-String).Trim())
+  if ($genExit -ne 0) {
+    throw "生成 ServerEndpoint.local.ets 失败（exit=$genExit）"
+  }
+} elseif (-not (Test-Path -LiteralPath $serverOut -PathType Leaf)) {
+  throw '缺少 ServerEndpoint.local.ets：请用 -ServerIp/-ServerPort/-ServerKey 传入服务器参数'
+} else {
+  Write-Host '[0/2] 复用已有 ServerEndpoint.local.ets（未传服务器参数）' -ForegroundColor DarkGray
+}
 
 $profilePath = Join-Path $project 'build-profile.json5'
 $examplePath = Join-Path $project 'build-profile.example.json5'

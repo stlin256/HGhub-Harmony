@@ -5,6 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { UpdateInfo } from '../models/Types';
 import { Api } from './Api';
 import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
+import { Endpoints } from './Endpoints';
 import { Net, RawText } from './Net';
 import { Prefs } from './Prefs';
 import { bucket, inRollout } from './Rollout';
@@ -13,9 +14,7 @@ import { UiBus } from './UiBus';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGUpdate';
 
-/** 更新闸门端点（telemetry-worker，SPEC §5.2）。 */
-const ENDPOINT: string = 'https://hghub-telemetry.stlin256.workers.dev/v1/update';
-/** 单次拉取超时（版本信息很小，8s 足够；失败静默回落 GitHub）。 */
+/** 单次拉取超时（版本信息很小，8s 足够；失败静默跳过）。 */
 const FETCH_TIMEOUT_MS: number = 8000;
 /** 响应体上限（版本信息只有几百字节，8 KB 留足余量）。 */
 const MAX_BODY_CHARS: number = 8 * 1024;
@@ -177,18 +176,13 @@ export class UpdateChecker {
     }, delayMs);
   }
 
-  /** 立即检查（设置页手动检查也走这里，共用同一份逻辑）。 */
+  /** 立即检查（设置页手动检查也走这里，共用同一份逻辑）。失败抛错给调用方提示。 */
   static async checkNow(): Promise<UpdateInfo> {
-    try {
-      const remote: RemoteUpdate | undefined = await UpdateChecker.fetchRemote();
-      if (remote !== undefined) {
-        return UpdateChecker.toUpdateInfo(remote);
-      }
-    } catch (err) {
-      hilog.warn(LOG_DOMAIN, LOG_TAG, 'remote check failed');
+    const remote: RemoteUpdate | undefined = await UpdateChecker.fetchRemote();
+    if (remote === undefined) {
+      throw new Error('更新服务不可用');
     }
-    // 回落原有 GitHub Release 检查（失败时照旧抛给调用方处理）。
-    return await Api.checkUpdate();
+    return UpdateChecker.toUpdateInfo(remote);
   }
 
   /** 取走待展示的更新信息（取一次即清空，避免重复弹窗）。 */
@@ -215,11 +209,11 @@ export class UpdateChecker {
     return UpdateState.NONE;
   }
 
-  /** 拉取 /v1/update 并验签；任何失败返回 undefined（调用方回落到 GitHub）。 */
+  /** 拉取 /v1/update 并验签；任何失败返回 undefined（调用方静默跳过）。 */
   private static async fetchRemote(): Promise<RemoteUpdate | undefined> {
     const installId: string = Prefs.getString('install_id', '');
     const deviceBucket: number = installId.length > 0 ? bucket(installId) : 0;
-    const url: string = ENDPOINT + '?ver=' + encodeURIComponent(Api.appVersion()) +
+    const url: string = Endpoints.updateUrl() + '?ver=' + encodeURIComponent(Api.appVersion()) +
       '&bucket=' + deviceBucket;
     const raw: RawText = await Net.getText(url, '', FETCH_TIMEOUT_MS);
     if (raw.code < 200 || raw.code >= 300) {
@@ -307,21 +301,8 @@ export class UpdateChecker {
         return;
       }
     } catch (err) {
+      // 下发只听自建服务器：远程不可用时静默跳过本次更新检查，不回落到第三方接口。
       hilog.warn(LOG_DOMAIN, LOG_TAG, 'remote check failed');
-    }
-    // 远程不可用：静默回落原有 GitHub Release 检查。
-    try {
-      const info: UpdateInfo = await Api.checkUpdate();
-      if (!info.has_update) {
-        hilog.info(LOG_DOMAIN, LOG_TAG, 'up to date ' + info.current);
-        return;
-      }
-      UpdateChecker.pending = info;
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'update found ' + info.latest);
-      // UI 已就绪则立即弹；未就绪时 Index 会在启动后 takePending() 兜底。
-      UiBus.showUpdate(info);
-    } catch (err) {
-      hilog.warn(LOG_DOMAIN, LOG_TAG, 'check failed');
     }
   }
 
