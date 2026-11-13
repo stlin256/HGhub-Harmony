@@ -43,6 +43,8 @@ export struct SettingsPage {
   /** 窗口宽度（vp，旋转/分屏实时更新）：宽屏时设置内容限宽 760vp 居中。 */
   @StorageProp(K_CONTENT_W) windowW: number = 400;
   @StorageProp(K_VIDEO_SCALE) videoScale: string = 'contain';
+  /** 设备不支持 AI 超分（播放时 5410003 持久化）：设置项灰置关闭，点击仅提示。 */
+  @StorageProp('hgSrUnsupported') srUnsupported: boolean = false;
 
   /** 设置页数据（编译期默认 + 远程增量覆盖）：aboutToAppear 构建，build 只读。 */
   private schema: SettingsSchemaData = SettingsSchema.default();
@@ -489,7 +491,7 @@ export struct SettingsPage {
       return this.preferHevc;
     }
     if (key === ConfigKey.SUPER_RESOLUTION) {
-      return this.superResolution;
+      return this.srUnsupported ? false : this.superResolution;
     }
     if (key === ConfigKey.MULTI_SOURCE) {
       return this.multiSource;
@@ -523,6 +525,10 @@ export struct SettingsPage {
       return;
     }
     if (key === ConfigKey.SUPER_RESOLUTION) {
+      if (this.srUnsupported) {
+        UiBus.toast('当前设备不支持 AI 超分');
+        return;
+      }
       this.superResolution = isOn;
       UserPrefs.setSuperResolution(isOn);
       // 立即重算并让当前播放器生效（省电/低电量时仍保持关闭）。
@@ -774,9 +780,24 @@ export struct SettingsPage {
     }
     Toggle({ type: ToggleType.Switch, isOn: this.switchValue(item) })
       .selectedColor(HgColor.accent(this.dark))
+      .enabled(!(item.key === ConfigKey.SUPER_RESOLUTION && this.srUnsupported))
+      .opacity(item.key === ConfigKey.SUPER_RESOLUTION && this.srUnsupported ? 0.4 : 1)
       .onChange((isOn: boolean) => {
         this.onSwitch(item, isOn);
       })
+  }
+
+  /** ResourceStr → string（系统无障碍属性只接受 string；远程/本地化资源统一在此解析）。 */
+  private a11y(value: ResourceStr | undefined, fallback: ResourceStr): string {
+    const target: ResourceStr = value !== undefined && value !== null ? value : fallback;
+    if (typeof target === 'string') {
+      return target as string;
+    }
+    try {
+      return getContext(this).resourceManager.getStringSync(target.id);
+    } catch (err) {
+      return '';
+    }
   }
 
   @Builder
@@ -787,13 +808,25 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(this.rowHeight(item))
-      .accessibilityText(item.accessibility)
+      .opacity(item.key === ConfigKey.SUPER_RESOLUTION && this.srUnsupported ? 0.55 : 1)
+      .accessibilityText(this.a11y(item.accessibility, item.title))
+      .onClick(() => {
+        if (item.key === ConfigKey.SUPER_RESOLUTION && this.srUnsupported) {
+          UiBus.toast('当前设备不支持 AI 超分');
+        }
+      })
     } else {
       Row({ space: HgSpace.m }) {
         this.SwitchContent(item)
       }
       .width('100%')
       .height(this.rowHeight(item))
+      .opacity(item.key === ConfigKey.SUPER_RESOLUTION && this.srUnsupported ? 0.55 : 1)
+      .onClick(() => {
+        if (item.key === ConfigKey.SUPER_RESOLUTION && this.srUnsupported) {
+          UiBus.toast('当前设备不支持 AI 超分');
+        }
+      })
     }
   }
 
@@ -830,7 +863,7 @@ export struct SettingsPage {
       .width('100%')
       .height(HgSize.listRowDouble)
       .opacity(this.isBusy(item) ? 0.6 : 1)
-      .accessibilityText(item.accessibility ?? item.title)
+      .accessibilityText(this.a11y(item.accessibility, item.title))
       .onClick(() => {
         this.runAction(item);
       })
@@ -857,7 +890,7 @@ export struct SettingsPage {
             .padding({ left: HgSpace.s })
             .opacity(this.isBusy(item) ? 0.6 : 1)
         }
-        .accessibilityText(item.accessibility ?? item.title)
+        .accessibilityText(this.a11y(item.accessibility, item.title))
         .onClick(() => {
           if (!this.isBusy(item)) {
             this.runAction(item);
@@ -870,7 +903,7 @@ export struct SettingsPage {
             HgColor.accent(this.dark))
           .height(HgSize.hitTarget)
           .padding({ left: HgSpace.s })
-          .accessibilityText(item.accessibility ?? item.title)
+          .accessibilityText(this.a11y(item.accessibility, item.title))
           .onClick(() => {
             this.runAction(item);
           })
@@ -1014,7 +1047,7 @@ export struct SettingsPage {
               HgColor.surface3(this.dark))
             .borderRadius(HgRadius.chip)
             .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-            .accessibilityText(item.accessibility ?? item.title)
+            .accessibilityText(this.a11y(item.accessibility, item.title))
             .onClick(() => {
               this.onChipSelect(item, option);
             })

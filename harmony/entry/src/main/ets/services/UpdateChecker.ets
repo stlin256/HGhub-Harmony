@@ -180,7 +180,17 @@ export class UpdateChecker {
   static async checkNow(): Promise<UpdateInfo> {
     const remote: RemoteUpdate | undefined = await UpdateChecker.fetchRemote();
     if (remote === undefined) {
-      throw new Error('更新服务不可用');
+      // 更新服务不可用/尚未配置 release：返回「当前即最新」而不是直接报错，
+      // 同时把 Release 页作为可打开的兜底地址。
+      const current: string = Api.appVersion();
+      return {
+        current: current,
+        latest: current,
+        tag: 'v' + current,
+        has_update: false,
+        url: DEFAULT_RELEASE_URL,
+        notes: ''
+      };
     }
     return UpdateChecker.toUpdateInfo(remote);
   }
@@ -216,6 +226,17 @@ export class UpdateChecker {
     const url: string = Endpoints.updateUrl() + '?ver=' + encodeURIComponent(Api.appVersion()) +
       '&bucket=' + deviceBucket;
     const raw: RawText = await Net.getText(url, '', FETCH_TIMEOUT_MS);
+    if (raw.code === 404 || (raw.text !== undefined && raw.text !== null &&
+      raw.text.indexOf('release_not_found') >= 0)) {
+      // 服务端尚未配置 release：视为「暂无新版本」，由调用方回退到 Release 页。
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'no release configured');
+      const current: string = Api.appVersion();
+      const empty = new RemoteUpdate();
+      empty.latest = current;
+      empty.minVersion = current;
+      empty.url = DEFAULT_RELEASE_URL;
+      return empty;
+    }
     if (raw.code < 200 || raw.code >= 300) {
       hilog.warn(LOG_DOMAIN, LOG_TAG, 'remote http ' + raw.code);
       return undefined;
@@ -322,8 +343,7 @@ export class UpdateChecker {
             text: '打开下载链接',
             color: '#4D6BFE'
           }
-        ],
-        autoCancel: false
+        ]
       }).then((result: promptAction.ShowDialogSuccessResponse) => {
         if (result.index === 0) {
           Api.openUrl(info.url);

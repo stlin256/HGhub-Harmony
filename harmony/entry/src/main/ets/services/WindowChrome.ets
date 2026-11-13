@@ -76,6 +76,12 @@ export class WindowChrome {
    * @param playerDark 传入则更新目标状态（播放页 true/离开 false）；不传则沿用上次目标，
    *                   这样 EntryAbility/Index 的主题刷新不会把播放页的纯黑导航栏回刷成页面色。
    */
+  /** 强制重发一次系统栏配色（页面级修复导航栏白条时用，跳过去重缓存）。 */
+  static forceSyncSystemBarColors(dark: boolean): void {
+    WindowChrome.barColorsSent = false;
+    WindowChrome.syncSystemBarColors(dark);
+  }
+
   static syncSystemBarColors(dark: boolean, playerDark?: boolean): void {
     if (playerDark !== undefined && playerDark !== null) {
       WindowChrome.playerDark = playerDark;

@@ -17,20 +17,24 @@
  * - 导出的 JSON 只包含配置 key 与生效值，不含设备标识、播放内容或搜索词。
  */
 
-import { pasteboard } from '@kit.BasicServicesKit';
+import { bundleManager } from '@kit.AbilityKit';
+import { deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { LineItem, UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
 import { HgMotion } from '../design/HgMotion';
+import { HgPressable } from '../components/HgPressable';
 import { HgResponsive } from '../design/HgResponsive';
-import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
+import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK, K_WINDOW_H, K_WINDOW_W } from '../state/UserPrefs';
 import { Api } from '../services/Api';
 import { AppContext } from '../services/AppContext';
-import { ConfigDef, ConfigRegistry, ConfigValue } from '../services/ConfigRegistry';
+import { ConfigDef, ConfigKey, ConfigRegistry, ConfigValue } from '../services/ConfigRegistry';
+import { Endpoints } from '../services/Endpoints';
 import { Lines } from '../services/Lines';
 import { Prefs } from '../services/Prefs';
 import { RemoteConfig } from '../services/RemoteConfig';
+import { WindowChrome } from '../services/WindowChrome';
 import { abGroup, bucket } from '../services/Rollout';
 import { UiBus } from '../services/UiBus';
 import { UpdateChecker } from '../services/UpdateChecker';
@@ -282,6 +286,23 @@ export struct DebugConfigPage {
   @State lines: LineItem[] = [];
   @State simCurrent: string = '';
   @State simMin: string = '';
+  /* ── 搜索 / 服务端 / 版本信息 / 悬浮窗 ── */
+  @State query: string = '';
+  @State serverBase: string = '';
+  @State serverHost: string = '';
+  @State serverKeyReady: boolean = false;
+  @State caReady: boolean = false;
+  @State appVersion: string = '';
+  @State appVersionCode: string = '';
+  @State apiVersion: string = '';
+  @State deviceModel: string = '';
+  @State overlayVisible: boolean = false;
+  @State overlayX: number = -1;
+  @State overlayY: number = -1;
+  @StorageProp(K_WINDOW_W) winW: number = 400;
+  @StorageProp(K_WINDOW_H) winH: number = 800;
+  private overlayStartX: number = 0;
+  private overlayStartY: number = 0;
 
   /** 当前编辑目标：kind 决定写回位置，key 为 ConfigRegistry key（数值编辑时使用）。 */
   private editKind: string = '';
@@ -301,6 +322,10 @@ export struct DebugConfigPage {
 
   aboutToAppear(): void {
     this.refresh();
+    // 页面级兜底：重新下发导航栏 canvas 色，避免新页面/主题切换后底部导航区露白。
+    WindowChrome.forceSyncSystemBarColors(this.dark);
+    this.overlayX = Math.max(12, this.winW - 100);
+    this.overlayY = Math.max(96, this.winH - 220);
   }
 
   /** 宽屏内容左右额外留白：返回 (W - FORM_MAX)/2，窄屏返回 0。 */
@@ -344,12 +369,85 @@ export struct DebugConfigPage {
     this.abOverride = Prefs.getNumber(DEBUG_AB_KEY, -1);
     this.simCurrent = Prefs.getString(DEBUG_SIM_CURRENT_KEY, '');
     this.simMin = Prefs.getString(DEBUG_SIM_MIN_KEY, '');
+    this.serverBase = Endpoints.baseUrl();
+    this.serverHost = Endpoints.host();
+    this.serverKeyReady = Endpoints.clientKey().length > 0;
+    this.caReady = Endpoints.caPath().length > 0;
+    this.appVersion = Api.appVersion();
+    try {
+      const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      this.appVersionCode = String(bundleInfo.versionCode);
+    } catch (err) {
+      this.appVersionCode = '—';
+    }
+    try {
+      this.apiVersion = String(deviceInfo.sdkApiVersion);
+      this.deviceModel = deviceInfo.productModel !== undefined && deviceInfo.productModel !== null ?
+        String(deviceInfo.productModel) : '—';
+    } catch (err) {
+      this.apiVersion = '—';
+      this.deviceModel = '—';
+    }
     this.loadAssets();
     this.loadLines();
     // 代次自增：ForEach 的 key 变化 → 行组件重建，读到最新生效值。
     this.revision = this.revision + 1;
   }
 
+  /* ── 搜索：按 key / 说明过滤配置项 ─────────────────── */
+
+  private matches(def: ConfigDef): boolean {
+    if (this.query.length === 0) {
+      return true;
+    }
+    const needle: string = this.query.toLowerCase();
+    return def.key.toLowerCase().indexOf(needle) >= 0 || def.desc.toLowerCase().indexOf(needle) >= 0;
+  }
+
+  private filtered(defs: ConfigDef[]): ConfigDef[] {
+    const out: ConfigDef[] = [];
+    for (let i = 0; i < defs.length; i++) {
+      if (this.matches(defs[i])) {
+        out.push(defs[i]);
+      }
+    }
+    return out;
+  }
+
+  private matchCount(): number {
+    return this.filtered(this.flagDefs).length + this.filtered(this.prefDefs).length +
+      this.filtered(this.numberDefs).length;
+  }
+
+  /** 搜索命中的全部配置项（布尔/数值/枚举），用于独立结果卡。 */
+  private searchResults(): ConfigDef[] {
+    const out: ConfigDef[] = [];
+    const groups: ConfigDef[][] = [this.flagDefs, this.prefDefs, this.numberDefs];
+    for (let g = 0; g < groups.length; g++) {
+      const list: ConfigDef[] = this.filtered(groups[g]);
+      for (let i = 0; i < list.length; i++) {
+        out.push(list[i]);
+      }
+    }
+    return out;
+  }
+
+  @Builder
+  SearchResultsContent() {
+    if (this.searchResults().length === 0) {
+      this.InfoRow('没有匹配项', this.query)
+    } else {
+      ForEach(this.searchResults(), (def: ConfigDef) => {
+        if (def.type === 'boolean') {
+          this.SwitchRow(def)
+        } else if (def.type === 'number') {
+          this.NumberRow(def)
+        } else {
+          this.CycleRow(def)
+        }
+      }, (def: ConfigDef) => 'search-' + def.key + '-' + this.revision)
+    }
+  }
   /* ── 配置读写 ─────────────────────────────────────── */
 
   private applyBool(key: string, value: boolean): void {
@@ -974,6 +1072,10 @@ export struct DebugConfigPage {
       Column() {
         if (keyPrefix === 'info') {
           this.InfoCardContent()
+        } else if (keyPrefix === 'server') {
+          this.ServerCardContent()
+        } else if (keyPrefix === 'search') {
+          this.SearchResultsContent()
         } else if (keyPrefix === 'flags') {
           this.FlagsCardContent()
         } else if (keyPrefix === 'prefs') {
@@ -1006,6 +1108,93 @@ export struct DebugConfigPage {
   /* ── 各分组内容 ───────────────────────────────────── */
 
   @Builder
+  ServerCardContent() {
+    this.InfoRow('服务端地址', this.serverBase.length > 0 ? this.serverBase : '未注入（占位端点）')
+    this.InfoRow('Host', this.serverHost.length > 0 ? this.serverHost : '—')
+    this.InfoRow('接入密钥', this.serverKeyReady ? '已注入（32 hex，已混淆）' : '未注入')
+    this.InfoRow('内置 CA', this.caReady ? '已复制到沙箱' : '未初始化/复制失败')
+    this.InfoRow('更新接口', Endpoints.updateUrl())
+    this.InfoRow('配置接口', Endpoints.configUrl())
+    this.InfoRow('App 版本', 'v' + this.appVersion + ' (' + this.appVersionCode + ')')
+    this.InfoRow('变体', VARIANT_NAME + (IS_TEST_VARIANT ? '（测试）' : '（发布）'))
+    this.InfoRow('系统 API', this.apiVersion)
+    this.InfoRow('设备型号', this.deviceModel)
+    this.InfoRow('当前线路', hostOf(Lines.current()))
+  }
+
+  /* ── 悬浮诊断窗：不离开当前页查看服务端/版本/超分关键状态 ── */
+  @Builder
+  DebugOverlayHost() {
+    if (this.overlayVisible) {
+      Column({ space: 2 }) {
+        Row() {
+          Text('运行诊断')
+            .fontSize(HgFont.caption)
+            .fontWeight(HgFont.weightMedium)
+            .fontColor(HgColor.textPrimary(this.dark))
+            .layoutWeight(1)
+          Text('关闭')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.accent(this.dark))
+            .padding({ left: HgSpace.s, right: HgSpace.s, top: 4, bottom: 4 })
+            .onClick(() => {
+              this.overlayVisible = false;
+            })
+        }
+        .width('100%')
+        this.InfoRow('服务端', this.serverHost.length > 0 ? this.serverHost : '未注入')
+        this.InfoRow('App', 'v' + this.appVersion + ' · ' + VARIANT_NAME)
+        this.InfoRow('配置', 'v' + this.infoVersion + ' · ' + this.infoSource)
+        this.InfoRow('config_id', this.infoConfigId.length > 0 ? this.infoConfigId : '—')
+        this.InfoRow('AI 超分', 'config=' + ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION) +
+          ' · 目标=' + ConfigRegistry.getNumber(ConfigKey.SR_TARGET_WIDTH) + '×' +
+          ConfigRegistry.getNumber(ConfigKey.SR_TARGET_HEIGHT))
+        this.InfoRow('优先高清', String(ConfigRegistry.getBool(ConfigKey.PREFER_HEVC)))
+        this.InfoRow('线路', hostOf(Lines.current()))
+        this.InfoRow('桶/AB', this.realBucket + '/99 · 组 ' + (this.realAb === 0 ? 'A' : 'B'))
+      }
+      .width(320)
+      .padding(12)
+      .backgroundColor('#B31A1A1A')
+      .borderRadius(HgRadius.surface)
+      .border({ width: 0.5, color: '#33FFFFFF' })
+      .shadow({ radius: 24, color: HgColor.shadowElev3, offsetX: 0, offsetY: 8 })
+      .position({ x: this.overlayX, y: this.overlayY })
+      .hitTestBehavior(HitTestMode.Transparent)
+      .gesture(PanGesture()
+        .onActionStart(() => {
+          this.overlayStartX = this.overlayX;
+          this.overlayStartY = this.overlayY;
+        })
+        .onActionUpdate((event: GestureEvent) => {
+          this.overlayX = Math.max(4, Math.min(this.winW - 324, this.overlayStartX + event.offsetX));
+          this.overlayY = Math.max(60, Math.min(this.winH - 120, this.overlayStartY + event.offsetY));
+        }))
+    } else {
+      Text('诊断')
+        .fontSize(HgFont.micro)
+        .fontColor('#E6FFFFFF')
+        .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+        .backgroundColor('#66000000')
+        .borderRadius(HgRadius.chip)
+        .position({ x: this.overlayX, y: this.overlayY })
+        .hitTestBehavior(HitTestMode.Transparent)
+        .onClick(() => {
+          this.overlayVisible = true;
+        })
+        .gesture(PanGesture()
+          .onActionStart(() => {
+            this.overlayStartX = this.overlayX;
+            this.overlayStartY = this.overlayY;
+          })
+          .onActionUpdate((event: GestureEvent) => {
+            this.overlayX = Math.max(4, Math.min(this.winW - 80, this.overlayStartX + event.offsetX));
+            this.overlayY = Math.max(60, Math.min(this.winH - 80, this.overlayStartY + event.offsetY));
+          }))
+        .accessibilityText('打开运行诊断悬浮窗，可拖动')
+    }
+  }
+  @Builder
   InfoCardContent() {
     this.InfoRow('变体', VARIANT_NAME + (IS_TEST_VARIANT ? '（调试可用）' : ''))
     this.InfoRow('配置版本', this.infoVersion > 0 ? 'v' + this.infoVersion : '0（编译期默认）')
@@ -1019,7 +1208,7 @@ export struct DebugConfigPage {
 
   @Builder
   FlagsCardContent() {
-    ForEach(this.flagDefs, (def: ConfigDef) => {
+    ForEach(this.filtered(this.flagDefs), (def: ConfigDef) => {
       this.SwitchRow(def)
     }, (def: ConfigDef) => 'flag-' + def.key + '-' + this.revision)
     this.ActionRow('清除全部本地覆盖', '恢复 远程 / 用户偏好 / 编译期默认 三层值', '清除', 'danger',
@@ -1028,7 +1217,7 @@ export struct DebugConfigPage {
 
   @Builder
   PrefsCardContent() {
-    ForEach(this.prefDefs, (def: ConfigDef) => {
+    ForEach(this.filtered(this.prefDefs), (def: ConfigDef) => {
       if (def.type === 'boolean') {
         this.SwitchRow(def)
       } else if (def.type === 'number') {
@@ -1041,7 +1230,7 @@ export struct DebugConfigPage {
 
   @Builder
   NumbersCardContent() {
-    ForEach(this.numberDefs, (def: ConfigDef) => {
+    ForEach(this.filtered(this.numberDefs), (def: ConfigDef) => {
       this.NumberRow(def)
     }, (def: ConfigDef) => 'num-' + def.key + '-' + this.revision)
   }
@@ -1133,8 +1322,9 @@ export struct DebugConfigPage {
 
   build() {
     NavDestination() {
-      Column() {
-        HgTopBar({
+      Stack({ alignContent: Alignment.BottomEnd }) {
+        Column() {
+          HgTopBar({
           title: '调试配置',
           dark: this.dark,
           showBack: true,
@@ -1148,16 +1338,40 @@ export struct DebugConfigPage {
         } else {
           Scroll() {
             Column({ space: HgSpace.l }) {
-              this.Card('当前配置', 'info')
-              this.Card('功能开关（' + this.flagDefs.length + '）', 'flags')
-              this.Card('用户偏好（' + this.prefDefs.length + '）', 'prefs')
-              this.Card('阈值（' + this.numberDefs.length + '）', 'numbers')
-              this.Card('灰度', 'rollout')
-              this.Card('A/B', 'ab')
-              this.Card('资源', 'assets')
-              this.Card('更新闸门', 'update')
-              this.Card('网络', 'network')
-              this.Card('导出', 'export')
+              TextInput({ text: this.query, placeholder: '搜索配置项（key / 说明）' })
+                .width('100%')
+                .height(HgSize.control)
+                .fontSize(HgFont.secondary)
+                .fontColor(HgColor.textPrimary(this.dark))
+                .placeholderColor(HgColor.textTertiary(this.dark))
+                .backgroundColor(HgColor.surface1(this.dark))
+                .borderRadius(HgRadius.control)
+                .padding({ left: HgSpace.m, right: HgSpace.m })
+                .onChange((value: string) => {
+                  this.query = value;
+                })
+              if (this.query.length > 0) {
+                Text('匹配 ' + this.matchCount() + ' 项')
+                  .width('100%')
+                  .fontSize(HgFont.micro)
+                  .fontColor(HgColor.textTertiary(this.dark))
+                  .padding({ left: HgSpace.s })
+              }
+              if (this.query.length > 0) {
+                this.Card('搜索结果（' + this.searchResults().length + '）', 'search')
+              } else {
+                this.Card('服务端与版本', 'server')
+                this.Card('当前配置', 'info')
+                this.Card('功能开关（' + this.flagDefs.length + '）', 'flags')
+                this.Card('用户偏好（' + this.prefDefs.length + '）', 'prefs')
+                this.Card('阈值（' + this.numberDefs.length + '）', 'numbers')
+                this.Card('灰度', 'rollout')
+                this.Card('A/B', 'ab')
+                this.Card('资源', 'assets')
+                this.Card('更新闸门', 'update')
+                this.Card('网络', 'network')
+                this.Card('导出', 'export')
+              }
             }
             .width('100%')
             .padding({
@@ -1172,11 +1386,21 @@ export struct DebugConfigPage {
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
         }
+        }
+        .width('100%')
+        .height('100%')
+        .padding({ bottom: this.bottomInset })
+        .backgroundColor(HgColor.canvas(this.dark))
+
+        if (IS_TEST_VARIANT) {
+          this.DebugOverlayHost()
+        }
       }
       .width('100%')
       .height('100%')
-      .padding({ bottom: this.bottomInset })
       .backgroundColor(HgColor.canvas(this.dark))
+      // 底部沉浸：背景延伸到系统导航区域，避免页面底边与导航栏之间露出窗口白底。
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     }
     .hideTitleBar(true)
     .systemTransition(NavigationSystemTransitionType.FADE)

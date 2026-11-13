@@ -32,12 +32,14 @@ import { CommentsSheet } from '../components/player/CommentsSheet';
 import { DetailSheet } from '../components/player/DetailSheet';
 import { LineSheet } from '../components/LineSheet';
 import { HgAsyncCover } from '../components/HgAsyncCover';
-import { fmt, fmtTime } from '../utils/Format';
+import { fmt, fmtTime, hostOf } from '../utils/Format';
 import { I18n } from '../utils/I18n';
 import {
   ActionStats, ACT_CAST, ACT_EP_SWITCH, ACT_FAV, ACT_LIKE, ACT_PIP, ACT_RATE, ACT_SHARE, ACT_UNFAV, ACT_UNLIKE
 } from '../services/ActionStats';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
+import { RemoteConfig } from '../services/RemoteConfig';
+import { IS_TEST_VARIANT } from '../utils/BuildVariant';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
 const CHROME_HIDE_MS: number = 3000;
@@ -76,6 +78,17 @@ class StartPoint {
   constructor(ep: number, sec: number) {
     this.ep = ep;
     this.sec = sec;
+  }
+}
+
+/** 调试浮窗一行：label + value。 */
+class DebugLine {
+  label: string;
+  value: string;
+
+  constructor(label: string, value: string) {
+    this.label = label;
+    this.value = value;
   }
 }
 
@@ -167,6 +180,13 @@ export struct PlayerPage {
   @State castPanelOpen: boolean = false;
   /** AI 超分提示的透明度（0 隐藏 / 1 显示）。 */
   @State srHintOpacity: number = 0;
+  @State srRipple: number = 0;
+  /** 测试变体播放诊断浮窗（媒体信息/超分状态/远端配置）。 */
+  @State debugOverlay: boolean = false;
+  @State debugX: number = 12;
+  @State debugY: number = 120;
+  private debugStartX: number = 12;
+  private debugStartY: number = 120;
   /** 本次打开播放器是否已提示过超分（每次进入页面最多一次）。 */
   private srHintShown: boolean = false;
   private srHintTimer: number = -1;
@@ -384,6 +404,8 @@ export struct PlayerPage {
   }
 
   aboutToAppear(): void {
+    this.debugX = Math.max(12, Math.min(360, 16));
+    this.debugY = Math.max(120, 180);
     // 匿名统计：播放页访问计数。
     Analytics.countPage('player');
     let ids = this.params.videoIds;
@@ -2511,6 +2533,7 @@ export struct PlayerPage {
     }
     this.srHintShown = true;
     this.srHintOpacity = 0;
+    this.srRipple = 1;
     animateTo({ duration: HgMotion.ms(HgMotion.base), curve: HgMotion.curve }, () => {
       this.srHintOpacity = 1;
     });
@@ -3873,11 +3896,24 @@ export struct PlayerPage {
         }
         this.BottomChrome()
       }
-      // AI 超分提示：顶部居中，不拦截触摸。
+      // AI 超分提示：定位于「视频画面中心」（不是播放器窗口中心），横屏/分栏时也不会跑到画面外。
       if (this.srHintOpacity > 0) {
-        Row() {
+        Stack({ alignContent: Alignment.Center }) {
+          // 水波纹：一圈向外扩散并淡出，循环播放。
+          Circle()
+            .width(56)
+            .height(56)
+            .border({ width: 1.5, color: '#FF60CDFF' })
+            .scale({ x: 1 + this.srRipple * 0.9, y: 1 + this.srRipple * 0.9 })
+            .opacity((1 - this.srRipple) * 0.55)
+            .animation({
+              duration: 900,
+              curve: Curve.EaseOut,
+              iterations: -1,
+              playMode: PlayMode.Normal
+            })
           Row({ space: 6 }) {
-            SymbolGlyph($r('sys.symbol.sparkles'))
+            SymbolGlyph($r('sys.symbol.aspect_ratio'))
               .fontSize(12)
               .fontColor([HgColor.accent(true)])
             Text($r('app.string.ui_10f28175'))
@@ -3888,9 +3924,9 @@ export struct PlayerPage {
           .backgroundColor(HgColor.videoChipStrong)
           .borderRadius(14)
         }
-        .width('100%')
-        .justifyContent(FlexAlign.Center)
-        .position({ x: 0, y: this.topSafePad() + 56 })
+        .width(this.videoRectW)
+        .height(this.videoRectH)
+        .position({ x: this.videoRectX, y: this.videoRectY })
         .opacity(this.srHintOpacity)
         .hitTestBehavior(HitTestMode.None)
         .accessibilityText($r('app.string.ui_10f28175'))
@@ -4114,6 +4150,143 @@ export struct PlayerPage {
     .padding({ bottom: this.bottomSafePad() })
   }
 
+  /* ── 测试变体播放诊断浮窗（媒体信息 / AI 超分 / 远端配置） ── */
+
+  private srReasonText(): string {
+    const enabled: boolean = ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION);
+    if (!enabled) {
+      return '配置关闭（super_resolution=false）';
+    }
+    if (this.service.isSuperResolutionActive()) {
+      return '已生效';
+    }
+    if (!this.service.isSuperResolutionCapable()) {
+      return '设备不支持（5410003）或尚未尝试';
+    }
+    return '已开启但未生效（电源/系统策略限制）';
+  }
+
+  private debugLines(): DebugLine[] {
+    const out: DebugLine[] = [];
+    const info = this.service.currentPlaybackInfo();
+    const streamUrl: string = info !== undefined ? PlayerService.streamUrl(info, this.service.preferHevcEnabled()) : '';
+    out.push(new DebugLine('视频', 'id=' + this.currentId() + ' · 第 ' + this.ep + '/' + this.episodeCount + ' 集'));
+    out.push(new DebugLine('标题', this.titleText()));
+    out.push(new DebugLine('播放状态', this.service.currentState() +
+      (this.service.currentBuffering() ? ' · 缓冲中' : '') + ' · ' + this.service.currentRate() + 'x'));
+    out.push(new DebugLine('进度', fmtTime(this.service.currentPositionMs()) + ' / ' +
+      fmtTime(this.service.currentDurationMs())));
+    out.push(new DebugLine('画面', this.service.currentVideoWidth() + '×' + this.service.currentVideoHeight() +
+      ' · ' + (this.qualityBadge.length > 0 ? this.qualityBadge : '—') +
+      ' · ' + (this.service.preferHevcEnabled() ? '优先 HEVC' : '默认编码')));
+    out.push(new DebugLine('流类型', this.service.currentStreamKind()));
+    out.push(new DebugLine('流地址', streamUrl.length > 0 ? hostOf(streamUrl) : '—'));
+    out.push(new DebugLine('线路', hostOf(Lines.current())));
+    out.push(new DebugLine('媒体时长', info !== undefined && info.duration !== undefined ?
+      String(info.duration) + 's' : '—'));
+    out.push(new DebugLine('音量/静音', this.service.currentVolume().toFixed(2) +
+      (this.service.currentMuted() ? ' · 静音' : '')));
+    out.push(new DebugLine('AI 超分', this.srReasonText()));
+    out.push(new DebugLine('超分配置', '开关=' + ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION) +
+      ' · 目标=' + ConfigRegistry.getNumber(ConfigKey.SR_TARGET_WIDTH) + '×' +
+      ConfigRegistry.getNumber(ConfigKey.SR_TARGET_HEIGHT)));
+    out.push(new DebugLine('超分诊断', this.service.superResolutionDebug()));
+    out.push(new DebugLine('超分电源', this.service.superResolutionPowerDebug()));
+    out.push(new DebugLine('配置来源', RemoteConfig.source() + ' · v' + RemoteConfig.currentVersion()));
+    out.push(new DebugLine('config_id', RemoteConfig.configId().length > 0 ? RemoteConfig.configId() : '—'));
+    out.push(new DebugLine('窗口', Math.round(this.screenW) + '×' + Math.round(this.screenH) + ' vp'));
+    return out;
+  }
+
+  @Builder
+  DebugInfoChip() {
+    Text('INFO')
+      .fontSize(10)
+      .fontWeight(FontWeight.Medium)
+      .fontColor('#CCFFFFFF')
+      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+      .backgroundColor('#99000000')
+      .borderRadius(10)
+      .position({ x: this.debugX, y: this.debugY })
+      .hitTestBehavior(HitTestMode.Transparent)
+      .zIndex(30)
+      .onClick(() => {
+        this.debugOverlay = !this.debugOverlay;
+      })
+      .gesture(PanGesture()
+        .onActionStart(() => {
+          this.debugStartX = this.debugX;
+          this.debugStartY = this.debugY;
+        })
+        .onActionUpdate((event: GestureEvent) => {
+          this.debugX = Math.max(4, Math.min(this.screenW - 60, this.debugStartX + event.offsetX));
+          this.debugY = Math.max(60, Math.min(this.screenH - 80, this.debugStartY + event.offsetY));
+        }))
+      .accessibilityText('播放诊断信息')
+  }
+
+  @Builder
+  DebugInfoPanel() {
+    Column({ space: 6 }) {
+      Row() {
+        Text('播放诊断')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFFFF')
+          .layoutWeight(1)
+        Text('关闭')
+          .fontSize(11)
+          .fontColor('#FF60CDFF')
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .onClick(() => {
+            this.debugOverlay = false;
+          })
+      }
+      .width('100%')
+
+      Scroll() {
+        Column({ space: 4 }) {
+          ForEach(this.debugLines(), (line: DebugLine) => {
+            Row({ space: 8 }) {
+              Text(line.label)
+                .width(76)
+                .fontSize(10)
+                .fontColor('#99FFFFFF')
+              Text(line.value)
+                .layoutWeight(1)
+                .fontSize(10)
+                .fontColor('#FFFFFFFF')
+                .maxLines(3)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Top)
+          }, (line: DebugLine) => line.label + ':' + line.value)
+        }
+        .width('100%')
+      }
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+    }
+    .width(Math.min(400, this.screenW - 24))
+    .height(Math.min(420, this.screenH * 0.66))
+    .padding(12)
+    .backgroundColor('#99000000')
+    .borderRadius(12)
+    .border({ width: 0.5, color: '#33FFFFFF' })
+    .position({ x: this.debugX, y: this.debugY })
+    .zIndex(40)
+    .hitTestBehavior(HitTestMode.Transparent)
+    .gesture(PanGesture()
+      .onActionStart(() => {
+        this.debugStartX = this.debugX;
+        this.debugStartY = this.debugY;
+      })
+      .onActionUpdate((event: GestureEvent) => {
+        this.debugX = Math.max(4, Math.min(this.screenW - 120, this.debugStartX + event.offsetX));
+        this.debugY = Math.max(60, Math.min(this.screenH - 120, this.debugStartY + event.offsetY));
+      }))
+  }
   build() {
     NavDestination() {
       Stack({ alignContent: Alignment.TopStart }) {
@@ -4210,6 +4383,12 @@ export struct PlayerPage {
 
         this.SpeedChip()
         this.PiPHintChip()
+        if (IS_TEST_VARIANT) {
+          this.DebugInfoChip()
+          if (this.debugOverlay) {
+            this.DebugInfoPanel()
+          }
+        }
         if (this.locked) {
           this.LockLayer()
         }
