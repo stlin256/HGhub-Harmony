@@ -21,6 +21,7 @@ import { K_APP_ACTIVE, K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../s
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
+import { RemoteAssets } from '../services/RemoteAssets';
 
 /** 首屏 / 每次滚动加载的条数（分页大小）。 */
 // @config-exempt: 未注册（ConfigRegistry 无 home_page_size）
@@ -58,6 +59,12 @@ const HERO_REFRESH_IDLE: number = 400;
 /** 随包目录注入：延迟多久尝试（等 RecService 异步载入）与一次并入多少条候选。 */
 const CATALOG_INJECT_DELAY: number = 1200;
 const CATALOG_INJECT_COUNT: number = 120;
+/**
+ * 远程资源在启动 8s 后后台拉取：首屏读一次 banner 路径，再在该延迟后补读一次，
+ * 让本次冷启动新下载的 banner 无需等下次启动即可展示（无下发时保持空串，零行为）。
+ */
+// @config-exempt: 远程资源拉取完成后的补读延迟，非业务配置
+const REMOTE_BANNER_RECHECK_MS: number = 9000;
 
 /** 品牌行图标按钮：统一按压反馈（HgPressable 0.96 / 80-140ms），热区保持 44vp。 */
 @Component
@@ -179,9 +186,18 @@ struct HomeChip {
 struct HomeHeroSwiper {
   @Prop dark: boolean = true;
   @Prop hero: VideoCard[] = [];
+  /** 远程 banner 本地 URI（空串 = 无下发，保持模糊封面底色，行为与未接入时完全一致）。 */
+  @Prop @Watch('onBannerChanged') bannerPath: string = '';
   onOpen: (index: number) => void = () => {};
   @StorageProp(K_APP_ACTIVE) appActive: boolean = true;
   @State inView: boolean = true;
+  /** banner 加载失败：静默回退到模糊封面底色（不弹提示、不阻塞轮播）。 */
+  @State bannerFailed: boolean = false;
+
+  /** banner 路径变化（启动 8s 后补读到新下载的资源）：允许重新尝试加载。 */
+  private onBannerChanged(): void {
+    this.bannerFailed = false;
+  }
 
   private shouldAutoPlay(): boolean {
     return this.hero.length > 1 && this.inView && this.appActive;
@@ -191,23 +207,35 @@ struct HomeHeroSwiper {
     Swiper() {
       ForEach(this.hero, (item: VideoCard, index: number) => {
         Stack({ alignContent: Alignment.BottomStart }) {
-          // 1) 模糊底色（静态层，不参与滚动重算）：同一张封面 Cover 铺满 + 高斯模糊 + 轻微放大。
-          //    竖版海报两侧不再露黑/露底色，而是由这张模糊图接手。
-          Stack() {
-            HgAsyncCover({
-              url: item.cover,
-              dark: this.dark,
-              radius: 0,
-              coverWidth: '100%',
-              coverHeight: '100%',
-              decodeWidth: HERO_DECODE_W,
-              decodeHeight: HERO_DECODE_H
-            })
+          // 1) 背景层（静态层，不参与滚动重算）：
+          //    有远程 banner 且加载成功 → 用 banner 铺满；否则用同一张封面 Cover + 高斯模糊 + 轻微放大。
+          //    无下发时 bannerPath 为空串，走 else 分支，行为与未接入时完全一致。
+          if (this.bannerPath.length > 0 && !this.bannerFailed) {
+            Image(this.bannerPath)
+              .width('100%')
+              .height('100%')
+              .objectFit(ImageFit.Cover)
+              .onError(() => {
+                // 图片加载失败静默回退：切回封面模糊底色，不影响轮播与文字层。
+                this.bannerFailed = true;
+              })
+          } else {
+            Stack() {
+              HgAsyncCover({
+                url: item.cover,
+                dark: this.dark,
+                radius: 0,
+                coverWidth: '100%',
+                coverHeight: '100%',
+                decodeWidth: HERO_DECODE_W,
+                decodeHeight: HERO_DECODE_H
+              })
+            }
+            .width('100%')
+            .height('100%')
+            .blur(28)
+            .scale({ x: 1.1, y: 1.1 })
           }
-          .width('100%')
-          .height('100%')
-          .blur(28)
-          .scale({ x: 1.1, y: 1.1 })
 
           // 两侧暗色蒙版：中间略亮、两端更暗，让居中海报的边界干净、文字区域更稳。
           Column()
@@ -323,6 +351,8 @@ export struct HomePage {
   @StorageProp(K_NAV_W) windowW: number = 400;
   @State items: VideoCard[] = [];
   @State hero: VideoCard[] = [];
+  /** 远程 banner 本地 URI（RemoteAssets 缓存命中才有值；空串 = 无下发，Hero 保持原有视觉）。 */
+  @State bannerPath: string = '';
   @State loading: boolean = true;
   @State refreshing: boolean = false;
   @State loadingMore: boolean = false;
@@ -392,9 +422,30 @@ export struct HomePage {
   aboutToAppear(): void {
     // 页面重新出现（Tab 切回）时恢复可写状态：否则后台补池/淡入动效会被当成已销毁而永久停摆。
     this.pageGone = false;
+    this.bannerPath = HomePage.remoteBannerUri();
+    // 远程资源在启动 8s 后后台拉取：拉取完成后补读一次（无下发时保持空串，零行为）。
+    setTimeout(() => {
+      if (this.pageGone) {
+        return;
+      }
+      this.bannerPath = HomePage.remoteBannerUri();
+    }, REMOTE_BANNER_RECHECK_MS);
     this.reload();
     this.scheduleCatalogInject();
     this.loadChannels();
+  }
+
+  /** 远程 banner 的 Image URI：RemoteAssets 有缓存文件时返回 file:// 路径，否则空串（回退现有视觉）。 */
+  private static remoteBannerUri(): string {
+    try {
+      const path: string | undefined = RemoteAssets.path('home_banner');
+      if (path === undefined || path.length === 0) {
+        return '';
+      }
+      return 'file://' + path;
+    } catch (err) {
+      return '';
+    }
   }
 
   aboutToDisappear(): void {
@@ -1637,6 +1688,7 @@ export struct HomePage {
         HomeHeroSwiper({
           dark: this.dark,
           hero: this.hero,
+          bannerPath: this.bannerPath,
           onOpen: (index: number) => {
             this.openHero(index);
           }
