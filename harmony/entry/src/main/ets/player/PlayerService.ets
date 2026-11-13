@@ -13,6 +13,7 @@ import { MediaPrefetch } from './MediaPrefetch';
 import { PlayerQuality } from './PlayerQuality';
 import { MediaSession } from './MediaSession';
 import { PowerGuard } from '../services/PowerGuard';
+import { Analytics } from '../services/Analytics';
 import { redactSensitive } from '../utils/Security';
 
 const HISTORY_INTERVAL_MS: number = 5000;
@@ -113,6 +114,8 @@ export class PlayerService {
   private srCapable: boolean = false;
   /** 当前超分是否处于开启状态（以系统回调为准）。 */
   private srActive: boolean = false;
+  /** 当前这条媒体是否已计入一次播放（VV）；切集/切条时重置。 */
+  private vvCounted: boolean = false;
   /** 超分状态变化回调（页面用于展示提示）。 */
   onSuperResolutionChanged: (enabled: boolean, supported: boolean) => void = () => {};
   private lastHistoryAt: number = 0;
@@ -711,6 +714,11 @@ export class PlayerService {
         this.buffering = false;
         this.onState('playing');
         this.syncSessionState(true);
+        // 匿名统计：同一条媒体只计一次播放（VV），恢复播放不重复计。
+        if (!this.vvCounted) {
+          this.vvCounted = true;
+          Analytics.countVideoView();
+        }
       } else if (state === 'paused') {
         this.onState('paused');
         this.syncSessionState(true);
@@ -883,6 +891,7 @@ export class PlayerService {
       headers = { 'Accept': '*/*' };
     }
     const source: media.MediaSource = media.createMediaSourceWithUrl(sourceUrl, headers);
+    this.vvCounted = false;
     await player.setMediaSource(source);
     if (serial !== this.serial || this.released) {
       return;
