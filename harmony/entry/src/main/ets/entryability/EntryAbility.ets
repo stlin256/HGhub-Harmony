@@ -10,7 +10,7 @@ import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { LineAuto } from '../services/LineAuto';
 import { CrashGuard } from '../services/CrashGuard';
 import { PowerGuard } from '../services/PowerGuard';
-import { InstallReporter } from '../services/InstallReporter';
+import { Analytics } from '../services/Analytics';
 import { Net } from '../services/Net';
 import { PerfMark } from '../utils/PerfMark';
 import { ContinuationState } from '../services/ContinuationState';
@@ -137,10 +137,13 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
+    Analytics.onForeground();
   }
 
   onBackground(): void {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, false);
+    // 结算本次前台时长（匿名统计，设置页可关）。
+    Analytics.onBackground();
     // 兜底：播放页可能为了全屏隐藏了状态栏，退到后台时统一走 WindowChrome 串行队列恢复，避免竞态。
     WindowChrome.showStatusBar();
   }
@@ -158,8 +161,8 @@ export default class EntryAbility extends UIAbility {
       CrashGuard.init();
       // 电源守卫：跟踪省电模式与电量，供 AI 超分自动降级。
       PowerGuard.init();
-      // 匿名设备计数：只上报随机 UUID 与版本，用于 README 设备徽章（设置页可关）。
-      InstallReporter.reportOnLaunch();
+      // 匿名使用统计：随机 UUID + 版本/型号 + 当日聚合（设置页可关）。
+      Analytics.onLaunch();
       // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
       LineAuto.init();
       // 离线推荐：异步载入随包目录（3,388 条）+ 本地画像，并按冷却时间静默同步增量目录。
