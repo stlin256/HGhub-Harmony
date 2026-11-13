@@ -989,7 +989,34 @@ async function handleAssetDownload(url, env) {
   if (ASSET_SHA_RE.test(sha)) {
     headers['x-content-sha256'] = sha;
   }
-  return new Response(row.content, { status: 200, headers });
+  // D1 的 BLOB 在不同运行时下可能返回 ArrayBuffer / Uint8Array / 普通数组，
+  // 直接丢给 Response 在部分情况下会得到空 body（实测线上返回 0 字节）。
+  // 统一转成 Uint8Array 再返回。
+  const body = toBytes(row.content);
+  if (body === null) {
+    return json({ error: 'asset_corrupt' }, 500);
+  }
+  return new Response(body, { status: 200, headers });
+}
+
+/** 把 D1 返回的 BLOB 统一成 Uint8Array；无法识别返回 null。 */
+function toBytes(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (Array.isArray(value)) {
+    return new Uint8Array(value);
+  }
+  return null;
 }
 
 /**
