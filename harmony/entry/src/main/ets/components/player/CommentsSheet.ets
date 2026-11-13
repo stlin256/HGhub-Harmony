@@ -279,7 +279,7 @@ export struct CommentsSheet {
       .onClick(() => {
         this.send();
       })
-      .accessibilityText('发送评论')
+      .accessibilityText($r('app.string.ui_3f62e8f5'))
     }
     .width('100%')
     .padding({ top: HgSpace.s, bottom: HgSpace.s })
@@ -288,7 +288,7 @@ export struct CommentsSheet {
   build() {
     Column() {
       Row({ space: HgSpace.s }) {
-        Text('评论')
+        Text($r('app.string.ui_cf510562'))
           .fontSize(HgFont.section)
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
@@ -309,10 +309,11 @@ export struct CommentsSheet {
             .height(HgSize.hitTarget)
             .borderRadius(HgSize.hitTarget / 2)
             .backgroundColor(HgColor.surface3(this.dark))
+            .accessibilityText('评论')
             .onClick(() => {
               this.onClose();
             })
-            .accessibilityText('关闭评论')
+            .accessibilityText($r('app.string.ui_0e067ede'))
           }
         }
       }
@@ -341,15 +342,16 @@ export struct CommentsSheet {
         .transition(HgMotion.statusTransition())
       } else if (this.failed) {
         Column({ space: HgSpace.m }) {
-          Text('评论加载失败')
+          Text($r('app.string.ui_8df8281c'))
             .fontSize(HgFont.body)
             .fontColor(HgColor.textSecondary(this.dark))
-          Button('重试')
+          Button($r('app.string.ui_e2d53a6d'))
             .height(HgSize.secondaryAction)
             .fontSize(HgFont.body)
             .fontColor(HgColor.onAccent(this.dark))
             .backgroundColor(HgColor.accent(this.dark))
             .borderRadius(HgRadius.chip)
+            .accessibilityText('重试')
             .onClick(() => {
               this.reload();
             })
@@ -360,11 +362,11 @@ export struct CommentsSheet {
         .transition(HgMotion.statusTransition())
       } else if (this.items.length === 0) {
         Column({ space: HgSpace.s }) {
-          Text('还没有评论，来抢第一个沙发')
+          Text($r('app.string.ui_a0559bc8'))
             .fontSize(HgFont.rowTitle)
             .fontWeight(HgFont.weightMedium)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('友善发言，一起讨论剧情')
+          Text($r('app.string.ui_b0e70eec'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.textTertiary(this.dark))
         }
@@ -390,22 +392,23 @@ export struct CommentsSheet {
                     .width(16)
                     .height(16)
                     .color(HgColor.accent(this.dark))
-                  Text('加载中…')
+                  Text($r('app.string.ui_300ee3de'))
                     .fontSize(HgFont.micro)
                     .fontColor(HgColor.textTertiary(this.dark))
                 }
                 .transition(HgMotion.statusTransition())
               } else if (this.page < this.pages) {
                 // 无限滚动：滚动临近底部会自动请求下一页，这里只做轻提示（点击仍可作为兜底）。
-                Text('上滑自动加载更多')
+                Text($r('app.string.ui_2564141e'))
                   .fontSize(HgFont.micro)
                   .fontColor(HgColor.textTertiary(this.dark))
                   .transition(HgMotion.statusTransition())
+                  .accessibilityText('上滑自动加载更多')
                   .onClick(() => {
                     this.loadMore();
                   })
               } else {
-                Text('— 到底啦 —')
+                Text($r('app.string.ui_24318bcc'))
                   .fontSize(HgFont.micro)
                   .fontColor(HgColor.textTertiary(this.dark))
                   .transition(HgMotion.statusTransition())

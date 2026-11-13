@@ -67,7 +67,7 @@ export struct LoginSheet {
         Text(this.mode === 'login' ? '注册新账号' : '已有账号？登录')
           .fontSize(HgFont.secondary)
           .fontColor(HgColor.accent(this.dark))
-          .accessibilityText('切换登录/注册')
+          .accessibilityText($r('app.string.ui_afc8bdd9'))
           .onClick(() => {
             this.mode = this.mode === 'login' ? 'register' : 'login';
             this.error = '';
@@ -146,7 +146,7 @@ export struct LoginSheet {
         this.submit();
       })
 
-      Text('登录后可使用点赞、收藏、评论与关注；账号数据仅保存在本机。')
+      Text($r('app.string.ui_88f329ff'))
         .width('100%')
         .fontSize(HgFont.caption)
         .fontColor(HgColor.textTertiary(this.dark))

@@ -402,7 +402,7 @@ export struct SearchPage {
             this.submit(this.keyword);
           })
         if (this.showPlaceholder()) {
-          Text('搜索短剧、作者、题材…')
+          Text($r('app.string.ui_ba6a63ce'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textTertiary(this.dark))
             .maxLines(1)
@@ -419,6 +419,7 @@ export struct SearchPage {
           .fontColor([HgColor.textTertiary(this.dark)])
           .width(HgSize.hitTarget / 2)
           .height(HgSize.hitTarget / 2)
+          .accessibilityText('搜索短剧、作者、题材…')
           .onClick(() => {
             this.keyword = '';
           })
@@ -446,7 +447,7 @@ export struct SearchPage {
         .height(HgSize.control)
         .borderRadius(HgSize.control / 2)
         .backgroundColor(HgColor.surface3(this.dark))
-        .accessibilityText('返回热榜')
+        .accessibilityText($r('app.string.ui_36a4dfc6'))
         .onClick(() => {
           this.clearInput();
         })
@@ -558,16 +559,16 @@ export struct SearchPage {
             SymbolGlyph($r('sys.symbol.bolt_fill'))
               .fontSize(HgIconSize.compact)
               .fontColor([HgColor.accent(this.dark)])
-            Text('热榜')
+            Text($r('app.string.ui_f188133a'))
               .fontSize(HgFont.rowTitle)
               .fontWeight(HgFont.weightMedium)
               .fontColor(HgColor.textPrimary(this.dark))
               .layoutWeight(1)
-            Text('完整榜单 ›')
+            Text($r('app.string.ui_9a306145'))
               .fontSize(HgFont.caption)
               .fontColor(HgColor.accent(this.dark))
               .hoverEffect(HoverEffect.Scale)
-              .accessibilityText('完整榜单')
+              .accessibilityText($r('app.string.ui_2a33a141'))
               .onClick(() => {
                 this.navStack.pushPathByName(ROUTE_RANKS, null);
               })
@@ -581,7 +582,7 @@ export struct SearchPage {
                 .width(14)
                 .height(14)
                 .color(HgColor.accent(this.dark))
-              Text('热榜加载中…')
+              Text($r('app.string.ui_95ba7e56'))
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.textTertiary(this.dark))
             }
@@ -596,13 +597,13 @@ export struct SearchPage {
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .layoutWeight(1)
-              Text('重试')
+              Text($r('app.string.ui_e2d53a6d'))
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.accent(this.dark))
                 .height(HgSize.hitTarget)
                 .padding({ left: HgSpace.s })
                 .hoverEffect(HoverEffect.Scale)
-                .accessibilityText('重试热榜')
+                .accessibilityText($r('app.string.ui_fa7626ef'))
                 .onClick(() => {
                   this.loadHotRank();
                 })
@@ -622,7 +623,7 @@ export struct SearchPage {
         .borderRadius(HgRadius.group)
         .alignItems(HorizontalAlign.Start)
 
-        Text('输入关键词后按回车搜索；先看看热榜，或从搜索历史继续。')
+        Text($r('app.string.ui_05a28290'))
           .width('100%')
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))

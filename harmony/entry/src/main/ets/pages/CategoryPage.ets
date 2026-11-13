@@ -514,11 +514,11 @@ export struct CategoryPage {
       .backgroundColor(HgColor.accentSoft(this.dark))
 
       Column({ space: 2 }) {
-        Text('排行榜')
+        Text($r('app.string.ui_d00981d6'))
           .fontSize(HgFont.rowTitle)
           .fontWeight(HgFont.weightMedium)
           .fontColor(HgColor.textPrimary(this.dark))
-        Text('热播榜 · 推荐榜 · 潜力榜')
+        Text($r('app.string.ui_f3b14e33'))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
       }
@@ -534,7 +534,7 @@ export struct CategoryPage {
     .padding({ left: HgSpace.m, right: HgSpace.m })
         .backgroundColor(HgColor.surface1(this.dark))
         .borderRadius(HgRadius.group)
-        .accessibilityText('热播榜 · 推荐榜 · 潜力榜')
+        .accessibilityText($r('app.string.ui_f3b14e33'))
       }
   }
 
@@ -572,7 +572,7 @@ export struct CategoryPage {
       .alignItems(HorizontalAlign.Start)
 
       Row({ space: HgSpace.xxs }) {
-        Text('全部')
+        Text($r('app.string.ui_778fc8f9'))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
         SymbolGlyph($r('sys.symbol.chevron_right'))
@@ -585,7 +585,7 @@ export struct CategoryPage {
       .width('100%')
       .height(52)
       .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
-      .accessibilityText('全部')
+      .accessibilityText($r('app.string.ui_778fc8f9'))
     }
   }
 
@@ -726,13 +726,13 @@ export struct CategoryPage {
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1)
-      Text('重试')
+      Text($r('app.string.ui_e2d53a6d'))
         .fontSize(HgFont.caption)
         .fontColor(HgColor.accent(this.dark))
         .height(HgSize.hitTarget)
         .padding({ left: HgSpace.s })
         .hoverEffect(HoverEffect.Scale)
-        .accessibilityText('重试')
+        .accessibilityText($r('app.string.ui_e2d53a6d'))
         .onClick(() => {
           if (index >= 0 && index < this.channels.length) {
             this.fetchCate(this.channels[index].route, true);
@@ -763,7 +763,7 @@ export struct CategoryPage {
         .width('100%')
         .transition(HgMotion.statusTransition())
       } else if (this.rowData[index].length === 0) {
-        Text('暂无内容')
+        Text($r('app.string.ui_8c4d505e'))
           .width('100%')
           .height(80)
           .fontSize(HgFont.caption)
@@ -819,17 +819,17 @@ export struct CategoryPage {
         .height(36)
 
       Column({ space: 2 }) {
-        Text('专题')
+        Text($r('app.string.ui_bef9452a'))
           .fontSize(HgFont.rowTitle)
           .fontColor(HgColor.textPrimary(this.dark))
-        Text('精选合集 · 按主题浏览')
+        Text($r('app.string.ui_f32fba10'))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      Text('查看全部 ›')
+      Text($r('app.string.ui_59bca9f1'))
         .fontSize(HgFont.caption)
         .fontColor(HgColor.accent(this.dark))
     }
@@ -838,7 +838,7 @@ export struct CategoryPage {
       .padding({ left: HgSpace.m, right: HgSpace.m })
       .backgroundColor(HgColor.surface1(this.dark))
       .borderRadius(HgRadius.group)
-      .accessibilityText('专题，查看全部')
+      .accessibilityText($r('app.string.ui_60876162'))
     }
   }
 
@@ -862,13 +862,13 @@ export struct CategoryPage {
             .layoutWeight(1)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text('重试')
+          Text($r('app.string.ui_e2d53a6d'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.accent(this.dark))
             .height(HgSize.hitTarget)
             .padding({ left: HgSpace.s })
             .hoverEffect(HoverEffect.Scale)
-            .accessibilityText('重试')
+            .accessibilityText($r('app.string.ui_e2d53a6d'))
             .onClick(() => {
               this.fetchPosts(true);
             })
@@ -878,7 +878,7 @@ export struct CategoryPage {
         .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
         .transition(HgMotion.statusTransition())
       } else if (this.posts.length === 0) {
-        Text('暂无内容')
+        Text($r('app.string.ui_8c4d505e'))
           .width('100%')
           .height(80)
           .fontSize(HgFont.caption)
@@ -910,12 +910,12 @@ export struct CategoryPage {
   build() {
     Column() {
       Row() {
-        Text('分类')
+        Text($r('app.string.ui_435c5259'))
           .fontSize(HgFont.pageLarge)
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
           .lineHeight(HgFont.linePageLarge)
-        Text('每周持续上新')
+        Text($r('app.string.ui_82e9cc5a'))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
           .margin({ left: HgSpace.s, bottom: 5 })
@@ -956,7 +956,7 @@ export struct CategoryPage {
 
             this.PostsSection()
 
-            Text('— 已展示全部频道 —')
+            Text($r('app.string.ui_c24aa538'))
               .width('100%')
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))

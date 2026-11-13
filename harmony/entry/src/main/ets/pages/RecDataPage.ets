@@ -180,7 +180,7 @@ export struct RecDataPage {
 
           if (this.rows.length === 0) {
             Column() {
-              Text('画像还是空的：先收藏/播放几部剧，偏好会慢慢积累。')
+              Text($r('app.string.ui_fe65e02e'))
                 .fontSize(HgFont.body)
                 .fontColor(HgColor.textSecondary(this.dark))
                 .textAlign(TextAlign.Center)
@@ -240,28 +240,31 @@ export struct RecDataPage {
               .backgroundColor(HgColor.accentSoft(this.dark))
               .borderRadius(HgRadius.chip)
               .opacity(this.busy ? 0.6 : 1)
+              .accessibilityText(this.busy ? '正在从剪贴板导入画像' : '从剪贴板导入画像')
               .onClick(() => {
                 this.importProfile();
               })
             }
             HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-              Text('导出到剪贴板')
+              Text($r('app.string.ui_e29f3122'))
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.accent(this.dark))
                 .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.s, bottom: HgSpace.s })
                 .backgroundColor(HgColor.accentSoft(this.dark))
                 .borderRadius(HgRadius.chip)
+                .accessibilityText('导出画像到剪贴板')
                 .onClick(() => {
                   this.exportProfile();
                 })
             }
             HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-              Text('清空')
+              Text($r('app.string.ui_84fcd70d'))
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.danger(this.dark))
                 .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.s, bottom: HgSpace.s })
                 .backgroundColor(HgColor.surface3(this.dark))
                 .borderRadius(HgRadius.chip)
+                .accessibilityText('清空本地画像')
                 .onClick(() => {
                   this.askClear();
                 })
@@ -279,7 +282,7 @@ export struct RecDataPage {
 
           // 本地计算状态：真机验收点（截图需能看到「模型 v2 · 打分 3388」）。
           Column({ space: HgSpace.xxs }) {
-            Text('本地计算状态')
+            Text($r('app.string.ui_6fbdfa23'))
               .fontSize(HgFont.micro)
               .fontWeight(HgFont.weightMedium)
               .fontColor(HgColor.textTertiary(this.dark))
@@ -291,7 +294,7 @@ export struct RecDataPage {
               .fontSize(HgFont.micro)
               .lineHeight(HgFont.lineMicro)
               .fontColor(HgColor.textTertiary(this.dark))
-            Text('模型特征：标签 + 标题/简介文本')
+            Text($r('app.string.ui_bb6138bb'))
               .fontSize(HgFont.micro)
               .lineHeight(HgFont.lineMicro)
               .fontColor(HgColor.textTertiary(this.dark))

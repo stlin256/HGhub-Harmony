@@ -954,12 +954,13 @@ export struct ProfilePage {
           .width(HgSize.hitTarget)
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
+          .accessibilityText('退出登录')
           .onClick(() => {
             this.logout();
           })
         } else {
           Row({ space: HgSpace.xxs }) {
-            Text('登录')
+            Text($r('app.string.ui_21f1e882'))
               .fontSize(HgFont.caption)
               .fontWeight(HgFont.weightMedium)
               .fontColor(HgColor.onAccent(this.dark))
@@ -971,7 +972,7 @@ export struct ProfilePage {
           .padding({ left: HgSpace.m, right: HgSpace.s })
           .backgroundColor(HgColor.accent(this.dark))
           .borderRadius(HgRadius.chip)
-          .accessibilityText('登录')
+          .accessibilityText($r('app.string.ui_21f1e882'))
           .onClick(() => {
             UiBus.openLogin();
           })
@@ -982,7 +983,7 @@ export struct ProfilePage {
       .backgroundColor(HgColor.surface1(this.dark))
       .borderRadius(HgRadius.group)
       .border({ width: 0.5, color: HgColor.hairline(this.dark) })
-      .accessibilityText('登录')
+      .accessibilityText($r('app.string.ui_21f1e882'))
       .onClick(() => {
         if (!this.loggedIn) {
           UiBus.openLogin();
@@ -994,7 +995,7 @@ export struct ProfilePage {
   @Builder
   Segmented() {
     Row() {
-      Text('我的收藏')
+      Text($r('app.string.ui_93a41f50'))
         .fontSize(HgFont.secondary)
         .fontWeight(this.tab === 'fav' ? HgFont.weightMedium : HgFont.weightRegular)
         .fontColor(this.tab === 'fav' ? HgColor.textPrimary(this.dark) : HgColor.textSecondary(this.dark))
@@ -1004,11 +1005,11 @@ export struct ProfilePage {
         .backgroundColor(this.tab === 'fav' ? HgColor.surface1(this.dark) : Color.Transparent)
         .borderRadius(HgRadius.chip)
         .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-        .accessibilityText('我的收藏')
+        .accessibilityText($r('app.string.ui_93a41f50'))
         .onClick(() => {
           this.onTabTap('fav');
         })
-      Text('观看历史')
+      Text($r('app.string.ui_eb1befc2'))
         .fontSize(HgFont.secondary)
         .fontWeight(this.tab === 'history' ? HgFont.weightMedium : HgFont.weightRegular)
         .fontColor(this.tab === 'history' ? HgColor.textPrimary(this.dark) : HgColor.textSecondary(this.dark))
@@ -1018,7 +1019,7 @@ export struct ProfilePage {
         .backgroundColor(this.tab === 'history' ? HgColor.surface1(this.dark) : Color.Transparent)
         .borderRadius(HgRadius.chip)
         .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-        .accessibilityText('观看历史')
+        .accessibilityText($r('app.string.ui_eb1befc2'))
         .onClick(() => {
           this.onTabTap('history');
         })
@@ -1078,6 +1079,7 @@ export struct ProfilePage {
       .aspectRatio(0.75)
       .borderRadius(HgRadius.row)
       .clip(true)
+      .accessibilityText('打开第 ' + (index + 1) + ' 个内容')
       .onClick(() => {
         this.openCard(item, index);
       })
@@ -1152,7 +1154,7 @@ export struct ProfilePage {
               .width(20)
               .height(20)
               .color(HgColor.textTertiary(this.dark))
-            Text('加载中…')
+            Text($r('app.string.ui_300ee3de'))
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))
           }
@@ -1162,7 +1164,7 @@ export struct ProfilePage {
           .transition(HgMotion.fadeIn(HgMotion.fast))
         } else if (!this.hasMore()) {
           // 全部加载完：底部结束提示一次淡入。
-          Text('— 已经到底啦 —')
+          Text($r('app.string.ui_a74866f4'))
             .width('100%')
             .height(36)
             .fontSize(HgFont.micro)
@@ -1172,7 +1174,7 @@ export struct ProfilePage {
         }
         if (this.displayTab === 'history') {
           HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-            Text('清空观看历史')
+            Text($r('app.string.ui_e7ec9d80'))
               .width('100%')
               .height(HgSize.secondaryAction)
               .fontSize(HgFont.secondary)
@@ -1181,7 +1183,7 @@ export struct ProfilePage {
               .backgroundColor(HgColor.surface2(this.dark))
               .borderRadius(HgRadius.chip)
               .margin({ top: HgSpace.m })
-              .accessibilityText('清空观看历史')
+              .accessibilityText($r('app.string.ui_e7ec9d80'))
               .onClick(() => {
                 this.clearHistory();
               })
@@ -1221,10 +1223,10 @@ export struct ProfilePage {
         .height(36)
 
         Column({ space: 2 }) {
-          Text('关注')
+          Text($r('app.string.ui_7ac0d5c9'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('关注作者的最新作品')
+          Text($r('app.string.ui_5e4d3706'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
         }
@@ -1240,18 +1242,18 @@ export struct ProfilePage {
       .padding({ left: HgSpace.m, right: HgSpace.m })
       .backgroundColor(HgColor.surface1(this.dark))
       .borderRadius(HgRadius.group)
-      .accessibilityText('关注作者的最新作品')
+      .accessibilityText($r('app.string.ui_5e4d3706'))
       .onClick(() => {
         this.navStack.pushPathByName(ROUTE_FOLLOW, null);
       })
-      .accessibilityText('关注，查看关注作者的作品')
+      .accessibilityText($r('app.string.ui_fdbbd2d4'))
     }
   }
 
   build() {
     Column() {
       Row() {
-        Text('我的')
+        Text($r('app.string.ui_a82c993d'))
           .fontSize(this.titleCollapsed ? HgFont.section : HgFont.pageLarge)
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
@@ -1267,7 +1269,7 @@ export struct ProfilePage {
           .width(HgSize.hitTarget)
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
-          .accessibilityText('设置')
+          .accessibilityText($r('app.string.ui_7debf9cb'))
           .onClick(() => {
             this.navStack.pushPathByName(ROUTE_SETTINGS, null);
           })

@@ -205,14 +205,14 @@ export struct HgPosterFlow {
             .width(HgSize.hitTarget / 2)
             .height(HgSize.hitTarget / 2)
             .color(HgColor.accent(this.dark))
-          Text('加载中…')
+          Text($r('app.string.ui_300ee3de'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.textTertiary(this.dark))
             .margin({ left: HgSpace.s })
         }
         .transition(HgMotion.fadeIn(HgMotion.fast))
       } else if (this.errorText.length > 0) {
-        Text('加载失败，点击重试')
+        Text($r('app.string.ui_560c03c3'))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .padding({ left: HgSpace.s, right: HgSpace.s })
@@ -222,7 +222,7 @@ export struct HgPosterFlow {
             this.onLoadMore();
           })
       } else {
-        Text('— 已经到底啦 —')
+        Text($r('app.string.ui_a74866f4'))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
           .transition(HgMotion.fadeIn(HgMotion.fast))

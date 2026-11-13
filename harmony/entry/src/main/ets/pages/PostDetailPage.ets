@@ -206,6 +206,7 @@ export struct PostDetailPage {
       .width('100%')
       .aspectRatio(16 / 9)
       .backgroundColor(HgColor.playerBackground)
+      .accessibilityText('播放视频')
       .onClick(() => {
         this.openPlayer();
       })
@@ -276,7 +277,7 @@ export struct PostDetailPage {
       .padding({ left: HgSpace.m, right: HgSpace.m })
       .backgroundColor(HgColor.surface2(this.dark))
       .borderRadius(HgRadius.chip)
-      .accessibilityText('点赞')
+      .accessibilityText($r('app.string.ui_e07f300d'))
       .onClick(() => {
         this.toggleLike();
       })
@@ -293,6 +294,7 @@ export struct PostDetailPage {
       .padding({ left: HgSpace.m, right: HgSpace.m })
       .backgroundColor(HgColor.surface2(this.dark))
       .borderRadius(HgRadius.chip)
+      .accessibilityText('点赞')
       .onClick(() => {
         this.toggleCollect();
       })
@@ -348,7 +350,7 @@ export struct PostDetailPage {
   CommentsBlock() {
     Column() {
       Row() {
-        Text('评论')
+        Text($r('app.string.ui_cf510562'))
           .fontSize(HgFont.section)
           .fontWeight(HgFont.weightMedium)
           .fontColor(HgColor.textPrimary(this.dark))
@@ -395,12 +397,12 @@ export struct PostDetailPage {
             .layoutWeight(1)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text('重试')
+          Text($r('app.string.ui_e2d53a6d'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.accent(this.dark))
             .height(HgSize.hitTarget)
             .padding({ left: HgSpace.s })
-            .accessibilityText('重试')
+            .accessibilityText($r('app.string.ui_e2d53a6d'))
             .onClick(() => {
               this.loadComments();
             })
@@ -408,7 +410,7 @@ export struct PostDetailPage {
         .width('100%')
         .height(56)
       } else if (this.comments.length === 0) {
-        Text('还没有评论，来抢第一个沙发')
+        Text($r('app.string.ui_a0559bc8'))
           .width('100%')
           .fontSize(HgFont.secondary)
           .fontColor(HgColor.textTertiary(this.dark))
@@ -425,7 +427,7 @@ export struct PostDetailPage {
             .fontSize(HgFont.caption)
             .fontColor(HgColor.accent(this.dark))
             .textAlign(TextAlign.Center)
-            .accessibilityText('还没有评论，来抢第一个沙发')
+            .accessibilityText($r('app.string.ui_a0559bc8'))
             .onClick(() => {
               this.loadMoreComments();
             })

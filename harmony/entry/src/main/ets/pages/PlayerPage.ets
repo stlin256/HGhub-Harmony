@@ -2865,7 +2865,7 @@ export struct PlayerPage {
           .onClick(() => {
             this.handlePlayerBack();
           })
-          .accessibilityText('返回')
+          .accessibilityText($r('app.string.ui_11d02415'))
         }
 
         Column({ space: 2 }) {
@@ -2935,7 +2935,7 @@ export struct PlayerPage {
           .borderRadius(16)
           .backgroundColor(HgColor.videoChip)
           .margin({ right: HgSpace.xs })
-          .accessibilityText('投播到其他设备')
+          .accessibilityText($r('app.string.ui_bc88087e'))
           .transition(this.chipFade())
         }
 
@@ -2951,6 +2951,7 @@ export struct PlayerPage {
                 .backgroundColor(HgColor.videoChip)
                 .borderRadius(16)
                 .margin({ right: HgSpace.xs })
+                .accessibilityText('投播到其他设备')
                 .onClick(() => {
                   this.togglePaneFullscreen();
                 })
@@ -2962,7 +2963,7 @@ export struct PlayerPage {
 
         HgPressable({ dark: true, noTap: true }) {
           Row({ space: 2 }) {
-            Text('线路')
+            Text($r('app.string.ui_5922d95f'))
               .fontSize(HgFont.micro)
               .fontColor(HgColor.videoInk2)
               .maxLines(1)
@@ -2974,10 +2975,11 @@ export struct PlayerPage {
           .padding({ left: 10, right: 10 })
           .backgroundColor(HgColor.videoChip)
           .borderRadius(16)
+          .accessibilityText('线路')
           .onClick(() => {
             this.openLines();
           })
-          .accessibilityText('切换线路')
+          .accessibilityText($r('app.string.ui_5902c97c'))
         }
 
         HgPressable({ dark: true, noTap: true }) {
@@ -2988,10 +2990,11 @@ export struct PlayerPage {
           }
           .width(HgSize.hitTarget)
           .height(HgSize.hitTarget)
+          .accessibilityText('切换线路')
           .onClick(() => {
             this.toggleMenu();
           })
-          .accessibilityText('更多')
+          .accessibilityText($r('app.string.ui_9b0c6c78'))
         }
       }
       .width('100%')
@@ -3055,7 +3058,7 @@ export struct PlayerPage {
           .backgroundColor(HgColor.videoChip)
           // 收藏状态切换脉冲（1→1.12→1），由 pulseRail 用 animateTo 驱动。
           .scale({ x: this.favPulse, y: this.favPulse })
-          Text('收藏')
+          Text($r('app.string.ui_d07cee78'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.videoInk2)
         }
@@ -3065,6 +3068,7 @@ export struct PlayerPage {
         .onTouch((event: TouchEvent) => {
           this.chromeTouch('fav', event);
         })
+        .accessibilityText('收藏')
         .onClick(() => {
           this.toggleFav();
         })
@@ -3094,7 +3098,7 @@ export struct PlayerPage {
           this.openComments();
           this.showChrome();
         })
-        .accessibilityText('评论')
+        .accessibilityText($r('app.string.ui_cf510562'))
 
         Column({ space: HgSpace.xs }) {
           Stack() {
@@ -3106,7 +3110,7 @@ export struct PlayerPage {
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
           .backgroundColor(HgColor.videoChip)
-          Text('分享')
+          Text($r('app.string.ui_7a924341'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.videoInk2)
         }
@@ -3116,10 +3120,11 @@ export struct PlayerPage {
         .onTouch((event: TouchEvent) => {
           this.chromeTouch('share', event);
         })
+        .accessibilityText('分享')
         .onClick(() => {
           this.share();
         })
-        .accessibilityText('分享')
+        .accessibilityText($r('app.string.ui_7a924341'))
       }
       .alignItems(HorizontalAlign.Center)
       .margin({ right: HgSpace.m + this.rightInset, bottom: this.bottomSafePad() + 150 })
@@ -3284,7 +3289,7 @@ export struct PlayerPage {
               SymbolGlyph($r('sys.symbol.list_bullet'))
                 .fontSize(HgIconSize.compact)
                 .fontColor([HgColor.videoInk])
-              Text('选集')
+              Text($r('app.string.ui_e31ef097'))
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.videoInk)
             }
@@ -3297,11 +3302,12 @@ export struct PlayerPage {
             .onTouch((event: TouchEvent) => {
               this.chromeTouch('episode', event);
             })
+            .accessibilityText('选集')
             .onClick(() => {
               PlaybackLog.info('ui.episode', 'tap');
               this.openSheet('episode');
             })
-            .accessibilityText('选集')
+            .accessibilityText($r('app.string.ui_e31ef097'))
           }
 
           Stack() {
@@ -3318,10 +3324,11 @@ export struct PlayerPage {
           .onTouch((event: TouchEvent) => {
             this.chromeTouch('lock', event);
           })
+          .accessibilityText('选集')
           .onClick(() => {
             this.toggleLock();
           })
-          .accessibilityText('锁定屏幕')
+          .accessibilityText($r('app.string.ui_13143e50'))
         }
         .width('100%')
         .height(44)
@@ -3383,7 +3390,7 @@ export struct PlayerPage {
             .width(32)
             .height(32)
             .color(HgColor.videoInk)
-          Text('正在跳转…')
+          Text($r('app.string.ui_a34380dc'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.videoInk2)
             .maxLines(1)
@@ -3403,7 +3410,7 @@ export struct PlayerPage {
             .height(32)
             .color(HgColor.videoInk)
           if (this.bufferingLong) {
-            Text('正在缓冲…')
+            Text($r('app.string.ui_be4080c6'))
               .fontSize(HgFont.micro)
               .fontColor(HgColor.videoInk2)
           }
@@ -3424,10 +3431,11 @@ export struct PlayerPage {
             .borderRadius(32)
             .backgroundColor('#66000000')
             .border({ width: 1, color: HgColor.videoHairline })
+            .accessibilityText('正在缓冲…')
             .onClick(() => {
               this.togglePlay();
             })
-            .accessibilityText('继续播放')
+            .accessibilityText($r('app.string.ui_ed41aa6c'))
           }
         }
         .transition(HgMotion.statusTransition())
@@ -3435,26 +3443,28 @@ export struct PlayerPage {
 
       if (this.ended) {
         Column({ space: HgSpace.m }) {
-          Text('本集完')
+          Text($r('app.string.ui_c2e144d7'))
             .fontSize(HgFont.section)
             .fontColor(HgColor.videoInk)
           Row({ space: HgSpace.m }) {
-            Button('重播')
+            Button($r('app.string.ui_67597dbc'))
               .height(HgSize.secondaryAction)
               .fontSize(HgFont.body)
               .fontColor(HgColor.videoInk)
               .backgroundColor(HgColor.videoChipStrong)
               .borderRadius(HgRadius.chip)
+              .accessibilityText('重播')
               .onClick(() => {
                 this.replay();
               })
             if (this.params.feedKind !== 'post' && this.ep < this.episodeCount) {
-              Button('下一集')
+              Button($r('app.string.ui_8e48c9ea'))
                 .height(HgSize.secondaryAction)
                 .fontSize(HgFont.body)
                 .fontColor(HgColor.onAccent(true))
                 .backgroundColor(HgColor.accent(true))
                 .borderRadius(HgRadius.chip)
+                .accessibilityText('下一集')
                 .onClick(() => {
                   this.switchEpisode(this.ep + 1);
                 })
@@ -3469,7 +3479,7 @@ export struct PlayerPage {
 
       if (this.errorText.length > 0) {
         Column({ space: HgSpace.s }) {
-          Text('视频暂时无法加载')
+          Text($r('app.string.ui_016024b7'))
             .fontSize(HgFont.body)
             .fontWeight(HgFont.weightMedium)
             .fontColor(HgColor.videoInk)
@@ -3479,21 +3489,23 @@ export struct PlayerPage {
             .textAlign(TextAlign.Center)
             .maxLines(2)
           Row({ space: HgSpace.m }) {
-            Button('重试')
+            Button($r('app.string.ui_e2d53a6d'))
               .height(HgSize.secondaryAction)
               .fontSize(HgFont.secondary)
               .fontColor(HgColor.onAccent(true))
               .backgroundColor(HgColor.accent(true))
               .borderRadius(HgRadius.chip)
+              .accessibilityText('重试')
               .onClick(() => {
                 this.retryPlayback();
               })
-            Button('切换线路')
+            Button($r('app.string.ui_5902c97c'))
               .height(HgSize.secondaryAction)
               .fontSize(HgFont.secondary)
               .fontColor(HgColor.videoLink)
               .backgroundColor(HgColor.videoChip)
               .borderRadius(HgRadius.chip)
+              .accessibilityText('切换线路')
               .onClick(() => {
                 this.openLines();
               })
@@ -3674,7 +3686,7 @@ export struct PlayerPage {
       .onClick(() => {
         this.toggleLock();
       })
-      .accessibilityText('已锁定，点按解锁')
+      .accessibilityText($r('app.string.ui_53fdbebb'))
       .margin({ right: HgSpace.l + this.rightInset, bottom: this.bottomSafePad() + HgSpace.xxl })
     }
     .width('100%')
@@ -3690,6 +3702,7 @@ export struct PlayerPage {
       .width('100%')
       .height('100%')
       .backgroundColor(HgColor.mask(true))
+      .accessibilityText('已锁定，点按解锁')
       .onClick(() => {
         this.setMenuVisible(false);
       })
@@ -3747,12 +3760,12 @@ export struct PlayerPage {
   MoreMenuPanel() {
     Column() {
       Row() {
-        Text('画面比例')
+        Text($r('app.string.ui_f07fc510'))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(true))
           .layoutWeight(1)
         if (this.isContainForced()) {
-          Text('横屏自动适应')
+          Text($r('app.string.ui_d3e7de0f'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.videoInk3)
         }
@@ -3844,7 +3857,7 @@ export struct PlayerPage {
             SymbolGlyph($r('sys.symbol.sparkles'))
               .fontSize(12)
               .fontColor([HgColor.accent(true)])
-            Text('已开启 AI 超分')
+            Text($r('app.string.ui_10f28175'))
               .fontSize(HgFont.micro)
               .fontColor(HgColor.videoInk)
           }
@@ -3857,7 +3870,7 @@ export struct PlayerPage {
         .position({ x: 0, y: this.topSafePad() + 56 })
         .opacity(this.srHintOpacity)
         .hitTestBehavior(HitTestMode.None)
-        .accessibilityText('已开启 AI 超分')
+        .accessibilityText($r('app.string.ui_10f28175'))
       }
 
       // 加载/缓冲/播放/错误浮层也放进页内，滑动时跟着一起走，不会悬停在固定位置。

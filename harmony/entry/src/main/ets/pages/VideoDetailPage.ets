@@ -432,7 +432,7 @@ export struct VideoDetailPage {
       .onClick(() => {
         this.navStack.pop();
       })
-      .accessibilityText('返回')
+      .accessibilityText($r('app.string.ui_11d02415'))
 
       Blank()
 
@@ -445,10 +445,11 @@ export struct VideoDetailPage {
       .height(HgSize.hitTarget)
       .borderRadius(HgSize.hitTarget / 2)
       .backgroundColor(HgColor.videoChipStrong)
+      .accessibilityText('返回')
       .onClick(() => {
         this.copyLink();
       })
-      .accessibilityText('分享')
+      .accessibilityText($r('app.string.ui_7a924341'))
     }
     .width('100%')
     .height(44)
@@ -502,7 +503,7 @@ export struct VideoDetailPage {
   EpisodeSection() {
     Column() {
       Row({ space: HgSpace.s }) {
-        Text('选集')
+        Text($r('app.string.ui_e31ef097'))
           .fontSize(HgFont.section)
           .fontWeight(HgFont.weightMedium)
           .fontColor(HgColor.textPrimary(this.dark))
@@ -512,7 +513,7 @@ export struct VideoDetailPage {
         Blank()
         if (this.episodeCount > PREVIEW_COUNT) {
           Row({ space: HgSpace.xxs }) {
-            Text('全部')
+            Text($r('app.string.ui_778fc8f9'))
               .fontSize(HgFont.caption)
               .fontColor(HgColor.textSecondary(this.dark))
             SymbolGlyph($r('sys.symbol.chevron_right'))
@@ -520,6 +521,7 @@ export struct VideoDetailPage {
               .fontColor([HgColor.textTertiary(this.dark)])
           }
           .height(HgSize.hitTarget)
+          .accessibilityText('全部')
           .onClick(() => {
             this.showEpisodes = true;
           })
@@ -568,7 +570,7 @@ export struct VideoDetailPage {
           .fontColor(HgColor.textPrimary(this.dark))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text('创作者')
+        Text($r('app.string.ui_70ecebae'))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
       }
@@ -579,6 +581,7 @@ export struct VideoDetailPage {
     .padding(HgSpace.m)
     .backgroundColor(HgColor.surface1(this.dark))
     .borderRadius(HgRadius.group)
+    .accessibilityText('创作者')
     .onClick(() => {
       if (this.authorId > 0) {
         const param: UserParam = { uid: this.authorId };
@@ -591,7 +594,7 @@ export struct VideoDetailPage {
   @Builder
   DescriptionBlock() {
     Column({ space: HgSpace.s }) {
-      Text('简介')
+      Text($r('app.string.ui_5ea2e0cd'))
         .fontSize(HgFont.section)
         .fontWeight(HgFont.weightMedium)
         .fontColor(HgColor.textPrimary(this.dark))
@@ -609,6 +612,7 @@ export struct VideoDetailPage {
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .hoverEffect(HoverEffect.Scale)
+          .accessibilityText('简介')
           .onClick(() => {
             this.toggleDescExpanded();
           })
@@ -670,11 +674,12 @@ export struct VideoDetailPage {
               .fontSize(HgIconSize.emphasis)
               .fontColor([this.faved ? HgColor.star(this.dark) : HgColor.textSecondary(this.dark)])
               .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-            Text('收藏')
+            Text($r('app.string.ui_d07cee78'))
               .fontSize(HgFont.nano)
               .fontColor(HgColor.textSecondary(this.dark))
           }
           .width(44)
+          .accessibilityText('收藏')
           .onClick(() => {
             this.toggleFav();
           })
@@ -685,11 +690,12 @@ export struct VideoDetailPage {
               .fontSize(HgIconSize.emphasis)
               .fontColor([this.liked ? HgColor.like(this.dark) : HgColor.textSecondary(this.dark)])
               .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-            Text('点赞')
+            Text($r('app.string.ui_e07f300d'))
               .fontSize(HgFont.nano)
               .fontColor(HgColor.textSecondary(this.dark))
           }
           .width(44)
+          .accessibilityText('点赞')
           .onClick(() => {
             this.toggleLike();
           })
@@ -704,6 +710,7 @@ export struct VideoDetailPage {
             .backgroundColor(HgColor.accent(this.dark))
             .borderRadius(HgRadius.chip)
             .maxFontScale(1.2)
+            .accessibilityText('点赞')
             .onClick(() => {
               this.playPrimary();
             })

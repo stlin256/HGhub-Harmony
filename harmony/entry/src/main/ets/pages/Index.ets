@@ -641,7 +641,7 @@ struct Index {
           SymbolGlyph($r('sys.symbol.square_grid_2x2'))
             .fontSize(28)
             .fontColor([HgColor.textTertiary(this.dark)])
-          Text('从左侧选择内容')
+          Text($r('app.string.ui_bacaaa62'))
             .fontSize(13)
             .fontColor(HgColor.textTertiary(this.dark))
         }
