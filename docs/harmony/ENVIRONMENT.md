@@ -1,7 +1,7 @@
 # HarmonyOS CLI 开发环境、签名与真机调试
 
 > 适用对象：HGhub 鸿蒙原生客户端（`harmony/` 工程，ArkTS/ArkUI，无 WebView）。
-> 实测环境：Windows 11 本机、DevEco Studio 26.0.0（含 HarmonyOS SDK API 26）、无已连接真机。
+> 实测环境：Windows 11 本机、DevEco Studio 26.0.0（含 HarmonyOS SDK API 26）；当前开发机已连接 HarmonyOS 真机（Pura 70 Pro+ / HBN-AL80）用于验证。
 > 本文命令均为本机实测；未能在本机验证的条目标注「未验证 / 需真机」。
 > 配套脚本：[env.ps1](../../scripts/harmony/env.ps1)、[build.ps1](../../scripts/harmony/build.ps1)、
 > [install.ps1](../../scripts/harmony/install.ps1)、[device.ps1](../../scripts/harmony/device.ps1)、
