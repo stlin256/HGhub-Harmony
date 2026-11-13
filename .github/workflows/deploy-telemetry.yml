@@ -24,7 +24,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # wrangler 4.x 要求 Node.js >= 22.12.0
+          node-version: '22'
 
       - name: 安装依赖
         working-directory: telemetry-worker
