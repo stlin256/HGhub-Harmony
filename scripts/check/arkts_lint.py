@@ -338,8 +338,28 @@ def check_file_size():
     print("  单文件行数检查完成，超限 %d 个" % over)
 
 
+def ensure_server_placeholder():
+    """ServerEndpoint.local.ets 由 set-server.mjs 生成且不入库。
+    全新 clone 直接跑检查会因「导入不存在」失败，这里自动补占位（与 CI 一致）。"""
+    local = os.path.join(ROOT, "harmony", "entry", "src", "main", "ets", "services",
+                         "ServerEndpoint.local.ets")
+    if os.path.exists(local):
+        return
+    script = os.path.join(ROOT, "scripts", "harmony", "set-server.mjs")
+    if not os.path.exists(script):
+        return
+    try:
+        subprocess.run(["node", script, "--placeholder"], cwd=ROOT,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        if os.path.exists(local):
+            print("  已自动生成 ServerEndpoint.local.ets 占位（真实值由 build.ps1 注入）")
+    except Exception:
+        pass
+
+
 def main():
     skip_syntax = "--skip-syntax" in sys.argv
+    ensure_server_placeholder()
     print("[1/7] ArkTS 语法")
     if skip_syntax:
         print("  已跳过")
