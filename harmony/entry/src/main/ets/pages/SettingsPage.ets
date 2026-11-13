@@ -60,6 +60,8 @@ export struct SettingsPage {
   @State preferHevc: boolean = false;
   /** AI 超分开关（默认开）。 */
   @State superResolution: boolean = true;
+  /** 匿名使用统计开关（默认开）。 */
+  @State analytics: boolean = true;
   @State multiSource: boolean = true;
   /** IPv6 优先（默认开）。 */
   @State ipv6Prefer: boolean = true;
@@ -111,6 +113,7 @@ export struct SettingsPage {
     this.muteOnStartup = UserPrefs.muteOnStartup();
     this.preferHevc = UserPrefs.preferHevc();
     this.superResolution = UserPrefs.superResolution();
+    this.analytics = UserPrefs.analytics();
     this.multiSource = UserPrefs.multiSource();
     this.ipv6Prefer = Ipv6Preference.enabled();
     this.crashCount = CrashGuard.count();
@@ -931,6 +934,35 @@ export struct SettingsPage {
           this.checkUpdate();
         })
       }
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.person'))
+        Column({ space: 2 }) {
+          Text('匿名使用统计')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text('仅上报随机设备 ID 与版本号，用于统计设备数；不含账号、位置与播放内容')
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(2)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.analytics })
+          .selectedColor(HgColor.accent(this.dark))
+          .onChange((isOn: boolean) => {
+            this.analytics = isOn;
+            UserPrefs.setAnalytics(isOn);
+          })
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+      .accessibilityText('匿名使用统计')
 
       Divider()
         .width('100%')
