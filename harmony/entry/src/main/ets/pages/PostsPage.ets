@@ -289,25 +289,25 @@ export struct PostsPage {
             .width(18)
             .height(18)
             .color(HgColor.accent(this.dark))
-          Text('加载中…')
+          Text($r('app.string.ui_300ee3de'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.textTertiary(this.dark))
             .margin({ left: HgSpace.s })
         }
         .transition(HgMotion.fadeIn(HgMotion.fast))
       } else if (this.errorText.length > 0) {
-        Text('加载失败，点击重试')
+        Text($r('app.string.ui_560c03c3'))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .padding(HgSpace.m)
           .hoverEffect(HoverEffect.Scale)
           .transition(HgMotion.fadeIn(HgMotion.fast))
-          .accessibilityText('加载失败，点击重试')
+          .accessibilityText($r('app.string.ui_560c03c3'))
           .onClick(() => {
             this.loadMore();
           })
       } else if (this.finished) {
-        Text('— 已经到底啦 —')
+        Text($r('app.string.ui_a74866f4'))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
           .transition(HgMotion.fadeIn(HgMotion.fast))

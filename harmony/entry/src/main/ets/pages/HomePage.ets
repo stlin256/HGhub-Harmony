@@ -266,7 +266,7 @@ struct HomeHeroSwiper {
         .height('100%')
         .borderRadius(HgRadius.hero)
         .clip(true)
-        .accessibilityText('推荐内容，点击播放')
+        .accessibilityText($r('app.string.ui_c36dc2ad'))
         .onClick(() => {
           this.onOpen(index);
         })
@@ -1594,14 +1594,14 @@ export struct HomePage {
   @Builder
   HomeHeader() {
     Column() {
-      Text('发现')
+      Text($r('app.string.ui_523e40a0'))
         .width('100%')
         .fontSize(HgFont.pageLarge)
         .fontWeight(HgFont.weightBold)
         .fontColor(HgColor.textPrimary(this.dark))
         .lineHeight(HgFont.linePageLarge)
         .margin({ top: HgSpace.xs })
-      Text('AI 短剧 · 每日上新')
+      Text($r('app.string.ui_e1c90126'))
         .width('100%')
         .fontSize(HgFont.caption)
         .fontColor(HgColor.textTertiary(this.dark))
@@ -1625,14 +1625,14 @@ export struct HomePage {
           }
         }) {
           Row() {
-            Text('为你推荐')
+            Text($r('app.string.ui_d01c2df7'))
               .fontSize(HgFont.section)
               .fontWeight(HgFont.weightMedium)
               .fontColor(HgColor.textPrimary(this.dark))
           }
           .height(HgSize.hitTarget)
           .padding({ right: HgSpace.s })
-          .accessibilityText('为你推荐')
+          .accessibilityText($r('app.string.ui_d01c2df7'))
         }
         Blank()
         if (this.switching) {
@@ -1653,13 +1653,13 @@ export struct HomePage {
             SymbolGlyph($r('sys.symbol.arrow_clockwise'))
               .fontSize(HgIconSize.inline)
               .fontColor([HgColor.textTertiary(this.dark)])
-            Text('换一批')
+            Text($r('app.string.ui_b0d66234'))
               .fontSize(HgFont.caption)
               .fontColor(HgColor.textTertiary(this.dark))
           }
           .height(HgSize.hitTarget)
           .padding({ left: HgSpace.s })
-          .accessibilityText('换一批')
+          .accessibilityText($r('app.string.ui_b0d66234'))
         }
       }
       .width('100%')
@@ -1668,7 +1668,7 @@ export struct HomePage {
 
       if (this.cateError.length > 0) {
         Row() {
-          Text('加载失败，点击重试')
+          Text($r('app.string.ui_560c03c3'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.accent(this.dark))
         }
@@ -1676,7 +1676,7 @@ export struct HomePage {
         .height(HgSize.hitTarget)
         .justifyContent(FlexAlign.Center)
         .hoverEffect(HoverEffect.Scale)
-        .accessibilityText('加载失败，点击重试')
+        .accessibilityText($r('app.string.ui_560c03c3'))
         .onClick(() => {
           this.retryCate();
         })
@@ -1695,25 +1695,25 @@ export struct HomePage {
             .width(18)
             .height(18)
             .color(HgColor.accent(this.dark))
-          Text('加载中…')
+          Text($r('app.string.ui_300ee3de'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.textTertiary(this.dark))
             .margin({ left: HgSpace.s })
         }
         .transition(HgMotion.fadeIn(HgMotion.fast))
       } else if (this.errorText.length > 0) {
-        Text('加载失败，点击重试')
+        Text($r('app.string.ui_560c03c3'))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .padding(HgSpace.m)
           .hoverEffect(HoverEffect.Scale)
           .transition(HgMotion.fadeIn(HgMotion.fast))
-          .accessibilityText('加载失败，点击重试')
+          .accessibilityText($r('app.string.ui_560c03c3'))
           .onClick(() => {
             this.loadMore();
           })
       } else if (this.finished) {
-        Text('— 已经到底啦 —')
+        Text($r('app.string.ui_a74866f4'))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
           .transition(HgMotion.fadeIn(HgMotion.fast))
@@ -1805,12 +1805,12 @@ export struct HomePage {
             }
           })
           if (this.errorText.length > 0) {
-            Text('切换线路')
+            Text($r('app.string.ui_5902c97c'))
               .fontSize(HgFont.body)
               .fontColor(HgColor.accent(this.dark))
               .height(HgSize.hitTarget)
               .margin({ top: HgSpace.s })
-              .accessibilityText('切换线路')
+              .accessibilityText($r('app.string.ui_5902c97c'))
               .onClick(() => {
                 UiBus.openLines();
               })

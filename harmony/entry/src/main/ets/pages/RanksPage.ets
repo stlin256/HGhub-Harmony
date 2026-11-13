@@ -798,7 +798,7 @@ export struct RanksPage {
 
         if (this.errorText.length > 0 && (this.topRows.length > 0 || this.restRows.length > 0)) {
           Row() {
-            Text('加载失败，点击重试')
+            Text($r('app.string.ui_560c03c3'))
               .fontSize(HgFont.caption)
               .fontColor(HgColor.accent(this.dark))
           }
@@ -806,7 +806,7 @@ export struct RanksPage {
           .height(HgSize.hitTarget)
           .justifyContent(FlexAlign.Center)
           .hoverEffect(HoverEffect.Scale)
-          .accessibilityText('加载失败，点击重试')
+          .accessibilityText($r('app.string.ui_560c03c3'))
           .onClick(() => {
             this.retry();
           })
@@ -869,7 +869,7 @@ export struct RanksPage {
               }, (row: RankRowView) => row.key)
               ListItem() {
                 Row() {
-                  Text('— 榜单已加载完 —')
+                  Text($r('app.string.ui_190c349c'))
                     .fontSize(HgFont.micro)
                     .fontColor(HgColor.textTertiary(this.dark))
                 }

@@ -52,7 +52,7 @@ export struct AboutPage {
       .borderRadius(22)
       .objectFit(ImageFit.Cover)
       .backgroundColor(HgColor.surface3(this.dark))
-      .accessibilityText('作者头像')
+      .accessibilityText($r('app.string.ui_408579c3'))
   }
 
   @Builder
@@ -118,7 +118,7 @@ export struct AboutPage {
                 .height(88)
                 .borderRadius(20)
                 .objectFit(ImageFit.Cover)
-                .accessibilityText('HGhub 应用图标')
+                .accessibilityText($r('app.string.ui_be39a686'))
 
               Text('HGhub Harmony')
                 .fontSize(HgFont.pageLarge)
@@ -133,7 +133,7 @@ export struct AboutPage {
             .padding({ top: HgSpace.xl, bottom: HgSpace.s })
 
             // 简介
-            Text('黄果短剧的 HarmonyOS 客户端：发现、搜索、榜单、专题与沉浸播放一站完成，支持端侧个性化推荐、画质切换、画中画、应用接续与投播。')
+            Text($r('app.string.ui_82ca4338'))
               .width('100%')
               .fontSize(HgFont.secondary)
               .lineHeight(HgFont.lineSecondary)
@@ -142,11 +142,11 @@ export struct AboutPage {
 
             // 免责声明
             Column({ space: HgSpace.xs }) {
-              Text('免责声明')
+              Text($r('app.string.ui_576374ba'))
                 .width('100%')
                 .fontSize(HgFont.micro)
                 .fontColor(HgColor.textTertiary(this.dark))
-              Text('本项目仅供学习与技术交流，不存储、不分发任何音视频内容；所有内容均来自第三方站点，版权归原作者与站点所有。请支持正版。')
+              Text($r('app.string.ui_a2552cea'))
                 .width('100%')
                 .fontSize(HgFont.micro)
                 .lineHeight(HgFont.lineMicro)
@@ -165,7 +165,7 @@ export struct AboutPage {
                 Text(AUTHOR_NAME)
                   .fontSize(HgFont.rowTitle)
                   .fontColor(HgColor.textPrimary(this.dark))
-                Text('作者 · GitHub')
+                Text($r('app.string.ui_3b8a6e73'))
                   .fontSize(HgFont.micro)
                   .fontColor(HgColor.textTertiary(this.dark))
               }
@@ -194,7 +194,7 @@ export struct AboutPage {
             .borderRadius(HgRadius.group)
 
             // 许可证
-            Text('PolyForm Noncommercial License 1.0.0 · 仅限非商业使用')
+            Text($r('app.string.ui_37445711'))
               .width('100%')
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))

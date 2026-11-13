@@ -242,7 +242,7 @@ export struct LineSheet {
 
   @Builder
   UseBadge() {
-    Text('使用中')
+    Text($r('app.string.ui_e6aa2cbd'))
       .fontSize(HgFont.micro)
       .fontColor(HgColor.onAccent(this.dark))
       .padding({ left: 7, right: 7, top: 3, bottom: 3 })
@@ -353,15 +353,16 @@ export struct LineSheet {
         .maxLines(2)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
       HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-        Text('重试')
+        Text($r('app.string.ui_e2d53a6d'))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .height(HgSize.compactControl)
           .padding({ left: HgSpace.m, right: HgSpace.m })
+          .accessibilityText('重试')
           .onClick(() => {
             this.loadMirrors();
           })
-          .accessibilityText('重新获取镜像线路')
+          .accessibilityText($r('app.string.ui_18dcd86b'))
       }
     }
     .width('100%')
@@ -377,16 +378,17 @@ export struct LineSheet {
       SymbolGlyph($r('sys.symbol.arrow_clockwise'))
         .fontSize(HgIconSize.compact)
         .fontColor([HgColor.textTertiary(this.dark)])
-      Text('暂未获取到镜像线路，可稍后刷新重试。')
+      Text($r('app.string.ui_c30e213a'))
         .fontSize(HgFont.caption)
         .fontColor(HgColor.textSecondary(this.dark))
         .layoutWeight(1)
       HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-        Text('刷新')
+        Text($r('app.string.ui_38108eaa'))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
           .height(HgSize.compactControl)
           .padding({ left: HgSpace.m, right: HgSpace.m })
+          .accessibilityText('刷新')
           .onClick(() => {
             this.loadMirrors();
           })
@@ -444,11 +446,11 @@ export struct LineSheet {
   Header() {
     Row({ space: HgSpace.s }) {
       Column({ space: HgSpace.xxs }) {
-        Text('线路')
+        Text($r('app.string.ui_5922d95f'))
           .fontSize(HgFont.pageTitle)
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
-        Text('选择数据源线路；手动切换后需要重新登录')
+        Text($r('app.string.ui_74839625'))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
           .maxLines(1)
@@ -468,10 +470,11 @@ export struct LineSheet {
           .height(HgSize.compactControl)
           .borderRadius(HgSize.compactControl / 2)
           .backgroundColor(HgColor.surface3(this.dark))
+          .accessibilityText('选择数据源线路；手动切换后需要重新登录')
           .onClick(() => {
             this.close();
           })
-          .accessibilityText('关闭线路面板')
+          .accessibilityText($r('app.string.ui_e8aa9cc6'))
         }
       }
     }
@@ -484,7 +487,7 @@ export struct LineSheet {
     Column({ space: HgSpace.s }) {
       Row({ space: HgSpace.s }) {
         Column({ space: 2 }) {
-          Text('当前线路')
+          Text($r('app.string.ui_dfe74b48'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.textTertiary(this.dark))
           Text(hostOf(this.current))
@@ -515,17 +518,18 @@ export struct LineSheet {
             .transition(HgMotion.fadeIn(HgMotion.fast))
         } else {
           HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-            Text('自动选择')
+            Text($r('app.string.ui_9741bc8c'))
               .fontSize(HgFont.caption)
               .fontColor(HgColor.accent(this.dark))
               .backgroundColor(HgColor.accentSoft(this.dark))
               .borderRadius(HgRadius.chip)
               .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.xs, bottom: HgSpace.xs })
               .transition(HgMotion.fadeIn(HgMotion.fast))
+              .accessibilityText('自动选择')
               .onClick(() => {
                 this.autoSelect();
               })
-              .accessibilityText('自动检测并选择可用线路')
+              .accessibilityText($r('app.string.ui_c3a0709c'))
           }
         }
       }
@@ -557,7 +561,7 @@ export struct LineSheet {
 
           Column({ space: HgSpace.s }) {
             Row() {
-              Text('镜像线路')
+              Text($r('app.string.ui_756f0f27'))
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.textTertiary(this.dark))
               if (this.mirrors.length > 0) {
@@ -578,17 +582,18 @@ export struct LineSheet {
                     SymbolGlyph($r('sys.symbol.arrow_clockwise'))
                       .fontSize(HgIconSize.inline)
                       .fontColor([HgColor.accent(this.dark)])
-                    Text('刷新')
+                    Text($r('app.string.ui_38108eaa'))
                       .fontSize(HgFont.micro)
                       .fontColor(HgColor.accent(this.dark))
                   }
                   .height(HgSize.compactControl)
                   .padding({ left: HgSpace.s, right: HgSpace.s })
                   .transition(HgMotion.fadeIn(HgMotion.fast))
+                  .accessibilityText('刷新')
                   .onClick(() => {
                     this.loadMirrors();
                   })
-                  .accessibilityText('刷新镜像线路')
+                  .accessibilityText($r('app.string.ui_8c593599'))
                 }
               }
             }
@@ -610,7 +615,7 @@ export struct LineSheet {
           .width('100%')
           .alignItems(HorizontalAlign.Start)
 
-          Text('镜像线路仅支持游客浏览，登录请使用固定线路。')
+          Text($r('app.string.ui_c8109f43'))
             .width('100%')
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))

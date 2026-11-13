@@ -59,12 +59,12 @@ export struct RecHowPage {
         Scroll() {
           Column({ space: HgSpace.m }) {
             Column({ space: HgSpace.xxs }) {
-              Text('推荐是怎么来的？')
+              Text($r('app.string.ui_7b31abb2'))
                 .width('100%')
                 .fontSize(HgFont.section)
                 .fontWeight(HgFont.weightBold)
                 .fontColor(HgColor.textPrimary(this.dark))
-              Text('一张图看懂，不需要懂技术')
+              Text($r('app.string.ui_e067f1ab'))
                 .width('100%')
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.textTertiary(this.dark))
@@ -121,12 +121,12 @@ export struct RecHowPage {
             }, (step: RecHowStep) => step.no)
 
             Column({ space: HgSpace.xxs }) {
-              Text('简单说：你看剧 → 手机记住偏好 → 手机上的小模型给剧打分 → "换一批"按分数推荐。')
+              Text($r('app.string.ui_a0d73841'))
                 .width('100%')
                 .fontSize(HgFont.caption)
                 .lineHeight(HgFont.lineCaption)
                 .fontColor(HgColor.textSecondary(this.dark))
-              Text('全部在手机本地完成 · 断网也能用 · 不上传任何个人数据')
+              Text($r('app.string.ui_648372e0'))
                 .width('100%')
                 .fontSize(HgFont.micro)
                 .lineHeight(HgFont.lineMicro)

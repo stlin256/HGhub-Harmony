@@ -23,7 +23,7 @@ export struct HgTopBar {
           .width(HgSize.hitTarget)
           .height(HgSize.hitTarget)
           .borderRadius(HgSize.hitTarget / 2)
-          .accessibilityText('返回')
+          .accessibilityText($r('app.string.ui_11d02415'))
           .hoverEffect(HoverEffect.Scale)
           .onClick(() => {
             this.onBack();
@@ -83,7 +83,7 @@ export struct HgEmptyState {
           .backgroundColor(HgColor.accent(this.dark))
           .borderRadius(HgRadius.chip)
           .padding({ left: HgSpace.xxl, right: HgSpace.xxl })
-          .accessibilityText('重试')
+          .accessibilityText($r('app.string.ui_e2d53a6d'))
           .hoverEffect(HoverEffect.Scale)
           .onClick(() => {
             this.onAction();
@@ -208,7 +208,7 @@ export struct HgSectionHeader {
         Text(this.actionText)
           .fontSize(HgFont.secondary)
           .fontColor(HgColor.textTertiary(this.dark))
-          .accessibilityText('操作')
+          .accessibilityText($r('app.string.ui_f3ea6d34'))
           .hoverEffect(HoverEffect.Scale)
           .onClick(() => {
             this.onAction();
@@ -239,6 +239,7 @@ export struct HgChip {
       .borderRadius(HgRadius.chip)
       .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
       .hoverEffect(HoverEffect.Scale)
+      .accessibilityText(this.text)
       .onClick(() => {
         this.onTap();
       })

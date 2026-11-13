@@ -66,22 +66,22 @@ export struct TabletNoticeDialog {
 
   build() {
     Column({ space: HgSpace.m }) {
-      Text('平板 / 大屏适配提示')
+      Text($r('app.string.ui_5b2cd791'))
         .width('100%')
         .fontSize(HgFont.pageTitle)
         .fontWeight(HgFont.weightBold)
         .fontColor(HgColor.textPrimary(this.dark))
-      Text('开发者没有平板设备，平板 / 大屏 / PC 布局尚未实机验证，可能存在界面或交互问题。')
+      Text($r('app.string.ui_a8638e63'))
         .width('100%')
         .fontSize(HgFont.secondary)
         .fontColor(HgColor.textSecondary(this.dark))
         .lineHeight(HgFont.lineBody)
-      Text('如果遇到 bug，欢迎通过 GitHub Issue 反馈（README 有入口），帮助我们改进大屏体验。')
+      Text($r('app.string.ui_7578c613'))
         .width('100%')
         .fontSize(HgFont.secondary)
         .fontColor(HgColor.textTertiary(this.dark))
         .lineHeight(HgFont.lineBody)
-      Button('我知道了')
+      Button($r('app.string.ui_dd3760c8'))
         .width('100%')
         .height(44)
         .fontSize(HgFont.body)
@@ -92,7 +92,7 @@ export struct TabletNoticeDialog {
         .onClick(() => {
           this.dismiss();
         })
-        .accessibilityText('关闭平板适配提示')
+        .accessibilityText($r('app.string.ui_2ef997a0'))
     }
     .width('86%')
     // customStyle(true) 下弹窗容器铺满全屏，这里限制最大宽度，平板上不会变成一整条巨宽弹窗。

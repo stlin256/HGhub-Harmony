@@ -421,7 +421,7 @@ export struct SettingsPage {
     Column() {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.gearshape'))
-        Text('主题')
+        Text($r('app.string.ui_e848ddd4'))
           .fontSize(HgFont.rowTitle)
           .fontColor(HgColor.textPrimary(this.dark))
           .layoutWeight(1)
@@ -440,7 +440,7 @@ export struct SettingsPage {
             .backgroundColor(this.themeMode === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
             .borderRadius(HgRadius.chip)
             .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-            .accessibilityText('主题')
+            .accessibilityText($r('app.string.ui_e848ddd4'))
             .onClick(() => {
               this.setTheme(option.key);
             })
@@ -457,10 +457,10 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.bolt_fill'))
         Column({ space: 2 }) {
-          Text('减少动态效果')
+          Text($r('app.string.ui_ad25121b'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('关闭页面切换、弹窗与骨架呼吸动画（省电 / 无障碍）')
+          Text($r('app.string.ui_27054dfb'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .maxLines(2)
@@ -489,10 +489,10 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.speaker_slash'))
         Column({ space: 2 }) {
-          Text('启动时静音')
+          Text($r('app.string.ui_d5a1c832'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('默认开启；关闭后记住上次音量状态')
+          Text($r('app.string.ui_355e7cca'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .maxLines(2)
@@ -517,10 +517,10 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.aspect_ratio'))
         Column({ space: 2 }) {
-          Text('优先高清（HEVC）')
+          Text($r('app.string.ui_167667a8'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('有高清源时优先播放，更清晰但更耗流量')
+          Text($r('app.string.ui_72429b8a'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .maxLines(2)
@@ -545,10 +545,10 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.sparkles'))
         Column({ space: 2 }) {
-          Text('AI 超分')
+          Text($r('app.string.ui_1ac5f1f7'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('系统原生画质增强，画面更清晰')
+          Text($r('app.string.ui_191e4ae3'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .maxLines(2)
@@ -566,7 +566,7 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(HgSize.listRowDouble)
-      .accessibilityText('AI 超分')
+      .accessibilityText($r('app.string.ui_1ac5f1f7'))
 
       Divider()
         .width('100%')
@@ -576,7 +576,7 @@ export struct SettingsPage {
       Column() {
         Row({ space: HgSpace.m }) {
           this.RowIcon($r('sys.symbol.aspect_ratio'))
-          Text('画面比例')
+          Text($r('app.string.ui_f07fc510'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
             .layoutWeight(1)
@@ -595,7 +595,7 @@ export struct SettingsPage {
               .backgroundColor(this.videoScale === option.key ? HgColor.accent(this.dark) : HgColor.surface3(this.dark))
               .borderRadius(HgRadius.chip)
               .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-              .accessibilityText('画面比例')
+              .accessibilityText($r('app.string.ui_f07fc510'))
               .onClick(() => {
                 this.setScale(option.key, option.label);
               })
@@ -633,10 +633,10 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.arrow_clockwise'))
         Column({ space: 2 }) {
-          Text('多源加速')
+          Text($r('app.string.ui_19fd6a38'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('并发请求多条线路取最快响应（默认开启）')
+          Text($r('app.string.ui_f31811ba'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .maxLines(2)
@@ -661,10 +661,10 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.arrowshape_turn_up_right'))
         Column({ space: 2 }) {
-          Text('IPv6 优先')
+          Text($r('app.string.ui_f2b50920'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('目标站点有 IPv6 地址时优先走 IPv6（默认开启）')
+          Text($r('app.string.ui_3a711aad'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .maxLines(2)
@@ -680,7 +680,7 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(HgSize.listRowDouble)
-      .accessibilityText('IPv6 优先')
+      .accessibilityText($r('app.string.ui_f2b50920'))
 
       Divider()
         .width('100%')
@@ -691,7 +691,7 @@ export struct SettingsPage {
         Row({ space: HgSpace.m }) {
           this.RowIcon($r('sys.symbol.speaker_wave_2'))
           Column({ space: 2 }) {
-            Text('线路')
+            Text($r('app.string.ui_5922d95f'))
               .fontSize(HgFont.rowTitle)
               .fontColor(HgColor.textPrimary(this.dark))
             Text(this.lineHost)
@@ -704,7 +704,7 @@ export struct SettingsPage {
         }
         .width('100%')
         .height(HgSize.listRowDouble)
-        .accessibilityText('线路')
+        .accessibilityText($r('app.string.ui_5922d95f'))
         .onClick(() => {
           UiBus.openLines();
         })
@@ -721,7 +721,7 @@ export struct SettingsPage {
     Column() {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.square_grid_2x2'))
-        Text('封面缓存')
+        Text($r('app.string.ui_cecaaf5b'))
           .fontSize(HgFont.rowTitle)
           .fontColor(HgColor.textPrimary(this.dark))
           .layoutWeight(1)
@@ -747,7 +747,7 @@ export struct SettingsPage {
               .padding({ left: HgSpace.s })
               .opacity(this.clearing ? 0.6 : 1)
           }
-          .accessibilityText('封面缓存')
+          .accessibilityText($r('app.string.ui_cecaaf5b'))
           .onClick(() => {
             if (!this.clearing) {
               this.clearCache();
@@ -766,7 +766,7 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.heart'))
         Column({ space: 2 }) {
-          Text('收藏 / 观看历史')
+          Text($r('app.string.ui_5fc8f9d0'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
           Text(this.favCount + ' 部收藏 · ' + this.historyCount + ' 条观看记录')
@@ -777,12 +777,12 @@ export struct SettingsPage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-          Text('清空历史')
+          Text($r('app.string.ui_578bbcfa'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.danger(this.dark))
             .height(HgSize.hitTarget)
             .padding({ left: HgSpace.s })
-            .accessibilityText('清空历史')
+            .accessibilityText($r('app.string.ui_578bbcfa'))
             .onClick(() => {
               this.clearHistory();
             })
@@ -799,7 +799,7 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.magnifyingglass'))
         Column({ space: 2 }) {
-          Text('搜索历史')
+          Text($r('app.string.ui_adf6d73a'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
           Text(this.searchHistCount + ' 条搜索记录')
@@ -810,12 +810,12 @@ export struct SettingsPage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-          Text('清空')
+          Text($r('app.string.ui_84fcd70d'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.danger(this.dark))
             .height(HgSize.hitTarget)
             .padding({ left: HgSpace.s })
-            .accessibilityText('清空')
+            .accessibilityText($r('app.string.ui_84fcd70d'))
             .onClick(() => {
               this.clearSearchHistory();
             })
@@ -835,7 +835,7 @@ export struct SettingsPage {
     Column() {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.star'))
-        Text('个性化推荐')
+        Text($r('app.string.ui_9f1e3081'))
           .fontSize(HgFont.rowTitle)
           .fontColor(HgColor.textPrimary(this.dark))
           .layoutWeight(1)
@@ -863,7 +863,7 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.person'))
         Column({ space: 2 }) {
-          Text('推荐数据')
+          Text($r('app.string.ui_1c5c171f'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
           Text('画像 ' + this.recTagCount + ' 个标签 · 可导入 / 导出 / 清空')
@@ -873,12 +873,12 @@ export struct SettingsPage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-          Text('管理')
+          Text($r('app.string.ui_4989b5cf'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.accent(this.dark))
             .height(HgSize.hitTarget)
             .padding({ left: HgSpace.s })
-            .accessibilityText('管理')
+            .accessibilityText($r('app.string.ui_4989b5cf'))
             .onClick(() => {
               this.navStack.pushPathByName(ROUTE_REC_DATA, null);
             })
@@ -895,22 +895,22 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.heart'))
         Column({ space: 2 }) {
-          Text('推荐说明')
+          Text($r('app.string.ui_bc86f4f4'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('一张图看懂推荐是怎么来的')
+          Text($r('app.string.ui_e10f8bfd'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         HgPressable({ dark: this.dark, noTap: true, pressScale: HgMotion.pressScale }) {
-          Text('查看')
+          Text($r('app.string.ui_f7acefd2'))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.accent(this.dark))
             .height(HgSize.hitTarget)
             .padding({ left: HgSpace.s })
-            .accessibilityText('查看')
+            .accessibilityText($r('app.string.ui_f7acefd2'))
             .onClick(() => {
               this.navStack.pushPathByName(ROUTE_REC_HOW, null);
             })
@@ -932,7 +932,7 @@ export struct SettingsPage {
         Row({ space: HgSpace.m }) {
           this.RowIcon($r('sys.symbol.arrow_clockwise'))
           Column({ space: 2 }) {
-            Text('检查更新')
+            Text($r('app.string.ui_a6df3858'))
               .fontSize(HgFont.rowTitle)
               .fontColor(HgColor.textPrimary(this.dark))
             Text(this.checking ? '正在检查…' : '当前 v' + Api.appVersion() + ' · 对比 GitHub Release')
@@ -953,7 +953,7 @@ export struct SettingsPage {
         .width('100%')
         .height(HgSize.listRowDouble)
         .opacity(this.checking ? 0.6 : 1)
-        .accessibilityText('检查更新')
+        .accessibilityText($r('app.string.ui_a6df3858'))
         .onClick(() => {
           this.checkUpdate();
         })
@@ -968,7 +968,7 @@ export struct SettingsPage {
         Row({ space: HgSpace.m }) {
           this.RowIcon($r('sys.symbol.exclamationmark_triangle'))
           Column({ space: 2 }) {
-            Text('导出诊断日志')
+            Text($r('app.string.ui_5c37f0c6'))
               .fontSize(HgFont.rowTitle)
               .fontColor(HgColor.textPrimary(this.dark))
             Text(this.exporting ? '正在打包…' :
@@ -984,7 +984,7 @@ export struct SettingsPage {
         }
         .width('100%')
         .height(HgSize.listRowDouble)
-        .accessibilityText('导出诊断日志')
+        .accessibilityText($r('app.string.ui_5c37f0c6'))
         .onClick(() => {
           this.exportDiagLog();
         })
@@ -999,10 +999,10 @@ export struct SettingsPage {
         Row({ space: HgSpace.m }) {
           this.RowIcon($r('sys.symbol.message'))
           Column({ space: 2 }) {
-            Text('反馈')
+            Text($r('app.string.ui_42a36e94'))
               .fontSize(HgFont.rowTitle)
               .fontColor(HgColor.textPrimary(this.dark))
-            Text('打开项目 Issue 页（链接会复制到剪贴板）')
+            Text($r('app.string.ui_7b09aa5e'))
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))
               .maxLines(2)
@@ -1013,7 +1013,7 @@ export struct SettingsPage {
         }
         .width('100%')
         .height(HgSize.listRowDouble)
-        .accessibilityText('反馈，打开 Issue 页面')
+        .accessibilityText($r('app.string.ui_705090b2'))
         .onClick(() => {
           this.openFeedback();
         })
@@ -1027,7 +1027,7 @@ export struct SettingsPage {
       Row({ space: HgSpace.m }) {
         this.RowIcon($r('sys.symbol.bolt_fill'))
         Column({ space: 2 }) {
-          Text('启动耗时')
+          Text($r('app.string.ui_60192f6f'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
           Text(this.startupMs > 0 ? '最近一次 ' + this.startupMs + ' ms（本地打点）' : '暂无记录')
@@ -1049,7 +1049,7 @@ export struct SettingsPage {
         Row({ space: HgSpace.m }) {
           this.RowIcon($r('sys.symbol.message'))
           Column({ space: 2 }) {
-            Text('关于 HGhub')
+            Text($r('app.string.ui_efb28fde'))
               .fontSize(HgFont.rowTitle)
               .fontColor(HgColor.textPrimary(this.dark))
             Text('v' + Api.appVersion() + ' · PolyForm 非商业许可证')
@@ -1062,7 +1062,7 @@ export struct SettingsPage {
         }
         .width('100%')
         .height(HgSize.listRowDouble)
-        .accessibilityText('关于 HGhub，打开关于页面')
+        .accessibilityText($r('app.string.ui_15dbaa78'))
         .onClick(() => {
           this.navStack.pushPathByName(ROUTE_ABOUT, null);
         })

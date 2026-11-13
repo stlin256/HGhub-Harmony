@@ -101,7 +101,7 @@ export struct EpisodeSheet {
   build() {
     Column() {
       Row({ space: HgSpace.s }) {
-        Text('选集')
+        Text($r('app.string.ui_e31ef097'))
           .fontSize(HgFont.section)
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))

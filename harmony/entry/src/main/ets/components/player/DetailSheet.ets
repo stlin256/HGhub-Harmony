@@ -49,7 +49,7 @@ export struct DetailSheet {
   build() {
     Column() {
       Row({ space: HgSpace.s }) {
-        Text('详情')
+        Text($r('app.string.ui_4f55ee1e'))
           .fontSize(HgFont.section)
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
@@ -126,7 +126,7 @@ export struct DetailSheet {
           }
 
           Column({ space: HgSpace.xs }) {
-            Text('简介')
+            Text($r('app.string.ui_5ea2e0cd'))
               .fontSize(HgFont.secondary)
               .fontWeight(HgFont.weightMedium)
               .fontColor(HgColor.textPrimary(this.dark))
@@ -144,7 +144,7 @@ export struct DetailSheet {
               Text(this.expanded ? '收起' : '展开')
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.accent(this.dark))
-                .accessibilityText('展开或收起简介')
+                .accessibilityText($r('app.string.ui_2c808595'))
                 .onClick(() => {
                   this.expanded = !this.expanded;
                 })
