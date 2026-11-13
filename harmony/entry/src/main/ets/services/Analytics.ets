@@ -4,6 +4,7 @@ import { display } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { i18n } from '@kit.LocalizationKit';
 import { IS_TEST_VARIANT } from '../utils/BuildVariant';
+import { AppChannel } from '../utils/AppChannel';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Api } from './Api';
 import { CrashGuard } from './CrashGuard';
@@ -613,6 +614,7 @@ export class Analytics {
       'security_patch': Analytics.envString('security_patch'),
       'version_code': Analytics.envNumber('version_code'),
       'variant': IS_TEST_VARIANT ? 'test' : 'release',
+      'channel': AppChannel.id(),
       'language': Analytics.envString('language'),
       'region': Analytics.envString('region'),
       'screen_w': Analytics.envNumber('screen_w'),

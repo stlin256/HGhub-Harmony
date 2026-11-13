@@ -40,6 +40,7 @@ import {
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { RemoteConfig } from '../services/RemoteConfig';
 import { IS_TEST_VARIANT } from '../utils/BuildVariant';
+import { AppChannel } from '../utils/AppChannel';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
 const CHROME_HIDE_MS: number = 3000;
@@ -4190,6 +4191,7 @@ export struct PlayerPage {
       ConfigRegistry.getNumber(ConfigKey.SR_TARGET_HEIGHT)));
     out.push(new DebugLine('超分诊断', this.service.superResolutionDebug()));
     out.push(new DebugLine('超分电源', this.service.superResolutionPowerDebug()));
+    out.push(new DebugLine('分发渠道', AppChannel.id()));
     out.push(new DebugLine('配置来源', RemoteConfig.source() + ' · v' + RemoteConfig.currentVersion()));
     out.push(new DebugLine('config_id', RemoteConfig.configId().length > 0 ? RemoteConfig.configId() : '—'));
     out.push(new DebugLine('窗口', Math.round(this.screenW) + '×' + Math.round(this.screenH) + ' vp'));
