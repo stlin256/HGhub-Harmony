@@ -39,17 +39,20 @@ import { UserPage } from './UserPage';
 import { FollowPage } from './FollowPage';
 import { AboutPage } from './AboutPage';
 import { DynamicPage } from './DynamicPage';
+import { DebugConfigPage } from './DebugConfigPage';
 import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
 import { TabletNoticeDialog } from '../components/TabletNoticeDialog';
 import { RemoteNoticeDialog } from '../components/RemoteNoticeDialog';
+import { ShakeDetector } from '../services/ShakeDetector';
 import {
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
   ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC, ROUTE_USER, ROUTE_FOLLOW, ROUTE_ABOUT,
-  ROUTE_DYNAMIC_PAGE, PlayerParam, ChannelParam, PostParam, VideoParam, TopicParam, UserParam,
-  DynamicPageParam
+  ROUTE_DYNAMIC_PAGE, ROUTE_DEBUG_CONFIG, PlayerParam, ChannelParam, PostParam, VideoParam,
+  TopicParam, UserParam, DynamicPageParam
 } from '../state/Routes';
 import { I18n } from '../utils/I18n';
+import { IS_TEST_VARIANT } from '../utils/BuildVariant';
 
 /** 服务卡片「继续观看」携带的最近一条历史。 */
 interface FormContinuePayload {
@@ -224,6 +227,8 @@ struct Index {
     WindowChrome.syncSystemBarColors(this.dark);
     this.syncNavMode();
     this.maybeShowTabletNotice();
+    // 摇一摇入口（仅 test 变体；release 下空操作）。
+    this.startShakeEntry();
     // 远程通知：延迟 6s 再挑一条展示（不阻塞首屏；无 notices 时 pick() 立即返回 undefined，零行为）。
     setTimeout(() => {
       this.presentRemoteNotice();
@@ -253,6 +258,27 @@ struct Index {
       this.noticeVisible = true;
     } catch (err) {
     }
+  }
+
+  /**
+   * 摇一摇入口（仅 test 变体）：首页 Tab 且无二级页/无远程通知时，打开调试配置菜单。
+   * release 变体下 IS_TEST_VARIANT=false，ShakeDetector.start() 内部也会直接返回（不注册传感器）。
+   */
+  private startShakeEntry(): void {
+    if (!IS_TEST_VARIANT) {
+      return;
+    }
+    ShakeDetector.start(() => {
+      if (this.currentIndex !== 0 || this.navStack.size() > 0 || this.noticeVisible) {
+        return;
+      }
+      this.navStack.pushPathByName(ROUTE_DEBUG_CONFIG, null);
+    });
+  }
+
+  aboutToDisappear(): void {
+    // 页面销毁时停掉摇一摇监听（幂等；release 变体下未注册，空操作）。
+    ShakeDetector.stop();
   }
 
   /** 剪贴板识别到分享链接：弹「是否打开」。 */
@@ -596,6 +622,8 @@ struct Index {
       AboutPage()
     } else if (name === ROUTE_DYNAMIC_PAGE) {
       DynamicPage({ params: param as DynamicPageParam })
+    } else if (name === ROUTE_DEBUG_CONFIG) {
+      DebugConfigPage()
     }
   }
 

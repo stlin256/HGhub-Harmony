@@ -21,6 +21,8 @@ export const ROUTE_FOLLOW: string = 'follow';
 export const ROUTE_ABOUT: string = 'about';
 /** 远程下发的声明式二级页（blocks 白名单渲染，无代码执行；SPEC §13.3）。 */
 export const ROUTE_DYNAMIC_PAGE: string = 'dynamicPage';
+/** 调试配置菜单（仅 test 变体：首页摇一摇进入；SPEC §8.2 / §8.3）。 */
+export const ROUTE_DEBUG_CONFIG: string = 'debugConfig';
 
 export interface ChannelParam {
   cate: string;
