@@ -17,8 +17,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BUILD_VARIANT = os.path.join(ROOT, "harmony", "entry", "src", "main", "ets", "utils", "BuildVariant.ets")
 
-IS_TEST_RE = re.compile(r"IS_TEST_VARIANT\s*:\s*boolean\s*=\s*(true|false)")
-VARIANT_NAME_RE = re.compile(r"VARIANT_NAME\s*:\s*string\s*=\s*'([^']+)'")
+IS_TEST_RE = re.compile(r"^export const IS_TEST_VARIANT\s*:\s*boolean\s*=\s*(true|false)\s*;", re.M)
+VARIANT_NAME_RE = re.compile(r"^export const VARIANT_NAME\s*:\s*string\s*=\s*'([^']+)'", re.M)
 
 
 def main():
