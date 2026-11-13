@@ -56,6 +56,8 @@ export struct ConfirmDialog {
   copyOf: () => ConfirmCopy = () => new ConfirmCopy('', '', '确定', '取消', false);
   /** 点确认后的动作（弹窗关闭后执行）。 */
   onConfirm: () => void = () => {};
+  /** 点取消/关闭后的动作（可选，用于「忽略」这类需要记录的场景）。 */
+  onCancel: () => void = () => {};
   /** 弹窗入场/退场状态（统一弹窗壳动效）。 */
   @State entered: boolean = false;
   private started: boolean = false;
@@ -138,7 +140,9 @@ export struct ConfirmDialog {
           .borderRadius(HgRadius.chip)
           .accessibilityText('取消')
           .onClick(() => {
-            this.dismiss();
+            this.dismiss(() => {
+              this.onCancel();
+            });
           })
         Button(this.copyOf().confirmLabel)
           .layoutWeight(1)

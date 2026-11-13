@@ -14,6 +14,7 @@ import { Api } from '../services/Api';
 import { ContinuationState, ContinuePayload } from '../services/ContinuationState';
 import { UpdateChecker } from '../services/UpdateChecker';
 import { Analytics } from '../services/Analytics';
+import { ClipboardLink } from '../services/ClipboardLink';
 import { UpdateInfo } from '../models/Types';
 import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgColor, HgFont, HgSize } from '../design/HgTokens';
@@ -71,6 +72,28 @@ struct Index {
       copyOf: (): ConfirmCopy => this.updateCopy,
       onConfirm: (): void => {
         this.openUpdatePage();
+      }
+    }),
+    autoCancel: true,
+    alignment: DialogAlignment.Center,
+    customStyle: true
+  });
+
+  /** 剪贴板链接确认弹窗。 */
+  private clipCopy: ConfirmCopy = new ConfirmCopy('', '', '打开', '忽略', false);
+  private clipVideoId: number = 0;
+  private clipController: CustomDialogController = new CustomDialogController({
+    builder: ConfirmDialog({
+      copyOf: (): ConfirmCopy => this.clipCopy,
+      onConfirm: (): void => {
+        this.openClipLink();
+      },
+      onCancel: (): void => {
+        // 用户忽略：记录该链接，避免反复提示。
+        if (this.clipVideoId > 0) {
+          ClipboardLink.markHandled(this.clipVideoId);
+          this.clipVideoId = 0;
+        }
       }
     }),
     autoCancel: true,
@@ -159,6 +182,10 @@ struct Index {
     UiBus.showUpdate = (info: UpdateInfo) => {
       this.presentUpdate(info);
     };
+    // 剪贴板快捷拉起：识别到分享链接时弹确认。
+    UiBus.onClipboardLink = (videoId: number) => {
+      this.presentClipLink(videoId);
+    };
     UpdateChecker.scheduleOnLaunch();
     // 兜底：检查可能在 Index 挂载前就完成，这里补一次消费，保证「至少弹一次」。
     setTimeout(() => {
@@ -187,6 +214,41 @@ struct Index {
     WindowChrome.syncSystemBarColors(this.dark);
     this.syncNavMode();
     this.maybeShowTabletNotice();
+  }
+
+  /** 剪贴板识别到分享链接：弹「是否打开」。 */
+  private presentClipLink(videoId: number): void {
+    if (videoId <= 0 || this.clipVideoId > 0) {
+      return;
+    }
+    this.clipVideoId = videoId;
+    this.clipCopy = new ConfirmCopy('发现视频链接',
+      '剪贴板里有一条 HGhub 分享链接，是否直接打开？', '打开', '忽略', false);
+    try {
+      this.clipController.open();
+    } catch (err) {
+      this.clipVideoId = 0;
+    }
+  }
+
+  /** 打开剪贴板里的视频。 */
+  private openClipLink(): void {
+    const id: number = this.clipVideoId;
+    this.clipVideoId = 0;
+    if (id <= 0) {
+      return;
+    }
+    ClipboardLink.markHandled(id);
+    const param: PlayerParam = {
+      videoIds: [id],
+      index: 0,
+      title: '',
+      source: 'clipboard',
+      feedKind: 'video',
+      startEp: 1,
+      startTime: 0
+    };
+    this.navStack.pushPathByName(ROUTE_PLAYER, param);
   }
 
   /** Tab 下标 → 匿名统计用的页面名。 */

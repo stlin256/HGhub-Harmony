@@ -12,4 +12,6 @@ export class UiBus {
   static toastInfo: (message: string) => void = () => {};
   /** 后台检查到新版本：由 Index 弹出更新弹窗（每次冷启动至多一次）。 */
   static showUpdate: (info: UpdateInfo) => void = () => {};
+  /** 剪贴板识别到分享链接：由 Index 弹出「是否打开」确认。 */
+  static onClipboardLink: (videoId: number) => void = () => {};
 }

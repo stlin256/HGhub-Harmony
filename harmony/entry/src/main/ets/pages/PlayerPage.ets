@@ -1,4 +1,3 @@
-import { pasteboard } from '@kit.BasicServicesKit';
 import { vibrator } from '@kit.SensorServiceKit';
 import { Api } from '../services/Api';
 import { K_LINE_BASE, Lines } from '../services/Lines';
@@ -21,6 +20,7 @@ import { PlayerSeekPolicy } from '../player/PlayerSeekPolicy';
 import { ContinuationState } from '../services/ContinuationState';
 import { PiPController } from '../player/PiPController';
 import { Analytics } from '../services/Analytics';
+import { ShareLink } from '../services/ShareLink';
 import {
   AVCastPicker, AVCastPickerColorMode, AVCastPickerState, AVCastPickerStyle
 } from '@kit.AVSessionKit';
@@ -1450,21 +1450,24 @@ export struct PlayerPage {
     }, HgMotion.ms(HgMotion.instant));
   }
 
-  private share(): void {
-    const id = this.playVideoId > 0 ? this.playVideoId : this.currentId();
-    const link = 'https://example.invalid' + id + '/';
-    this.copyText(link);
-  }
-
-  private async copyText(text: string): Promise<void> {
-    try {
-      const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
-      await pasteboard.getSystemPasteboard().setData(data);
-      UiBus.toastOk('链接已复制');
-      this.haptic(10);
-    } catch (err) {
-      UiBus.toast('复制失败，请稍后重试');
+  /**
+   * 分享：优先调起系统分享面板，不支持时回退复制链接。
+   * 分享出去的永远是主站规范链接（与当前线路无关），接收方只解析视频 ID 用自己的线路播放。
+   */
+  private async share(): Promise<void> {
+    const id: number = this.playVideoId > 0 ? this.playVideoId : this.currentId();
+    if (id <= 0) {
+      return;
     }
+    const title: string = this.titleText();
+    const shown: boolean = await ShareLink.share(id, title);
+    if (shown) {
+      this.haptic(10);
+      return;
+    }
+    // 回退路径：ShareLink 内部已复制链接。
+    UiBus.toastOk('链接已复制');
+    this.haptic(10);
   }
 
   private haptic(duration: number): void {
