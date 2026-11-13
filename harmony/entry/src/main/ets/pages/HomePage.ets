@@ -9,7 +9,7 @@ import { HgPressable } from '../components/HgPressable';
 import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
 import { HgListSource } from '../components/browse/HgListSource';
 import { HgFeedGrid } from '../components/browse/HgFeedGrid';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace, UiEntryKey } from '../design/HgTokens';
 import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
@@ -1632,13 +1632,16 @@ export struct HomePage {
         .fontColor(HgColor.textTertiary(this.dark))
         .margin({ top: 2, bottom: HgSpace.m })
 
-      HomeHeroSwiper({
-        dark: this.dark,
-        hero: this.hero,
-        onOpen: (index: number) => {
-          this.openHero(index);
-        }
-      })
+      // 首页 Hero 推荐位：远程 ui.entries.home_hero 可隐藏（未下发默认展示，行为不变）。
+      if (ConfigRegistry.entryVisible(UiEntryKey.HOME_HERO)) {
+        HomeHeroSwiper({
+          dark: this.dark,
+          hero: this.hero,
+          onOpen: (index: number) => {
+            this.openHero(index);
+          }
+        })
+      }
       this.ChannelChips()
 
       Row() {

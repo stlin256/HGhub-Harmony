@@ -18,7 +18,8 @@ import { ClipboardLink } from '../services/ClipboardLink';
 import { emptyNotice, NoticeData, RemoteNotice } from '../services/RemoteNotice';
 import { UpdateInfo } from '../models/Types';
 import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
-import { HgColor, HgFont, HgSize } from '../design/HgTokens';
+import { HgColor, HgFont, HgSize, UiEntryKey } from '../design/HgTokens';
+import { ConfigRegistry } from '../services/ConfigRegistry';
 import { HgMotion } from '../design/HgMotion';
 import { HomePage } from './HomePage';
 import { SearchPage } from './SearchPage';
@@ -138,9 +139,17 @@ struct Index {
   private navApplying: boolean = false;
   private tabsController: HdsTabsController = new HdsTabsController();
   private readonly selectedColor: string = '';
+  /**
+   * 可见 Tab 的逻辑 id 列表（顺序即底栏位置）：0 首页 / 1 搜索 / 2 分类 / 3 我的。
+   * 远程 ui.entries.tab_category 可隐藏分类 Tab；未下发时保持 [0,1,2,3]（行为不变）。
+   */
+  private visibleTabs: number[] = [0, 1, 2, 3];
 
   aboutToAppear(): void {
     hilog.info(0x0000, 'HGBoot', 'app init build=cover-debug-2');
+    // UI 下发：底部 Tab 显隐（SPEC §14.1 ui.entries）；隐藏当前选中 Tab 时回退首页。
+    this.visibleTabs = Index.computeVisibleTabs();
+    this.ensureActiveTabVisible();
     // 应用接续：目标设备收到播放上下文后，直接打开播放页对应位置（只消费一次）。
     const cont: ContinuePayload | undefined = ContinuationState.take();
     if (cont !== undefined && cont.videoId > 0) {
@@ -170,10 +179,14 @@ struct Index {
       this.navStack.pushPathByName(ROUTE_SETTINGS, null);
     };
     UiBus.switchTab = (index: number) => {
+      const position: number = this.positionOfTab(index);
+      if (position < 0) {
+        return;
+      }
       this.activeIndex = index;
       Analytics.countPage(Index.pageNameOf(index));
       try {
-        this.tabsController.changeIndex(index);
+        this.tabsController.changeIndex(position);
       } catch (err) {
       }
       this.navStack.clear();
@@ -328,6 +341,43 @@ struct Index {
       return 'profile';
     }
     return 'home';
+  }
+
+  /**
+   * 计算可见 Tab 的逻辑 id（顺序即底栏位置）：0 首页 / 1 搜索 / 2 分类 / 3 我的。
+   * 分类 Tab 按远程 ui.entries.tab_category 显隐；首页/搜索/我的始终保留。
+   * 吃瓜（tab_posts）在当前 4 Tab 信息架构中没有独立 Tab（吃瓜入口在分类页），key 预留。
+   */
+  private static computeVisibleTabs(): number[] {
+    const ids: number[] = [0, 1];
+    if (ConfigRegistry.entryVisible(UiEntryKey.TAB_CATEGORY)) {
+      ids.push(2);
+    }
+    ids.push(3);
+    return ids;
+  }
+
+  /** 逻辑 Tab id → 底栏位置；不可见返回 -1。 */
+  private positionOfTab(tabId: number): number {
+    return this.visibleTabs.indexOf(tabId);
+  }
+
+  /** 底栏位置 → 逻辑 Tab id（越界回退首页）。 */
+  private tabIdAt(position: number): number {
+    return position >= 0 && position < this.visibleTabs.length ? this.visibleTabs[position] : 0;
+  }
+
+  /** Tab 显隐保护：当前选中 Tab 被远程隐藏时回退首页（位置 0，首页始终可见）。 */
+  private ensureActiveTabVisible(): void {
+    if (this.positionOfTab(this.activeIndex) >= 0) {
+      return;
+    }
+    this.activeIndex = 0;
+    this.currentIndex = 0;
+    try {
+      this.tabsController.changeIndex(0);
+    } catch (err) {
+    }
   }
 
   /** 弹出更新弹窗：每次冷启动至多一次。 */
@@ -580,12 +630,13 @@ struct Index {
     .justifyContent(FlexAlign.Center)
     .accessibilityText(this.activeIndex === index ? I18n.fmt1($r('app.string.fmt_current_page'), title) : title)
     .onClick(() => {
-      if (this.activeIndex === index) {
+      const position: number = this.positionOfTab(index);
+      if (position < 0 || this.activeIndex === index) {
         return;
       }
-      // 先更新高亮，再交给 controller 做 240ms 页面切换动画。
+      // 先更新高亮，再交给 controller 做 240ms 页面切换动画（位置按可见 Tab 列表映射）。
       this.activeIndex = index;
-      this.tabsController.changeIndex(index);
+      this.tabsController.changeIndex(position);
       Analytics.countPage(Index.pageNameOf(index));
     })
   }
@@ -665,10 +716,14 @@ struct Index {
           }
           .tabBar(this.tabItem('搜索', $r('sys.symbol.magnifyingglass'), 1))
 
-          TabContent() {
-            CategoryPage()
+          // 分类 Tab：远程 ui.entries.tab_category 可隐藏（未下发默认展示，行为不变）；
+          // 隐藏后「我的」位置由 visibleTabs 映射，Tab 下标不会错位。
+          if (this.positionOfTab(2) >= 0) {
+            TabContent() {
+              CategoryPage()
+            }
+            .tabBar(this.tabItem('分类', $r('sys.symbol.square_grid_2x2'), 2))
           }
-          .tabBar(this.tabItem('分类', $r('sys.symbol.square_grid_2x2'), 2))
 
           TabContent() {
             ProfilePage()
@@ -694,9 +749,10 @@ struct Index {
         })
         .width('100%')
         .height('100%')
-        .onChange((index: number) => {
-          this.currentIndex = index;
-          this.activeIndex = index;
+        .onChange((position: number) => {
+          // currentIndex 是底栏位置（0 起，随可见 Tab 列表变化）；activeIndex 是逻辑 Tab id。
+          this.currentIndex = position;
+          this.activeIndex = this.tabIdAt(position);
         })
       }
       .mode(this.navSplit ? NavigationMode.Split : NavigationMode.Stack)

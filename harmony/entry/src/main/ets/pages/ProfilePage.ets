@@ -6,7 +6,7 @@ import { HgEmptyState } from '../components/HgCommon';
 import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgPressable } from '../components/HgPressable';
 import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace, UiEntryKey } from '../design/HgTokens';
 import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { HgGrid } from '../design/HgGrid';
@@ -1289,7 +1289,9 @@ export struct ProfilePage {
       Scroll(this.scroller) {
         Column({ space: HgSpace.l }) {
           this.ProfileCard()
-          if (ConfigRegistry.getBool(ConfigKey.FOLLOW_ENABLED)) {
+          // 关注入口：功能开关（kill switch）与远程入口显隐都开启才渲染；未下发时两者默认 true。
+          if (ConfigRegistry.getBool(ConfigKey.FOLLOW_ENABLED)
+            && ConfigRegistry.entryVisible(UiEntryKey.PROFILE_FOLLOW)) {
             this.FollowEntry()
           }
           this.Segmented()

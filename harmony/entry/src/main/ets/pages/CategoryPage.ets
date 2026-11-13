@@ -5,7 +5,7 @@ import { Paged, Post, VideoCard } from '../models/Types';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { HgPressable } from '../components/HgPressable';
 import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
-import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../design/HgTokens';
+import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace, UiEntryKey } from '../design/HgTokens';
 import { HgMotion } from '../design/HgMotion';
 import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
@@ -942,7 +942,9 @@ export struct CategoryPage {
               .width('100%')
               .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
 
-              if (ConfigRegistry.getBool(ConfigKey.TOPICS_ENABLED)) {
+              // 专题入口：功能开关（kill switch）与远程入口显隐都开启才渲染；未下发时两者默认 true。
+              if (ConfigRegistry.getBool(ConfigKey.TOPICS_ENABLED)
+                && ConfigRegistry.entryVisible(UiEntryKey.CATEGORY_TOPICS)) {
                 Column() {
                   this.TopicsEntry()
                 }

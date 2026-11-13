@@ -2,12 +2,40 @@
  * HGhub 鸿蒙原生设计 token（唯一来源）。
  * 数值来自 docs/harmony/DESIGN.md §2；禁止在页面里散落颜色/字号/间距字面量。
  * 深色为设计基准；所有颜色用 #AARRGGBB。
+ *
+ * UI 下发（SPEC §14 / C9）：关键颜色与间距优先读远程覆盖
+ * （ConfigRegistry.uiColor / uiSize），无下发时返回编译期默认值——行为与未接入时完全一致。
  */
+
+import { ConfigRegistry } from '../services/ConfigRegistry';
+
+/**
+ * UI 下发入口显隐 key（SPEC §14.1 ui.entries）。
+ * 远程 ui.entries 段按这些 key 下发布尔值；未下发时 entryVisible 返回 true（入口照常展示）。
+ */
+export class UiEntryKey {
+  /** 首页 Hero 推荐位。 */
+  static readonly HOME_HERO: string = 'home_hero';
+  /** 分类页专题入口。 */
+  static readonly CATEGORY_TOPICS: string = 'category_topics';
+  /** 我的页关注入口。 */
+  static readonly PROFILE_FOLLOW: string = 'profile_follow';
+  /** 底部 Tab「分类」。 */
+  static readonly TAB_CATEGORY: string = 'tab_category';
+  /** 底部 Tab「吃瓜」（当前版本无独立 Tab，预留：吃瓜入口在分类页）。 */
+  static readonly TAB_POSTS: string = 'tab_posts';
+}
 
 export class HgColor {
   // 中性表面
-  static canvas(dark: boolean): string { return dark ? '#FF0B0C10' : '#FFF3F4F6'; }
-  static surface1(dark: boolean): string { return dark ? '#FF14161B' : '#FFFFFFFF'; }
+  static canvas(dark: boolean): string {
+    return ConfigRegistry.uiColor('canvas', dark ? '#FF0B0C10' : '#FFF3F4F6');
+  }
+
+  static surface1(dark: boolean): string {
+    return ConfigRegistry.uiColor('surface1', dark ? '#FF14161B' : '#FFFFFFFF');
+  }
+
   static surface2(dark: boolean): string { return dark ? '#FF1B1D23' : '#FFF7F8FA'; }
   static surface3(dark: boolean): string { return dark ? '#FF24272E' : '#FFEDF0F4'; }
   static surface4(dark: boolean): string { return dark ? '#FF2F333B' : '#FFE2E6EC'; }
@@ -22,12 +50,24 @@ export class HgColor {
   static cardBackground(dark: boolean): string { return dark ? '#FF14161B' : '#FFFFFFFF'; }
 
   // 文字与语义
-  static textPrimary(dark: boolean): string { return dark ? '#FFF5F6F8' : '#FF15171B'; }
-  static textSecondary(dark: boolean): string { return dark ? '#FFB6BBC4' : '#FF5A616B'; }
+  static textPrimary(dark: boolean): string {
+    return ConfigRegistry.uiColor('text_primary', dark ? '#FFF5F6F8' : '#FF15171B');
+  }
+
+  static textSecondary(dark: boolean): string {
+    return ConfigRegistry.uiColor('text_secondary', dark ? '#FFB6BBC4' : '#FF5A616B');
+  }
+
   static textTertiary(dark: boolean): string { return dark ? '#FF878E99' : '#FF667080'; }
   static textDisabled(dark: boolean): string { return dark ? '#FF5B616B' : '#FFB0B7C1'; }
-  static accent(dark: boolean): string { return dark ? '#FF60CDFF' : '#FF0067C0'; }
-  static accentPressed(dark: boolean): string { return dark ? '#FF4CB8E8' : '#FF00559E'; }
+
+  static accent(dark: boolean): string {
+    return ConfigRegistry.uiColor('accent', dark ? '#FF60CDFF' : '#FF0067C0');
+  }
+
+  static accentPressed(dark: boolean): string {
+    return ConfigRegistry.uiColor('accent_pressed', dark ? '#FF4CB8E8' : '#FF00559E');
+  }
   static onAccent(dark: boolean): string { return dark ? '#FF003042' : '#FFFFFFFF'; }
   static accentSoft(dark: boolean): string { return dark ? '#FF132B36' : '#FFCCE4F7'; }
   static secondaryFill(dark: boolean): string { return dark ? '#FF2A2E36' : '#FFE8EBF0'; }
@@ -97,13 +137,17 @@ export class HgSpace {
   static readonly xxs: number = 2;
   static readonly xs: number = 4;
   static readonly s: number = 8;
-  static readonly m: number = 12;
-  static readonly l: number = 16;
-  static readonly xl: number = 20;
+  /** 间距 m（默认 12vp）：远程 ui.sizes.space_m 可覆盖（0-64）。 */
+  static get m(): number { return ConfigRegistry.uiSize('space_m', 12); }
+  /** 间距 l（默认 16vp）：远程 ui.sizes.space_l 可覆盖（0-64）。 */
+  static get l(): number { return ConfigRegistry.uiSize('space_l', 16); }
+  /** 间距 xl（默认 20vp）：远程 ui.sizes.space_xl 可覆盖（0-64）。 */
+  static get xl(): number { return ConfigRegistry.uiSize('space_xl', 20); }
   static readonly xxl: number = 24;
   static readonly xxxl: number = 28;
 
-  static readonly pageInset: number = 16;
+  /** 页面左右边距（默认 16vp）：远程 ui.sizes.page_inset 可覆盖（0-64）。 */
+  static get pageInset(): number { return ConfigRegistry.uiSize('page_inset', 16); }
   static readonly sheetInset: number = 16;
   static readonly rowInset: number = 16;
   static readonly rowInnerInset: number = 12;
