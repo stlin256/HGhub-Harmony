@@ -91,6 +91,570 @@
     {
       "name": "widget_favorites_desc",
       "value": "My favorites shelf"
+    },
+    {
+      "name": "ui_016024b7",
+      "value": "Video is temporarily unavailable"
+    },
+    {
+      "name": "ui_05a28290",
+      "value": "Type a keyword and press Enter; or check the trending list / search history."
+    },
+    {
+      "name": "ui_0e067ede",
+      "value": "Close comments"
+    },
+    {
+      "name": "ui_10f28175",
+      "value": "AI Super Resolution enabled"
+    },
+    {
+      "name": "ui_11d02415",
+      "value": "Back"
+    },
+    {
+      "name": "ui_13143e50",
+      "value": "Lock screen"
+    },
+    {
+      "name": "ui_15dbaa78",
+      "value": "About HGhub, open the about page"
+    },
+    {
+      "name": "ui_167667a8",
+      "value": "Prefer HD (HEVC)"
+    },
+    {
+      "name": "ui_18dcd86b",
+      "value": "Re-fetch mirror lines"
+    },
+    {
+      "name": "ui_190c349c",
+      "value": "— End of ranking —"
+    },
+    {
+      "name": "ui_191e4ae3",
+      "value": "Native image enhancement for a sharper picture"
+    },
+    {
+      "name": "ui_19fd6a38",
+      "value": "Multi-source acceleration"
+    },
+    {
+      "name": "ui_1ac5f1f7",
+      "value": "AI Super Resolution"
+    },
+    {
+      "name": "ui_1c5c171f",
+      "value": "Recommendation data"
+    },
+    {
+      "name": "ui_21f1e882",
+      "value": "Sign in"
+    },
+    {
+      "name": "ui_24318bcc",
+      "value": "— End —"
+    },
+    {
+      "name": "ui_2564141e",
+      "value": "Scroll up to load more"
+    },
+    {
+      "name": "ui_27054dfb",
+      "value": "Disable page transitions, dialogs and skeleton animations (battery / accessibility)"
+    },
+    {
+      "name": "ui_2a33a141",
+      "value": "Full ranking"
+    },
+    {
+      "name": "ui_2c808595",
+      "value": "Expand or collapse description"
+    },
+    {
+      "name": "ui_2ef997a0",
+      "value": "Dismiss tablet notice"
+    },
+    {
+      "name": "ui_300ee3de",
+      "value": "Loading…"
+    },
+    {
+      "name": "ui_355e7cca",
+      "value": "On by default; remembers the last volume when off"
+    },
+    {
+      "name": "ui_36a4dfc6",
+      "value": "Back to rankings"
+    },
+    {
+      "name": "ui_37445711",
+      "value": "PolyForm Noncommercial License 1.0.0 · Noncommercial use only"
+    },
+    {
+      "name": "ui_38108eaa",
+      "value": "Refresh"
+    },
+    {
+      "name": "ui_3a711aad",
+      "value": "Prefer IPv6 when the target has an IPv6 address (on by default)"
+    },
+    {
+      "name": "ui_3b8a6e73",
+      "value": "Author · GitHub"
+    },
+    {
+      "name": "ui_3f62e8f5",
+      "value": "Post comment"
+    },
+    {
+      "name": "ui_408579c3",
+      "value": "Author avatar"
+    },
+    {
+      "name": "ui_42a36e94",
+      "value": "Feedback"
+    },
+    {
+      "name": "ui_435c5259",
+      "value": "Categories"
+    },
+    {
+      "name": "ui_4989b5cf",
+      "value": "Manage"
+    },
+    {
+      "name": "ui_4d0b4688",
+      "value": "Cancel"
+    },
+    {
+      "name": "ui_4f55ee1e",
+      "value": "Details"
+    },
+    {
+      "name": "ui_523e40a0",
+      "value": "Discover"
+    },
+    {
+      "name": "ui_53fdbebb",
+      "value": "Locked, tap to unlock"
+    },
+    {
+      "name": "ui_560c03c3",
+      "value": "Failed to load, tap to retry"
+    },
+    {
+      "name": "ui_576374ba",
+      "value": "Disclaimer"
+    },
+    {
+      "name": "ui_578bbcfa",
+      "value": "Clear history"
+    },
+    {
+      "name": "ui_5902c97c",
+      "value": "Switch line"
+    },
+    {
+      "name": "ui_5922d95f",
+      "value": "Line"
+    },
+    {
+      "name": "ui_59bca9f1",
+      "value": "View all ›"
+    },
+    {
+      "name": "ui_5b2cd791",
+      "value": "Tablet / large screen notice"
+    },
+    {
+      "name": "ui_5c37f0c6",
+      "value": "Export diagnostic logs"
+    },
+    {
+      "name": "ui_5e4d3706",
+      "value": "Latest works from creators you follow"
+    },
+    {
+      "name": "ui_5ea2e0cd",
+      "value": "Description"
+    },
+    {
+      "name": "ui_5fc8f9d0",
+      "value": "Favorites / Watch history"
+    },
+    {
+      "name": "ui_60192f6f",
+      "value": "Startup time"
+    },
+    {
+      "name": "ui_60876162",
+      "value": "Topics, view all"
+    },
+    {
+      "name": "ui_648372e0",
+      "value": "Runs entirely on your phone · Works offline · No personal data uploaded"
+    },
+    {
+      "name": "ui_67597dbc",
+      "value": "Replay"
+    },
+    {
+      "name": "ui_6fbdfa23",
+      "value": "Local computation status"
+    },
+    {
+      "name": "ui_705090b2",
+      "value": "Feedback, open the issue page"
+    },
+    {
+      "name": "ui_70ecebae",
+      "value": "Creator"
+    },
+    {
+      "name": "ui_72429b8a",
+      "value": "Play the HD source when available; sharper but uses more data"
+    },
+    {
+      "name": "ui_74839625",
+      "value": "Choose a data source line; switching manually requires signing in again"
+    },
+    {
+      "name": "ui_756f0f27",
+      "value": "Mirror lines"
+    },
+    {
+      "name": "ui_7578c613",
+      "value": "Found a bug? Report it via GitHub Issues (link in README) to help us improve the large-screen experience."
+    },
+    {
+      "name": "ui_778fc8f9",
+      "value": "All"
+    },
+    {
+      "name": "ui_7a924341",
+      "value": "Share"
+    },
+    {
+      "name": "ui_7ac0d5c9",
+      "value": "Follow"
+    },
+    {
+      "name": "ui_7b09aa5e",
+      "value": "Open the project issue page (link is copied to clipboard)"
+    },
+    {
+      "name": "ui_7b31abb2",
+      "value": "How do recommendations work?"
+    },
+    {
+      "name": "ui_7debf9cb",
+      "value": "Settings"
+    },
+    {
+      "name": "ui_82ca4338",
+      "value": "A HarmonyOS client for Huangguo short dramas: discovery, search, rankings, topics and immersive playback in one place, with on-device recommendations, quality switching, picture-in-picture, app continuation and casting."
+    },
+    {
+      "name": "ui_82e9cc5a",
+      "value": "New titles every week"
+    },
+    {
+      "name": "ui_84fcd70d",
+      "value": "Clear"
+    },
+    {
+      "name": "ui_88f329ff",
+      "value": "Sign in to like, favorite, comment and follow; account data stays on this device."
+    },
+    {
+      "name": "ui_8c4d505e",
+      "value": "No content"
+    },
+    {
+      "name": "ui_8c593599",
+      "value": "Refresh mirror lines"
+    },
+    {
+      "name": "ui_8df8281c",
+      "value": "Failed to load comments"
+    },
+    {
+      "name": "ui_8e48c9ea",
+      "value": "Next episode"
+    },
+    {
+      "name": "ui_93a41f50",
+      "value": "My favorites"
+    },
+    {
+      "name": "ui_95ba7e56",
+      "value": "Loading rankings…"
+    },
+    {
+      "name": "ui_9741bc8c",
+      "value": "Auto select"
+    },
+    {
+      "name": "ui_9a306145",
+      "value": "Full ranking ›"
+    },
+    {
+      "name": "ui_9b0c6c78",
+      "value": "More"
+    },
+    {
+      "name": "ui_9f1e3081",
+      "value": "Personalized recommendations"
+    },
+    {
+      "name": "ui_a0559bc8",
+      "value": "No comments yet. Be the first!"
+    },
+    {
+      "name": "ui_a0d73841",
+      "value": "In short: you watch → your phone learns preferences → an on-device model scores the shows → \"Refresh\" picks by score."
+    },
+    {
+      "name": "ui_a2552cea",
+      "value": "This project is for learning and technical exchange only. It stores and distributes no audio or video content; all content comes from third-party sites and remains the property of the original creators. Please support legitimate sources."
+    },
+    {
+      "name": "ui_a34380dc",
+      "value": "Redirecting…"
+    },
+    {
+      "name": "ui_a6df3858",
+      "value": "Check for updates"
+    },
+    {
+      "name": "ui_a74866f4",
+      "value": "— You have reached the end —"
+    },
+    {
+      "name": "ui_a82c993d",
+      "value": "Me"
+    },
+    {
+      "name": "ui_a8638e63",
+      "value": "The developer has no tablet device; tablet / large-screen / PC layouts have not been verified on real hardware and may have UI or interaction issues."
+    },
+    {
+      "name": "ui_ad25121b",
+      "value": "Reduce motion"
+    },
+    {
+      "name": "ui_adf6d73a",
+      "value": "Search history"
+    },
+    {
+      "name": "ui_afc8bdd9",
+      "value": "Switch sign in / sign up"
+    },
+    {
+      "name": "ui_b0d66234",
+      "value": "Refresh"
+    },
+    {
+      "name": "ui_b0e70eec",
+      "value": "Be kind and enjoy discussing the story"
+    },
+    {
+      "name": "ui_ba6a63ce",
+      "value": "Search shows, creators, genres…"
+    },
+    {
+      "name": "ui_bacaaa62",
+      "value": "Select something from the left"
+    },
+    {
+      "name": "ui_bb6138bb",
+      "value": "Model features: tags + title/description text"
+    },
+    {
+      "name": "ui_bc86f4f4",
+      "value": "How recommendations work"
+    },
+    {
+      "name": "ui_bc88087e",
+      "value": "Cast to another device"
+    },
+    {
+      "name": "ui_be39a686",
+      "value": "HGhub app icon"
+    },
+    {
+      "name": "ui_be4080c6",
+      "value": "Buffering…"
+    },
+    {
+      "name": "ui_bef9452a",
+      "value": "Topics"
+    },
+    {
+      "name": "ui_c24aa538",
+      "value": "— All channels shown —"
+    },
+    {
+      "name": "ui_c2e144d7",
+      "value": "End of episode"
+    },
+    {
+      "name": "ui_c30e213a",
+      "value": "No mirror lines yet. Try refreshing later."
+    },
+    {
+      "name": "ui_c36dc2ad",
+      "value": "Recommended, tap to play"
+    },
+    {
+      "name": "ui_c3a0709c",
+      "value": "Automatically detect and select an available line"
+    },
+    {
+      "name": "ui_c8109f43",
+      "value": "Mirror lines support guest browsing only; sign in using a fixed line."
+    },
+    {
+      "name": "ui_cecaaf5b",
+      "value": "Cover cache"
+    },
+    {
+      "name": "ui_cf510562",
+      "value": "Comments"
+    },
+    {
+      "name": "ui_d00981d6",
+      "value": "Rankings"
+    },
+    {
+      "name": "ui_d01c2df7",
+      "value": "For you"
+    },
+    {
+      "name": "ui_d07cee78",
+      "value": "Favorite"
+    },
+    {
+      "name": "ui_d3e7de0f",
+      "value": "Auto-fit in landscape"
+    },
+    {
+      "name": "ui_d5a1c832",
+      "value": "Mute on launch"
+    },
+    {
+      "name": "ui_dd3760c8",
+      "value": "Got it"
+    },
+    {
+      "name": "ui_dfe74b48",
+      "value": "Current line"
+    },
+    {
+      "name": "ui_e067f1ab",
+      "value": "One diagram, no technical knowledge needed"
+    },
+    {
+      "name": "ui_e07f300d",
+      "value": "Like"
+    },
+    {
+      "name": "ui_e10f8bfd",
+      "value": "See how recommendations work in one diagram"
+    },
+    {
+      "name": "ui_e1c90126",
+      "value": "AI short dramas · Updated daily"
+    },
+    {
+      "name": "ui_e29f3122",
+      "value": "Export to clipboard"
+    },
+    {
+      "name": "ui_e2d53a6d",
+      "value": "Retry"
+    },
+    {
+      "name": "ui_e31ef097",
+      "value": "Episodes"
+    },
+    {
+      "name": "ui_e6aa2cbd",
+      "value": "In use"
+    },
+    {
+      "name": "ui_e7ec9d80",
+      "value": "Clear watch history"
+    },
+    {
+      "name": "ui_e848ddd4",
+      "value": "Theme"
+    },
+    {
+      "name": "ui_e8aa9cc6",
+      "value": "Close line panel"
+    },
+    {
+      "name": "ui_eb1befc2",
+      "value": "Watch history"
+    },
+    {
+      "name": "ui_ed41aa6c",
+      "value": "Resume"
+    },
+    {
+      "name": "ui_efb28fde",
+      "value": "About HGhub"
+    },
+    {
+      "name": "ui_f07fc510",
+      "value": "Aspect ratio"
+    },
+    {
+      "name": "ui_f188133a",
+      "value": "Rankings"
+    },
+    {
+      "name": "ui_f2b50920",
+      "value": "Prefer IPv6"
+    },
+    {
+      "name": "ui_f31811ba",
+      "value": "Request multiple lines concurrently and use the fastest (on by default)"
+    },
+    {
+      "name": "ui_f32fba10",
+      "value": "Curated collections · Browse by topic"
+    },
+    {
+      "name": "ui_f3b14e33",
+      "value": "Trending · Recommended · Rising"
+    },
+    {
+      "name": "ui_f3ea6d34",
+      "value": "Action"
+    },
+    {
+      "name": "ui_f526c899",
+      "value": "OK"
+    },
+    {
+      "name": "ui_f7acefd2",
+      "value": "View"
+    },
+    {
+      "name": "ui_fa7626ef",
+      "value": "Retry rankings"
+    },
+    {
+      "name": "ui_fdbbd2d4",
+      "value": "Follow, see works from creators you follow"
+    },
+    {
+      "name": "ui_fe65e02e",
+      "value": "Your profile is empty: favorite or play a few shows and preferences will build up."
     }
   ]
 }
