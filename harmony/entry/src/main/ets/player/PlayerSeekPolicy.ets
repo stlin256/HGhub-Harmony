@@ -1,12 +1,12 @@
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
+
 /**
  * 播放进度与续播判定（纯函数，无 Kit 依赖，便于单元测试）。
  *
  * 从 PlayerPage 抽出：拖到片尾判定、是否自动续播、是否允许贴片尾续播。
+ * 片尾判定比例由远程配置下发（seek_end_ratio），默认 0.95 与迁移前一致。
  */
 export class PlayerSeekPolicy {
-  /** 拖到片尾该比例以上松手 → 视为「看完了」。 */
-  static readonly END_RATIO: number = 0.95;
-
   /**
    * 是否属于「拖到片尾」：必须发生过拖动（点按不算）、时长已知、位置达到阈值。
    * @param moved 本次触摸是否发生过拖动
@@ -17,7 +17,7 @@ export class PlayerSeekPolicy {
     if (!moved || durationMs <= 0 || positionMs <= 0) {
       return false;
     }
-    return positionMs >= durationMs * PlayerSeekPolicy.END_RATIO;
+    return positionMs >= durationMs * ConfigRegistry.getNumber(ConfigKey.SEEK_END_RATIO);
   }
 
   /**

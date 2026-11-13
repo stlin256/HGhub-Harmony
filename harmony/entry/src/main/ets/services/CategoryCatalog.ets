@@ -26,6 +26,7 @@ const KNOWN_CHANNELS: CateInfo[] = [
 /** 接口新增频道的副标题（本地没有存量文案可用）。 */
 const NEW_CHANNEL_DESC: string = '新频道 · 持续更新';
 /** 频道合并 + 可用性探测结果的内存缓存时长：避免每次进页重复请求接口与探测。 */
+// @config-exempt: 未注册（ConfigRegistry 无 catalog_cache_ttl_ms）
 const CACHE_TTL_MS: number = 10 * 60 * 1000;
 /**
  * 「内容已下线」判定标记。

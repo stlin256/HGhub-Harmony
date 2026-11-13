@@ -1,6 +1,7 @@
 import { media } from '@kit.MediaKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { Lines } from '../services/Lines';
 import { USER_AGENT } from '../services/Net';
 import { PlaybackInfo } from '../models/Types';
@@ -16,9 +17,17 @@ import { PowerGuard } from '../services/PowerGuard';
 import { Analytics } from '../services/Analytics';
 import { redactSensitive } from '../utils/Security';
 
+/** 进度落盘节流：ConfigRegistry 未注册 history_interval_ms，保持迁移前 5s。 */
+// @config-exempt: 未注册（ConfigRegistry 无 history_interval_ms）
 const HISTORY_INTERVAL_MS: number = 5000;
+/** UI 进度回调节流：UI 刷新节奏，非业务可调阈值。 */
+// @config-exempt: UI 刷新节流，走固定交互节奏
 const UI_INTERVAL_MS: number = 250;
+/** 播放地址缓存 TTL：ConfigRegistry 未注册 play_cache_ttl_ms，保持迁移前 8 分钟。 */
+// @config-exempt: 未注册（ConfigRegistry 无 play_cache_ttl_ms）
 const PLAY_CACHE_TTL_MS: number = 8 * 60 * 1000;
+/** 片尾判定窗口：ConfigRegistry 未注册 near_end_ms，保持迁移前 3s。 */
+// @config-exempt: 未注册（ConfigRegistry 无 near_end_ms）
 const NEAR_END_MS: number = 3000;
 
 /** 页面注入的真实媒体元数据（系统会话/投播面板展示用）。 */
@@ -549,7 +558,7 @@ export class PlayerService {
   }
 
   /**
-   * 失败后按策略重试：可重试错误按指数退避重取播放地址，最多 MAX_ATTEMPTS 次。
+   * 失败后按策略重试：可重试错误按指数退避重取播放地址，最多 retry_max 次（ConfigRegistry 下发）。
    * @returns true=已安排重试（调用方直接返回），false=不再重试（调用方报错）
    */
   private async retryOrFail(videoId: number, ep: number, startSec: number, autoPlay: boolean,
@@ -560,7 +569,7 @@ export class PlayerService {
     const delay: number = PlayerQuality.retryDelay(attempt);
     PlaybackLog.warn('load.retry', 'attempt=' + (attempt + 1) + ' delay=' + delay +
       ' code=' + code + ' from=' + (fromResolve ? 'resolve' : 'open'));
-    this.onRetry(attempt + 1, PlayerQuality.MAX_ATTEMPTS - 1);
+    this.onRetry(attempt + 1, PlayerQuality.maxAttempts() - 1);
     if (delay > 0) {
       await PlayerService.sleep(delay);
     }
@@ -646,8 +655,9 @@ export class PlayerService {
 
   /**
    * 按「用户开关 + 电源状态」应用超分。
-   * 开：setSuperResolution(true) + setVideoWindowSize(1920,1080)；
+   * 开：setSuperResolution(true) + setVideoWindowSize(SR_TARGET_WIDTH, SR_TARGET_HEIGHT)；
    * 关：setSuperResolution(false)。
+   * 目标分辨率由远程配置下发（默认 1920×1080，与迁移前一致）。
    * 设备不支持（5410003）时标记 srCapable=false 并静默。
    */
   async applySuperResolution(): Promise<void> {
@@ -662,8 +672,10 @@ export class PlayerService {
     try {
       if (want) {
         await player.setSuperResolution(true);
-        // 目标输出分辨率：1080p 上限（系统允许范围 320×320 ~ 1920×1080）。
-        await player.setVideoWindowSize(1920, 1080);
+        // 目标输出分辨率：读 ConfigRegistry（默认 1080p；系统允许范围 320×320 ~ 1920×1080）。
+        const targetWidth: number = ConfigRegistry.getNumber(ConfigKey.SR_TARGET_WIDTH);
+        const targetHeight: number = ConfigRegistry.getNumber(ConfigKey.SR_TARGET_HEIGHT);
+        await player.setVideoWindowSize(targetWidth, targetHeight);
         this.srCapable = true;
       } else {
         await player.setSuperResolution(false);

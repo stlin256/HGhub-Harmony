@@ -1,16 +1,16 @@
 import { PlaybackInfo } from '../models/Types';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 
 /**
  * 播放画质与重试策略（纯函数，无 Kit 依赖，便于单元测试）。
  *
  * 从 PlayerService 抽出：取流地址、高清源判定、重试退避与可重试判定。
- * 只依赖 models/Types，不触碰 AVPlayer / 网络 / 存储。
+ * 只依赖 models/Types 与 ConfigRegistry，不触碰 AVPlayer / 网络 / 存储。
+ *
+ * 重试退避与最大次数由远程配置下发（retry_delay_1/2/3_ms / retry_max），
+ * 默认值与迁移前常量一致：500 / 1500 / 3000ms，最多 4 次（含首次）。
  */
 export class PlayerQuality {
-  /** 重试退避（毫秒）：首次重试 0.5s，之后 1.5s / 3s。 */
-  static readonly RETRY_DELAYS_MS: number[] = [500, 1500, 3000];
-  /** 最大尝试次数（含首次）。 */
-  static readonly MAX_ATTEMPTS: number = 4;
 
   /** 该播放响应是否带 HEVC 高清源。 */
   static hasHevc(info: PlaybackInfo | undefined): boolean {
@@ -58,14 +58,25 @@ export class PlayerQuality {
       text.indexOf('network') >= 0;
   }
 
-  /** 第 attempt 次重试的等待时长（attempt 从 0 开始）。 */
+  /** 第 attempt 次重试的等待时长（attempt 从 0 开始）；退避序列读 ConfigRegistry。 */
   static retryDelay(attempt: number): number {
-    const index: number = Math.min(Math.max(0, attempt), PlayerQuality.RETRY_DELAYS_MS.length - 1);
-    return PlayerQuality.RETRY_DELAYS_MS[index];
+    const index: number = Math.min(Math.max(0, attempt), 2);
+    if (index === 0) {
+      return ConfigRegistry.getNumber(ConfigKey.RETRY_DELAY_1_MS);
+    }
+    if (index === 1) {
+      return ConfigRegistry.getNumber(ConfigKey.RETRY_DELAY_2_MS);
+    }
+    return ConfigRegistry.getNumber(ConfigKey.RETRY_DELAY_3_MS);
+  }
+
+  /** 最大尝试次数（含首次），读 ConfigRegistry（默认 4）。 */
+  static maxAttempts(): number {
+    return ConfigRegistry.getNumber(ConfigKey.RETRY_MAX);
   }
 
   /** 是否还有重试机会（attempt 为已失败的次数，从 0 开始）。 */
   static canRetry(attempt: number): boolean {
-    return attempt + 1 < PlayerQuality.MAX_ATTEMPTS;
+    return attempt + 1 < PlayerQuality.maxAttempts();
   }
 }

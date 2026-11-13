@@ -26,10 +26,16 @@ class CacheEntry {
 }
 
 /** 解码目标尺寸（px）：封面按真实显示尺寸解码，避免整屏大图占满内存导致滚动掉帧。 */
+// @config-exempt: 未注册（ConfigRegistry 无 cover_decode_w/h；解码尺寸属 UI 展示规格）
 const DEFAULT_DECODE_W: number = 560;
+// @config-exempt: 未注册（ConfigRegistry 无 cover_decode_w/h；解码尺寸属 UI 展示规格）
 const DEFAULT_DECODE_H: number = 760;
 
-/** 磁盘缓存上限（文件数）：封面体积小，尽量"无限缓存"，让已看过的内容永远秒开。 */
+/**
+ * 磁盘缓存上限（文件数）：封面体积小，尽量"无限缓存"，让已看过的内容永远秒开。
+ * ConfigRegistry 只有字节上限 COVER_CACHE_MB，与文件数上限无法等价换算（默认值会变），故保留。
+ */
+// @config-exempt: 未注册（ConfigRegistry 仅有字节上限 COVER_CACHE_MB，无文件数 key）
 const DISK_MAX_FILES: number = 4000;
 
 /**
@@ -38,7 +44,11 @@ const DISK_MAX_FILES: number = 4000;
  * inflight 去重：列表内同一封面被多个组件同时请求时只下载/解码一次。
  */
 export class ImageCache {
+  /** 内存 LRU 条数上限。 */
+  // @config-exempt: 未注册（ConfigRegistry 无封面内存条数 key）
   private static readonly MAX: number = 48;
+  /** 封面下载/解码并发上限。 */
+  // @config-exempt: 未注册（ConfigRegistry 无封面并发 key）
   private static readonly MAX_CONCURRENT: number = 3;
   private static active: number = 0;
   private static waiters: Array<() => void> = [];

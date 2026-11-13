@@ -15,11 +15,18 @@ export const K_LINE_BASE = 'hgLineBase';
 export const PREF_LINE_LAST_GOOD: string = 'line_last_good';
 
 const PUBLISH_PAGE: string = 'https://example.invalid';
+/** 单次拉取的镜像线路条数上限。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_mirror_max）
 const MIRROR_MAX: number = 60;
 /** 持久化镜像缓存条数上限（无网/发布页不可达时给 LineAuto 当候选）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_mirror_cache_max）
 const MIRROR_CACHE_MAX: number = 30;
 const MIRROR_CACHE_KEY: string = 'line_mirror_cache';
+/** 单线路接口探测超时（毫秒）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_probe_timeout）
 const PROBE_TIMEOUT: number = 8000;
+/** 地址发布页拉取超时（毫秒）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_page_timeout）
 const PAGE_TIMEOUT: number = 12000;
 
 function allDigits(text: string): boolean {

@@ -4,6 +4,7 @@ import { util, JSON } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { EdgeRequestBody, Envelope } from '../models/Types';
 import { parseHttpsUrl, redactSensitive } from '../utils/Security';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Ipv6Preference } from './Ipv6Preference';
 import { LineStats } from './LineStats';
 
@@ -11,15 +12,17 @@ import { LineStats } from './LineStats';
 export const USER_AGENT: string =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-const DEFAULT_TIMEOUT: number = 20000;
-const API_RETRY_TIMES: number = 3;
 /** 文本响应上限（GitHub Release / 发布页等 HTML/JSON，正常远小于此值）。 */
+// @config-exempt: 协议/安全上限（响应体安全上限，放宽有内存风险）
 const RESPONSE_MAX_TEXT_BYTES: number = 4 * 1024 * 1024;
 /** 二进制响应上限（封面/截图；超出视为异常响应）。 */
+// @config-exempt: 协议/安全上限（响应体安全上限，放宽有内存风险）
 const RESPONSE_MAX_BINARY_BYTES: number = 8 * 1024 * 1024;
 /** 连接复用调优字段的最低 API 版本（reuseConnections / inactivityMs 自 API 26 起提供）。 */
+// @config-exempt: 平台 API 版本常量（系统能力门槛）
 const CONN_TUNING_MIN_API: number = 26;
 /** 连接池空闲超时（毫秒）：超过该时间未使用的连接会被关闭。 */
+// @config-exempt: 未注册（ConfigRegistry 无 conn_inactivity_ms）
 const CONN_INACTIVITY_MS: number = 118000;
 
 /** /api/search/hot 探测响应的最小结构校验。 */
@@ -119,8 +122,18 @@ export class Net {
    * 因此这里按 host 缓存实例，请求结束不 destroy，应用退出时统一 dispose()。
    */
   private static pool: Map<string, http.HttpRequest> = new Map<string, http.HttpRequest>();
-  /** 池上限（按 host 计）；超出按插入顺序淘汰最旧的。 */
-  private static readonly POOL_MAX: number = 8;
+  /** 池上限（按 host 计）：ConfigRegistry 下发（默认 8），超出按插入顺序淘汰最旧的。 */
+  private static poolMax(): number {
+    return ConfigRegistry.getNumber(ConfigKey.CONN_POOL_MAX);
+  }
+  /** 默认网络超时（毫秒）：ConfigRegistry 下发（默认 20000）。 */
+  private static defaultTimeoutMs(): number {
+    return ConfigRegistry.getNumber(ConfigKey.NET_TIMEOUT_MS);
+  }
+  /** GET 接口重试次数：ConfigRegistry 下发（默认 3）。 */
+  private static apiRetryTimes(): number {
+    return ConfigRegistry.getNumber(ConfigKey.API_RETRY_TIMES);
+  }
   /** 设备 API 版本缓存（-1 表示尚未读取）。 */
   private static apiVersion: number = -1;
 
@@ -153,7 +166,7 @@ export class Net {
     if (cached !== undefined) {
       return cached;
     }
-    if (Net.pool.size >= Net.POOL_MAX) {
+    if (Net.pool.size >= Net.poolMax()) {
       const keys: string[] = [];
       Net.pool.forEach((_value: http.HttpRequest, key: string) => {
         keys.push(key);
@@ -429,7 +442,7 @@ export class Net {
       headers['Authorization'] = 'Bearer ' + token;
     }
     const canRetry = method === 'GET' && body === null;
-    const attempts = canRetry ? API_RETRY_TIMES : 1;
+    const attempts = canRetry ? Net.apiRetryTimes() : 1;
     let lastError = 'network error';
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
@@ -468,7 +481,7 @@ export class Net {
       content_type: contentType
     };
     const raw = await Net.request(url, http.RequestMethod.POST, headers,
-      JSON.stringify(envelope), DEFAULT_TIMEOUT, false);
+      JSON.stringify(envelope), Net.defaultTimeoutMs(), false);
     const response = raw as RawText;
     if (response.code === 401 || response.code === 403) {
       throw new Error('401');

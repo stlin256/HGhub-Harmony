@@ -1,5 +1,6 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { LineItem, LineProbe } from '../models/Types';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Lines, PREF_LINE_LAST_GOOD } from './Lines';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
@@ -14,20 +15,19 @@ export const PREF_PREFERRED: string = 'line_preferred';
 export const PREF_MIRROR_CACHE: string = 'line_mirror_cache';
 
 /** 单条线路探测超时（连接+读取同一上限，避免不可达线路拖 10 秒）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_probe_timeout_ms）
 const PROBE_TIMEOUT_MS: number = 4500;
 /** 每批并发探测条数（一次性探测全部候选，上限 64）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_probe_batch）
 const PROBE_BATCH: number = 64;
 /** 候选线路上限（与 64 并发探测对齐；正常数量远小于此值）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_candidate_limit）
 const CANDIDATE_LIMIT: number = 64;
 /** 启动后延迟多久做首次后台检查（让首屏请求先走）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_init_delay_ms）
 const INIT_DELAY_MS: number = 1200;
-/** 播放中线路巡检间隔（仅播放页激活时运行）。 */
-const WATCH_INTERVAL_MS: number = 5 * 60 * 1000;
-/** 连续失败多少次触发自动切换。 */
-const WATCH_FAIL_THRESHOLD: number = 2;
-/** 线路面板延迟探测结果缓存时长（避免每次打开都重新探测）。 */
-const PROBE_CACHE_TTL_MS: number = 60 * 1000;
 /** 用户手动选线后的冷却期（期间不做回切，尊重用户选择）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_manual_cooldown_ms）
 const MANUAL_COOLDOWN_MS: number = 5 * 60 * 1000;
 
 /** 单条线路探测结果。 */
@@ -73,6 +73,21 @@ export class LineAuto {
   private static inflight: Promise<boolean> | null = null;
   private static checking: boolean = false;
   private static status: string = '';
+
+  /** 播放中线路巡检间隔（毫秒）：ConfigRegistry 下发（默认 5 分钟）。 */
+  private static watchIntervalMs(): number {
+    return ConfigRegistry.getNumber(ConfigKey.LINE_WATCH_INTERVAL_MS);
+  }
+
+  /** 连续失败多少次触发自动换线：ConfigRegistry 下发（默认 2）。 */
+  private static failThreshold(): number {
+    return ConfigRegistry.getNumber(ConfigKey.LINE_FAIL_THRESHOLD);
+  }
+
+  /** 线路面板延迟探测结果缓存时长（毫秒）：ConfigRegistry 下发（默认 60s）。 */
+  private static probeCacheTtlMs(): number {
+    return ConfigRegistry.getNumber(ConfigKey.LINE_PROBE_TTL_MS);
+  }
 
   /* ── 播放中巡检 ───────────────────────────────────── */
   private static watchTimer: number = -1;
@@ -234,7 +249,7 @@ export class LineAuto {
       }
       const cachedAt: number = LineAuto.probeCacheAt.get(url) ?? 0;
       const cachedMs: number = LineAuto.probeCache.get(url) ?? -1;
-      if (cachedAt > 0 && now - cachedAt < PROBE_CACHE_TTL_MS) {
+      if (cachedAt > 0 && now - cachedAt < LineAuto.probeCacheTtlMs()) {
         out.set(url, cachedMs);
         continue;
       }
@@ -277,7 +292,7 @@ export class LineAuto {
       seen.add(url);
       const cachedAt: number = LineAuto.probeCacheAt.get(url) ?? 0;
       const cachedMs: number = LineAuto.probeCache.get(url) ?? -1;
-      if (cachedAt > 0 && now - cachedAt < PROBE_CACHE_TTL_MS) {
+      if (cachedAt > 0 && now - cachedAt < LineAuto.probeCacheTtlMs()) {
         onResult(url, cachedMs);
         continue;
       }
@@ -331,7 +346,7 @@ export class LineAuto {
       LineAuto.watchTimer = -1;
       LineAuto.watchTick().catch(() => {
       });
-    }, WATCH_INTERVAL_MS);
+    }, LineAuto.watchIntervalMs());
   }
 
   /** 单次巡检：当前线路连续失败达阈值则切换；镜像线路时顺带尝试回切主站。 */
@@ -348,7 +363,7 @@ export class LineAuto {
       } else {
         LineAuto.watchFailCount++;
         hilog.warn(LOG_DOMAIN, LOG_TAG, 'watch.fail count=%{public}d', LineAuto.watchFailCount);
-        if (LineAuto.watchFailCount >= WATCH_FAIL_THRESHOLD) {
+        if (LineAuto.watchFailCount >= LineAuto.failThreshold()) {
           LineAuto.watchFailCount = 0;
           await LineAuto.retryAfterFailure();
         }
