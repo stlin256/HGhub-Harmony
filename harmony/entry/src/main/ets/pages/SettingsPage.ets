@@ -1,4 +1,4 @@
-import { pasteboard } from '@kit.BasicServicesKit';
+import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
 import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
@@ -305,9 +305,50 @@ export struct SettingsPage {
         UiBus.toastOk('已是最新版本 v' + info.current);
       }
     } catch (err) {
-      UiBus.toast((err as Error).message);
+      // 连不上 GitHub / 获取失败：弹窗给出可执行的兜底动作（复制下载页地址）。
+      const detail: string = (err as Error).message !== undefined && (err as Error).message !== null ?
+        (err as Error).message : '未知错误';
+      const reason: string = this.isNetworkError(err)
+        ? '连不上 GitHub，暂时无法获取最新版本。'
+        : '获取更新信息失败：' + detail;
+      this.openConfirm(
+        new ConfirmCopy('无法检查更新', reason + '\n\n可以复制下载页地址，稍后在浏览器中打开。',
+          '复制下载地址', '取消', false),
+        () => {
+          this.copyReleaseUrl();
+        }
+      );
     } finally {
       this.checking = false;
+    }
+  }
+
+  /** 是否属于网络层失败（Network Kit 错误码 2300xxx，或错误文本含网络类关键词）。 */
+  private isNetworkError(err: Object): boolean {
+    const be = err as BusinessError;
+    const code: number | undefined = be.code;
+    if (code !== undefined && code !== null && code >= 2300000 && code < 2400000) {
+      return true;
+    }
+    const text: string = (err as Error).message !== undefined && (err as Error).message !== null ?
+      (err as Error).message : '';
+    return text.indexOf('网络') >= 0 || text.indexOf('超时') >= 0 ||
+      text.indexOf('timeout') >= 0 || text.indexOf('连接') >= 0 ||
+      text.indexOf('解析服务器') >= 0;
+  }
+
+  /** 复制 Release 页地址到剪贴板（无法检查更新时的兜底）。 */
+  private copyReleaseUrl(): void {
+    const url: string = 'https://github.com/stlin256/HGhub-Harmony/releases';
+    try {
+      const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, url);
+      pasteboard.getSystemPasteboard().setData(data).then(() => {
+        UiBus.toastOk('下载地址已复制');
+      }).catch(() => {
+        UiBus.toast('复制失败，请手动打开 ' + url);
+      });
+    } catch (err) {
+      UiBus.toast('复制失败，请手动打开 ' + url);
     }
   }
 
