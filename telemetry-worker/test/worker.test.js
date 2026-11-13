@@ -26,12 +26,25 @@ function makeDB() {
             return { n: devices.size };
           }
           if (sql.includes('SUM(sessions)')) {
-            let sessions = 0, duration_sec = 0, vv = 0, crash = 0;
+            const acc = {
+              sessions: 0, duration_sec: 0, vv: 0, crash: 0,
+              play_fail: 0, fail_network: 0, fail_auth: 0, fail_notfound: 0,
+              fail_server: 0, fail_other: 0, sr_on: 0, sr_supported: 0,
+              quality_hd: 0, quality_sd: 0, play_complete: 0,
+              startup_ms_sum: 0, startup_ms_count: 0, avg_p50: 0, avg_p90: 0,
+              page_home: 0, page_search: 0, page_category: 0, page_profile: 0, page_player: 0,
+            };
+            let p50Sum = 0, p50N = 0, p90Sum = 0, p90N = 0;
             for (const v of dailyStats.values()) {
-              sessions += v.sessions; duration_sec += v.duration_sec;
-              vv += v.vv; crash += v.crash;
+              for (const k of Object.keys(acc)) {
+                if (typeof v[k] === 'number') acc[k] += v[k];
+              }
+              if (v.startup_p50_ms > 0) { p50Sum += v.startup_p50_ms; p50N += 1; }
+              if (v.startup_p90_ms > 0) { p90Sum += v.startup_p90_ms; p90N += 1; }
             }
-            return { sessions, duration_sec, vv, crash };
+            acc.avg_p50 = p50N > 0 ? p50Sum / p50N : 0;
+            acc.avg_p90 = p90N > 0 ? p90Sum / p90N : 0;
+            return acc;
           }
           if (sql.includes('SELECT count, expires_at FROM rate_limits')) {
             const r = rates.get(args[0]);
@@ -57,19 +70,30 @@ function makeDB() {
         },
         async run() {
           if (sql.includes('INSERT OR IGNORE INTO daily_active')) {
-            dailyActive.add(`${args[0]}:${args[1]}`);
-            return { success: true };
+            const k = `${args[0]}:${args[1]}`;
+            const existed = dailyActive.has(k);
+            dailyActive.add(k);
+            // 模拟 D1：被 IGNORE 时 changes = 0
+            return { success: true, meta: { changes: existed ? 0 : 1 } };
           }
           if (sql.includes('INSERT INTO daily_stats')) {
             const k = `${args[0]}:${args[1]}`;
-            const cur = dailyStats.get(k) || { sessions: 0, duration_sec: 0, vv: 0, crash: 0 };
-            dailyStats.set(k, {
-              sessions: cur.sessions + args[2],
-              duration_sec: cur.duration_sec + args[3],
-              vv: cur.vv + args[4],
-              crash: cur.crash + args[5],
+            const cur = dailyStats.get(k) || {};
+            const fields = [
+              'sessions', 'duration_sec', 'vv', 'crash',
+              'startup_p50_ms', 'startup_p90_ms', 'startup_ms_sum', 'startup_ms_count',
+              'play_fail', 'fail_network', 'fail_auth', 'fail_notfound', 'fail_server', 'fail_other',
+              'sr_on', 'sr_supported', 'quality_hd', 'quality_sd', 'play_complete',
+              'page_home', 'page_search', 'page_category', 'page_profile', 'page_player',
+            ];
+            const next = { ...cur };
+            fields.forEach((f, i) => {
+              const v = args[2 + i] || 0;
+              // p50/p90 是设备级快照，覆盖；其余累加
+              next[f] = (f === 'startup_p50_ms' || f === 'startup_p90_ms') ? v : (cur[f] || 0) + v;
             });
-            return { success: true };
+            dailyStats.set(k, next);
+            return { success: true, meta: { changes: 1 } };
           }
           if (sql.includes('INSERT INTO devices')) {
             const [idHash, version, model, os, first, last] = args;
@@ -317,4 +341,69 @@ test('toSafeInt：缺省值走 fallback，不传 0', () => {
   assert.equal(toSafeInt('7', 30, 1, 90), 7);
   assert.equal(toSafeInt('abc', 30, 1, 90), 30);
   assert.equal(toSafeInt(999, 30, 1, 90), 90);
+});
+
+/* ── 新增：启动耗时 / 播放失败 / 超分 / 画质 / 完播 / 页面 ── */
+
+test('扩展指标写入并聚合', async () => {
+  const e = env();
+  const day = todayStamp();
+  const stats = {
+    day, sessions: 1, duration_sec: 600, vv: 10, crash: 0,
+    startup_p50_ms: 500, startup_p90_ms: 1200, startup_ms_sum: 5000, startup_ms_count: 5,
+    play_fail: 2, fail_network: 1, fail_auth: 1, fail_notfound: 0, fail_server: 0, fail_other: 0,
+    sr_on: 1, sr_supported: 1, quality_hd: 7, quality_sd: 3, play_complete: 6,
+    page_home: 5, page_search: 2, page_category: 1, page_profile: 1, page_player: 10,
+  };
+  const res = await worker.fetch(post({ id: UUID, ver: '2.3.0', day, stats }), e, ctx);
+  assert.equal(res.status, 200);
+
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.startup_p50_ms, 500);
+  assert.equal(row.play_fail, 2);
+  assert.equal(row.sr_on, 1);
+  assert.equal(row.quality_hd, 7);
+  assert.equal(row.play_complete, 6);
+  assert.equal(row.page_player, 10);
+
+  const sres = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await sres.json();
+  assert.equal(body.startup.avg_ms, 1000);
+  assert.equal(body.startup.avg_p50_ms, 500);
+  assert.equal(body.playback.vv, 10);
+  assert.equal(body.playback.play_fail, 2);
+  assert.equal(body.playback.fail_breakdown.network, 1);
+  assert.equal(body.playback.fail_breakdown.auth, 1);
+  assert.equal(body.playback.play_complete_rate, 60);
+  assert.equal(body.quality.hd, 7);
+  assert.equal(body.quality.sd, 3);
+  assert.equal(body.quality.hd_ratio, 70);
+  assert.equal(body.quality.sr_support_rate, 100);
+  assert.equal(body.pages.home, 5);
+  assert.equal(body.pages.player, 10);
+});
+
+test('扩展指标缺省时安全为 0', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({ id: UUID, ver: '2.3.0', day, stats: { day, sessions: 1 } }), e, ctx);
+  const sres = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await sres.json();
+  assert.equal(body.startup.avg_ms, 0);
+  assert.equal(body.playback.play_fail, 0);
+  assert.equal(body.quality.hd_ratio, 0);
+  assert.equal(body.pages.home, 0);
+});
+
+test('扩展指标超上限被裁剪', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, startup_p50_ms: 9e9, play_fail: 9e12, page_home: -5 },
+  }), e, ctx);
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.startup_p50_ms, 600000);
+  assert.equal(row.play_fail, 1000000);
+  assert.equal(row.page_home, 0);
 });
