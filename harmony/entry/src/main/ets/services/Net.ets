@@ -4,6 +4,7 @@ import { util, JSON } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { EdgeRequestBody, Envelope } from '../models/Types';
 import { parseHttpsUrl, redactSensitive } from '../utils/Security';
+import { Ipv6Preference } from './Ipv6Preference';
 
 /** 与原项目一致的桌面 Chrome UA。 */
 export const USER_AGENT: string =
@@ -160,6 +161,21 @@ export class Net {
     return Net.pool.size;
   }
 
+  /** 按 IPv6 优先策略选择地址族（未探测时触发异步探测，本次仍用默认）。 */
+  private static pickFamily(host: string): http.AddressFamily {
+    if (!Ipv6Preference.enabled() || host.length === 0) {
+      return http.AddressFamily.DEFAULT;
+    }
+    const known: boolean | undefined = Ipv6Preference.known(host);
+    if (known === true) {
+      return http.AddressFamily.ONLY_V6;
+    }
+    if (known === undefined) {
+      Ipv6Preference.probe(host);
+    }
+    return http.AddressFamily.DEFAULT;
+  }
+
   static errorText(err: Object): string {
     const be = err as BusinessError;
     const message: string | undefined = be.message;
@@ -229,11 +245,22 @@ export class Net {
       throw new Error('仅支持 HTTPS 请求');
     }
     const host: string = hostOfUrl(url);
-    return await Net.requestOnce(url, host, method, headers, body, timeoutMs, asBytes);
+    const family: http.AddressFamily = Net.pickFamily(host);
+    try {
+      return await Net.requestOnce(url, host, family, method, headers, body, timeoutMs, asBytes);
+    } catch (err) {
+      // IPv6 优先失败：标记该 host 不支持 IPv6，回退默认地址族重试一次（只回退一次）。
+      if (family === http.AddressFamily.ONLY_V6) {
+        Ipv6Preference.markUnsupported(host);
+        return await Net.requestOnce(url, host, http.AddressFamily.DEFAULT,
+          method, headers, body, timeoutMs, asBytes);
+      }
+      throw err;
+    }
   }
 
   /** 单次请求：复用该 host 的 HttpRequest（连接池），按传入地址族解析。 */
-  private static async requestOnce(url: string, host: string,
+  private static async requestOnce(url: string, host: string, family: http.AddressFamily,
     method: http.RequestMethod, headers: Record<string, string>,
     body: string, timeoutMs: number, asBytes: boolean): Promise<RawText | RawBytes> {
     const request: http.HttpRequest = Net.httpFor(host);
@@ -244,7 +271,9 @@ export class Net {
       readTimeout: timeoutMs,
       expectDataType: asBytes ? http.HttpDataType.ARRAY_BUFFER : http.HttpDataType.STRING,
       // 响应体上限：系统栈超限直接失败，避免把超大响应读进内存。
-      maxLimit: asBytes ? RESPONSE_MAX_BINARY_BYTES : RESPONSE_MAX_TEXT_BYTES
+      maxLimit: asBytes ? RESPONSE_MAX_BINARY_BYTES : RESPONSE_MAX_TEXT_BYTES,
+      // 地址族：DEFAULT 由系统决定；ONLY_V6 用于 IPv6 优先。
+      addressFamily: family
     };
     if (body.length > 0) {
       options.extraData = body;
