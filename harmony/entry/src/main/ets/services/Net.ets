@@ -1,5 +1,5 @@
 import { http } from '@kit.NetworkKit';
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { util, JSON } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { EdgeRequestBody, Envelope } from '../models/Types';
@@ -16,6 +16,10 @@ const API_RETRY_TIMES: number = 3;
 const RESPONSE_MAX_TEXT_BYTES: number = 4 * 1024 * 1024;
 /** 二进制响应上限（封面/截图；超出视为异常响应）。 */
 const RESPONSE_MAX_BINARY_BYTES: number = 8 * 1024 * 1024;
+/** 连接复用调优字段的最低 API 版本（reuseConnections / inactivityMs 自 API 26 起提供）。 */
+const CONN_TUNING_MIN_API: number = 26;
+/** 连接池空闲超时（毫秒）：超过该时间未使用的连接会被关闭。 */
+const CONN_INACTIVITY_MS: number = 118000;
 
 /** /api/search/hot 探测响应的最小结构校验。 */
 interface HotSearchProbeData {
@@ -116,6 +120,31 @@ export class Net {
   private static pool: Map<string, http.HttpRequest> = new Map<string, http.HttpRequest>();
   /** 池上限（按 host 计）；超出按插入顺序淘汰最旧的。 */
   private static readonly POOL_MAX: number = 8;
+  /** 设备 API 版本缓存（-1 表示尚未读取）。 */
+  private static apiVersion: number = -1;
+
+  /**
+   * 设备 API 版本（读一次缓存）。
+   * 用于对 API 26 才提供的连接复用调优字段做降级：旧设备不设置这些字段，
+   * 沿用平台默认行为，不会因未知字段报错。
+   */
+  private static deviceApiVersion(): number {
+    if (Net.apiVersion >= 0) {
+      return Net.apiVersion;
+    }
+    try {
+      const version: number = deviceInfo.sdkApiVersion;
+      Net.apiVersion = version > 0 ? version : 0;
+    } catch (err) {
+      Net.apiVersion = 0;
+    }
+    return Net.apiVersion;
+  }
+
+  /** 当前设备是否支持连接复用调优字段（API 26+）。 */
+  static supportsConnectionTuning(): boolean {
+    return Net.deviceApiVersion() >= CONN_TUNING_MIN_API;
+  }
 
   /** 取（或创建）该 host 对应的 HttpRequest。 */
   private static httpFor(host: string): http.HttpRequest {
@@ -277,6 +306,11 @@ export class Net {
     };
     if (body.length > 0) {
       options.extraData = body;
+    }
+    // API 26+ 显式声明连接复用与空闲超时；旧设备不设置，沿用平台默认（避免未知字段）。
+    if (Net.supportsConnectionTuning()) {
+      options.reuseConnections = true;
+      options.inactivityMs = CONN_INACTIVITY_MS;
     }
     const response: http.HttpResponse = await request.request(url, options);
     const code: number = response.responseCode;
