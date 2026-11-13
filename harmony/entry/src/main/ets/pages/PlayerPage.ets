@@ -45,6 +45,8 @@ import { PlayerSheetContent } from '../components/player/PlayerSheetContent';
 import { PlayerMoreMenu } from '../components/player/PlayerMoreMenu';
 import { PlayerRailChrome, PlayerTopChrome } from '../components/player/PlayerChrome';
 import { PlayerBottomChrome } from '../components/player/PlayerBottomChrome';
+import { PlayerPageHelpers } from '../player/PlayerPageHelpers';
+import { PlayerCommentSidebar, PlayerLockLayer, PlayerPiPHintChip, PlayerPosterOverlay, PlayerSpeedChip } from '../components/player/PlayerOverlays';
 import { AppChannel } from '../utils/AppChannel';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
@@ -2526,44 +2528,16 @@ export struct PlayerPage {
 
   /* ── 文案 ─────────────────────────────────────────── */
   private titleText(): string {
-    if (this.title.length > 0) {
-      return this.title;
-    }
-    return this.params.title.length > 0 ? this.params.title : '正在播放';
+    return PlayerPageHelpers.titleText(this.title, this.params.title);
   }
 
   private subtitleText(): string {
-    if (this.locked) {
-      return '';
-    }
-    if (this.episodeCount > 1) {
-      return I18n.fmt2($r('app.string.fmt_ep_meta'), this.ep, this.episodeCount);
-    }
-    if (this.ids.length > 1) {
-      return (this.currentIndex + 1) + ' / ' + this.ids.length;
-    }
-    return I18n.fmt1($r('app.string.fmt_episode'), this.ep);
+    return PlayerPageHelpers.subtitleText(this.locked, this.episodeCount, this.ep,
+      this.ids.length, this.currentIndex);
   }
 
   private metaText(): string {
-    const parts: string[] = [];
-    if (this.authorName.length > 0) {
-      parts.push(this.authorName);
-    }
-    if (this.episodeCount > 1) {
-      parts.push(I18n.fmt2($r('app.string.fmt_episode_of'), this.ep, this.episodeCount));
-    }
-    if (this.score > 0) {
-      parts.push('★ ' + this.score.toFixed(1));
-    }
-    if (parts.length === 0) {
-      return '正在加载…';
-    }
-    let text = '';
-    for (let i = 0; i < parts.length; i++) {
-      text = i === 0 ? parts[i] : text + ' · ' + parts[i];
-    }
-    return text;
+    return PlayerPageHelpers.metaText(this.authorName, this.episodeCount, this.ep, this.score);
   }
 
   /**
@@ -2571,9 +2545,7 @@ export struct PlayerPage {
    * 用最小内边距兜底，保证标题/返回键不被状态栏或挖孔压住（隐藏状态栏后也留有呼吸空间）。
    */
   private topSafePad(): number {
-    // 本 App 全屏沉浸布局下，左右栏都从 y=0 起（左栏列表自己加 topInset），
-    // 分栏右栏同样要叠加系统顶部安全区，否则状态栏会压住返回键/标题。
-    return this.topInset > 0 ? this.topInset : TOP_SAFE_FALLBACK;
+    return PlayerPageHelpers.topSafePad(this.topInset, TOP_SAFE_FALLBACK);
   }
 
   /**
@@ -2581,7 +2553,7 @@ export struct PlayerPage {
    * 底栏、相邻页底部信息、锁定图标、评论侧栏、面板内容统一用它，保证竖屏/横屏都不贴手势条。
    */
   private bottomSafePad(): number {
-    return this.bottomInset > 0 ? this.bottomInset : HgSpace.bottomSafeMin;
+    return PlayerPageHelpers.bottomSafePad(this.bottomInset);
   }
 
   /**
@@ -2589,27 +2561,21 @@ export struct PlayerPage {
    * 竖屏时 leftInset/rightInset 为 0，与手机现有布局完全一致。
    */
   private chromeLeftPad(): number {
-    return HgSpace.pageInset + this.leftInset;
+    return PlayerPageHelpers.chromeLeftPad(this.leftInset);
   }
 
   private chromeRightPad(): number {
-    return HgSpace.pageInset + this.rightInset;
+    return PlayerPageHelpers.chromeRightPad(this.rightInset);
   }
 
   /** 播放页实测宽度（vp，onAreaChange 维护）；未测量时退回窗口宽度。 */
   private frameWidth(): number {
-    if (this.screenW > 0) {
-      return this.screenW;
-    }
-    return this.windowW > 0 ? this.windowW : 400;
+    return PlayerPageHelpers.frameWidth(this.screenW, this.windowW);
   }
 
   /** 播放页实测高度（vp）；未测量时退回窗口高度。 */
   private frameHeight(): number {
-    if (this.screenH > 0) {
-      return this.screenH;
-    }
-    return this.windowH > 0 ? this.windowH : 780;
+    return PlayerPageHelpers.frameHeight(this.screenH, this.windowH);
   }
 
   /**
@@ -2617,21 +2583,13 @@ export struct PlayerPage {
    * 保证左侧视频区至少 320vp，不会出现「面板比窗口还宽」的重叠。
    */
   private commentPanelWidth(): number {
-    if (!this.commentPanelVisible) {
-      return 0;
-    }
-    const width: number = this.frameWidth();
-    const maxPanel: number = width - COMMENT_VIDEO_MIN_W;
-    if (maxPanel >= COMMENT_PANEL_MIN_W) {
-      return Math.min(COMMENT_PANEL_W, maxPanel);
-    }
-    return Math.max(160, width * 0.5);
+    return PlayerPageHelpers.commentPanelWidth(this.commentPanelVisible, this.frameWidth(),
+      COMMENT_VIDEO_MIN_W, COMMENT_PANEL_MIN_W, COMMENT_PANEL_W);
   }
 
   /** 视频区可用宽度（vp）：侧栏打开时让出右侧面板宽度，视频在左侧区域居中。 */
   private videoAreaWidth(): number {
-    const avail: number = this.frameWidth() - this.commentPanelWidth();
-    return avail > 0 ? avail : this.frameWidth();
+    return PlayerPageHelpers.videoAreaWidth(this.frameWidth(), this.commentPanelWidth());
   }
 
   /** Swiper 宽度：侧栏打开时收窄为左侧视频区，关闭时保持满宽（默认 '100%'，与改造前一致）。 */
@@ -2641,21 +2599,17 @@ export struct PlayerPage {
 
   /** 是否启用宽屏评论侧栏：窗口 ≥840vp（平板/大屏，横竖屏均可）且非帖子（帖子留言仍在底部 Sheet）。 */
   private canUseCommentPanel(): boolean {
-    if (this.params.feedKind === 'post') {
-      return false;
-    }
-    const width: number = Math.max(this.windowW, this.frameWidth());
-    return width >= HgResponsive.EXPANDED;
+    return PlayerPageHelpers.canUseCommentPanel(this.params.feedKind, this.windowW, this.frameWidth());
   }
 
   /** 当前视频是否横屏（宽 > 高）；尺寸未知时返回 false。 */
   private isLandscapeVideo(): boolean {
-    return this.videoW > 0 && this.videoH > 0 && this.videoW > this.videoH;
+    return PlayerPageHelpers.isLandscapeVideo(this.videoW, this.videoH);
   }
 
   /** 当前窗口是否横屏（旋转/分屏后由 onAreaChange 更新；尺寸未测量时按竖屏处理）。 */
   private isLandscapeWindow(): boolean {
-    return this.screenW > 0 && this.screenH > 0 && this.screenW > this.screenH;
+    return PlayerPageHelpers.isLandscapeWindow(this.screenW, this.screenH);
   }
 
   /**
@@ -2663,16 +2617,13 @@ export struct PlayerPage {
    * 横屏窗口里竖屏视频若按 cover 等比放大，会被裁掉大半画面（平板/旋转场景），因此统一 contain。
    */
   private isContainForced(): boolean {
-    return this.isLandscapeVideo() || this.isLandscapeWindow();
+    return PlayerPageHelpers.isContainForced(this.isLandscapeVideo(), this.isLandscapeWindow());
   }
 
   /** 实际生效的画面模式：横屏视频 / 横屏窗口即使选「全屏沉浸」也回退为「适应」（不裁切、不变形）。 */
   private effectiveVideoScale(): string {
-    const mode: string = UserPrefs.normalizeVideoScale(this.videoScale);
-    if (mode === 'cover' && this.isContainForced()) {
-      return 'contain';
-    }
-    return mode;
+    return PlayerPageHelpers.effectiveVideoScale(this.videoScale, this.isContainForced(),
+      (mode: string) => UserPrefs.normalizeVideoScale(mode));
   }
 
   /**
@@ -2743,56 +2694,20 @@ export struct PlayerPage {
 
   private pageTitleAt(index: number): string {
     const meta: PageMeta = this.metaAt(index);
-    if (meta.title.length > 0) {
-      return meta.title;
-    }
-    if (index === this.currentIndex) {
-      return this.titleText();
-    }
-    return I18n.fmt1($r('app.string.fmt_index'), index + 1);
+    return PlayerPageHelpers.pageTitleAt(meta.title, index === this.currentIndex, index, this.titleText());
   }
 
   private pageSubtitleAt(index: number): string {
     const id: number = index >= 0 && index < this.ids.length ? this.ids[index] : 0;
     const progress: WatchProgress | null = id > 0 ? UserPrefs.progressOf(id) : null;
     const meta: PageMeta = this.metaAt(index);
-    const parts: string[] = [];
-    if (progress !== null && progress.ep > 1) {
-      parts.push(I18n.fmt1($r('app.string.fmt_watched_ep'), progress.ep));
-    }
-    if (meta.episodeCount > 1) {
-      parts.push(I18n.fmt1($r('app.string.fmt_episodes_total'), meta.episodeCount));
-    }
-    if (parts.length === 0) {
-      return index === this.currentIndex ? this.subtitleText() : '';
-    }
-    let text: string = parts[0];
-    for (let i = 1; i < parts.length; i++) {
-      text = text + ' · ' + parts[i];
-    }
-    return text;
+    return PlayerPageHelpers.pageSubtitleAt(progress !== null ? progress.ep : 0,
+      meta.episodeCount, index === this.currentIndex, this.subtitleText());
   }
 
   private pageMetaTextAt(index: number): string {
     const meta: PageMeta = this.metaAt(index);
-    const parts: string[] = [];
-    if (meta.author.length > 0) {
-      parts.push(meta.author);
-    }
-    if (meta.episodeCount > 1) {
-      parts.push(I18n.fmt1($r('app.string.fmt_episodes_total'), meta.episodeCount));
-    }
-    if (meta.score > 0) {
-      parts.push('★ ' + meta.score.toFixed(1));
-    }
-    if (parts.length === 0) {
-      return '正在加载…';
-    }
-    let text: string = parts[0];
-    for (let i = 1; i < parts.length; i++) {
-      text = text + ' · ' + parts[i];
-    }
-    return text;
+    return PlayerPageHelpers.pageMetaTextAt(meta.author, meta.episodeCount, meta.score);
   }
 
   private pageProgressPercentAt(index: number): string {
@@ -2801,58 +2716,27 @@ export struct PlayerPage {
       return '0%';
     }
     const progress: WatchProgress | null = UserPrefs.progressOf(id);
-    if (progress === null || progress.dur <= 0 || progress.t <= 0) {
+    if (progress === null) {
       return '0%';
     }
-    let ratio: number = progress.t / progress.dur;
-    if (ratio < 0) {
-      ratio = 0;
-    }
-    if (ratio > 1) {
-      ratio = 1;
-    }
-    return (ratio * 100).toFixed(2) + '%';
+    return PlayerPageHelpers.pageProgressPercentAt(progress.t, progress.dur);
   }
 
   private rateLabel(): string {
-    if (this.speedLocked) {
-      return '2.0x 已锁定';
-    }
-    if (this.speedBoost) {
-      return '2.0x 加速中';
-    }
-    if (this.rate === 1) {
-      return '1.0x';
-    }
-    return this.rate + 'x';
+    return PlayerPageHelpers.rateLabel(this.speedLocked, this.speedBoost, this.rate);
   }
 
   private dragTimeText(): string {
-    return fmtTime(Math.floor(this.dragMs / 1000));
+    return PlayerPageHelpers.dragTimeText(this.dragMs);
   }
 
   private dragDiffText(): string {
-    const diff = Math.floor((this.dragMs - this.positionMs) / 1000);
-    if (diff === 0) {
-      return '原位';
-    }
-    return diff > 0 ? I18n.fmt1($r('app.string.fmt_seek_delta_plus'), diff) :
-      I18n.fmt1($r('app.string.fmt_seek_delta'), diff);
+    return PlayerPageHelpers.dragDiffText(this.dragMs, this.positionMs);
   }
 
   /** 拖动预览浮层内 62% 宽进度条的填充百分比（DESIGN §4.8.4）。 */
   private dragProgressPercent(): string {
-    if (this.durationMs <= 0) {
-      return '0%';
-    }
-    let ratio: number = this.dragMs / this.durationMs;
-    if (ratio < 0) {
-      ratio = 0;
-    }
-    if (ratio > 1) {
-      ratio = 1;
-    }
-    return (ratio * 100).toFixed(2) + '%';
+    return PlayerPageHelpers.dragProgressPercent(this.dragMs, this.durationMs);
   }
 
   /* ── UI ───────────────────────────────────────────── */
@@ -3071,162 +2955,6 @@ export struct PlayerPage {
     .hitTestBehavior(this.overlayInteractive() ? HitTestMode.Default : HitTestMode.None)
   }
 
-  @Builder
-  SpeedChip() {
-    Stack({ alignContent: Alignment.Top }) {
-      if (this.speedBoost || this.speedLocked) {
-        Text(this.speedLocked ? '已锁定 2.0x · 点按解除' : '2.0x 倍速中 · 上滑锁定')
-          .fontSize(HgFont.micro)
-          .fontWeight(HgFont.weightMedium)
-          .fontColor(this.speedLocked ? HgColor.onAccent(true) : HgColor.videoInk)
-          .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.xs, bottom: HgSpace.xs })
-          .backgroundColor(this.speedLocked ? HgColor.accent(true) : HgColor.videoChipStrong)
-          .borderRadius(HgRadius.chip)
-          .margin({ top: this.topSafePad() + 52 })
-          .scale({ x: this.ratePulse, y: this.ratePulse })
-          .transition(TransitionEffect.asymmetric(
-            HgMotion.fadeIn(HgMotion.fast).combine(
-              TransitionEffect.scale({ x: HgMotion.pressScale, y: HgMotion.pressScale })
-                .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-            ),
-            HgMotion.fadeOut(HgMotion.exitFast)
-          ))
-          .onClick(() => {
-            if (this.speedLocked) {
-              this.speedLocked = false;
-              this.service.setSpeed(this.rate);
-              this.pulseRateChip();
-              UiBus.toastInfo('已解除 2.0x 锁定');
-            }
-          })
-      }
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ left: this.leftInset, right: this.rightInset + this.commentPanelWidth() })
-    .hitTestBehavior(HitTestMode.None)
-  }
-
-  /** 画中画状态提示（App 内 fast 140ms 级轻量反馈，系统小窗动画之外不叠加自绘转场）。 */
-  @Builder
-  PiPHintChip() {
-    Column() {
-      if (this.pipHint.length > 0) {
-        Text(this.pipHint)
-          .fontSize(HgFont.micro)
-          .fontColor(HgColor.videoInk)
-          .padding({ left: HgSpace.m, right: HgSpace.m, top: HgSpace.xs, bottom: HgSpace.xs })
-          .backgroundColor(HgColor.videoChipStrong)
-          .borderRadius(HgRadius.chip)
-          .transition(TransitionEffect.asymmetric(
-            HgMotion.fadeIn(HgMotion.fast),
-            HgMotion.fadeOut(HgMotion.exitFast)
-          ))
-      }
-    }
-    .width('100%')
-    .height('100%')
-    .alignItems(HorizontalAlign.Center)
-    .padding({ top: this.topSafePad() + 52 })
-    .hitTestBehavior(HitTestMode.None)
-  }
-
-  /**
-   * 宽屏评论侧栏：右侧固定约 380vp 全高面板，头部/列表/分页/发表复用 CommentsSheet(sidebar=true)；
-   * 侧栏不在 Swiper 内，滚动评论不会误切视频。
-   */
-  @Builder
-  CommentSidebar() {
-    Column() {
-      Column() {
-        CommentsSheet({
-          videoId: this.currentId(),
-          ep: this.ep,
-          kind: this.params.feedKind,
-          dark: true,
-          sidebar: true,
-          refreshKey: this.commentRefreshKey,
-          onClose: () => {
-            this.closeCommentPanel();
-          }
-        })
-      }
-      .width('100%')
-      .layoutWeight(1)
-    }
-    .width(this.commentPanelWidth())
-    .height('100%')
-    // 顶部/底部/右侧安全区：横屏刘海在右侧时不遮挡关闭按钮与输入栏。
-    .padding({ top: this.topSafePad(), right: this.rightInset, bottom: this.bottomSafePad() })
-    .backgroundColor(HgColor.surface1(true))
-    .border({ width: { left: 0.5 }, color: HgColor.hairline(true) })
-    .position({ x: this.frameWidth() - this.commentPanelWidth(), y: 0 })
-    // 侧栏属大块面板（§3.6）：surface 260ms 进、exitSurface 220ms 出，位移与视频区 resize 同时长。
-    .transition(TransitionEffect.asymmetric(
-      TransitionEffect.OPACITY.animation({ duration: HgMotion.ms(HgMotion.surface), curve: HgMotion.curve })
-        .combine(TransitionEffect.translate({ x: this.commentPanelWidth() })
-          .animation({ duration: HgMotion.ms(HgMotion.surface), curve: HgMotion.curve })),
-      TransitionEffect.OPACITY.animation({ duration: HgMotion.ms(HgMotion.exitSurface), curve: HgMotion.curve })
-        .combine(TransitionEffect.translate({ x: this.commentPanelWidth() })
-          .animation({ duration: HgMotion.ms(HgMotion.exitSurface), curve: HgMotion.curve }))
-    ))
-  }
-
-  /**
-   * 锁定态：只保留一个无背景的「锁住」图标（轻微阴影保证深色画面上可见），
-   * 不显示 mask/半透明底板/解锁按钮，避免遮挡视频；44x44vp 热区点击解锁后恢复原有 chrome。
-   */
-  @Builder
-  LockLayer() {
-    Stack({ alignContent: Alignment.BottomEnd }) {
-      Stack() {
-        SymbolGlyph($r('sys.symbol.lock'))
-          .fontSize(HgIconSize.emphasis)
-          .fontColor([HgColor.videoInk])
-          .shadow({ radius: 6, color: HgColor.shadowElev3, offsetX: 0, offsetY: 1 })
-      }
-      .width(HgSize.hitTarget)
-      .height(HgSize.hitTarget)
-      .onClick(() => {
-        this.toggleLock();
-      })
-      .accessibilityText($r('app.string.ui_53fdbebb'))
-      .margin({ right: HgSpace.l + this.rightInset, bottom: this.bottomSafePad() + HgSpace.xxl })
-    }
-    .width('100%')
-    .height('100%')
-    .hitTestBehavior(HitTestMode.None)
-    .transition(this.chromeFade())
-  }
-
-  /* ── 「更多」自定义弹层（遮罩 + 右上角面板） ──────── */
-  @Builder
-  PosterOverlay() {
-    Stack() {
-      if (this.coverAt(this.currentIndex).length > 0) {
-        HgAsyncCover({
-          url: this.coverAt(this.currentIndex),
-          dark: true,
-          radius: 0,
-          coverWidth: '100%',
-          coverHeight: '100%'
-        })
-      }
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(HgColor.playerBackground)
-    .opacity(this.starting || this.loading || this.errorText.length > 0 ? 1 : 0)
-    .animation({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve })
-    // 与视频层同步位移：上下滑时封面缩略图跟着页面一起走；切页落定后由 posterDragY=0 回正显示新封面。
-    .translate({ y: this.posterDragY })
-    .hitTestBehavior(HitTestMode.None)
-  }
-
-  /**
-   * 当前页：手势层 + chrome。chrome 放进 Swiper 页内，
-   * 这样上滑切条时标题/返回、右侧点赞栏、底部控件会跟着页面一起移动，而不是固定悬浮。
-   */
   @Builder
   CurrentPage() {
     Stack({ alignContent: Alignment.TopStart }) {
@@ -3612,7 +3340,11 @@ export struct PlayerPage {
         .hitTestBehavior(HitTestMode.None)
         .translate({ y: this.videoDragY })
 
-        this.PosterOverlay()
+        PlayerPosterOverlay({
+          coverUrl: this.coverAt(this.currentIndex),
+          show: this.starting || this.loading || this.errorText.length > 0,
+          translateY: this.posterDragY
+        })
 
         Swiper(this.swiperController) {
           ForEach(this.ids, (id: number, index: number) => {
@@ -3669,11 +3401,39 @@ export struct PlayerPage {
 
         // 宽屏评论区侧栏：固定右侧、全高，内容复用 CommentsSheet（分页/加载更多/发表逻辑不变）。
         if (this.commentPanelVisible) {
-          this.CommentSidebar()
+          PlayerCommentSidebar({
+            videoId: this.currentId(),
+            ep: this.ep,
+            feedKind: this.params.feedKind,
+            refreshKey: this.commentRefreshKey,
+            panelWidth: this.commentPanelWidth(),
+            frameWidth: this.frameWidth(),
+            topPad: this.topSafePad(),
+            rightInset: this.rightInset,
+            bottomPad: this.bottomSafePad(),
+            onClose: () => { this.closeCommentPanel(); }
+          })
         }
 
-        this.SpeedChip()
-        this.PiPHintChip()
+        PlayerSpeedChip({
+          speedBoost: this.speedBoost,
+          speedLocked: this.speedLocked,
+          ratePulse: this.ratePulse,
+          topPad: this.topSafePad(),
+          leftInset: this.leftInset,
+          rightInset: this.rightInset,
+          commentPanelWidth: this.commentPanelWidth(),
+          onUnlock: () => {
+            this.speedLocked = false;
+            this.service.setSpeed(this.rate);
+            this.pulseRateChip();
+            UiBus.toastInfo('已解除 2.0x 锁定');
+          }
+        })
+        PlayerPiPHintChip({
+          pipHint: this.pipHint,
+          topPad: this.topSafePad()
+        })
         if (IS_TEST_VARIANT) {
           PlayerDiagnostics({
             lines: this.debugLines(),
@@ -3683,7 +3443,11 @@ export struct PlayerPage {
           })
         }
         if (this.locked) {
-          this.LockLayer()
+          PlayerLockLayer({
+            rightInset: this.rightInset,
+            bottomPad: this.bottomSafePad(),
+            onUnlock: () => { this.toggleLock(); }
+          })
         }
         PlayerMoreMenu({
           visible: this.menuVisible,
