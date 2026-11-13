@@ -323,7 +323,7 @@ export struct RemoteNoticeDialog {
           Column({ space: HgSpace.s }) {
             ForEach(this.notice.buttons, (btn: NoticeButton) => {
               this.WideButton(btn)
-            }, (btn: NoticeButton) => 'wd_' + btn.type + '_' + btn.label)
+            }, (btn: NoticeButton, index: number) => 'wd_' + index + '_' + btn.type)
           }
           .width('100%')
         }
@@ -383,7 +383,7 @@ export struct RemoteNoticeDialog {
           Row({ space: HgSpace.s }) {
             ForEach(this.notice.buttons, (btn: NoticeButton) => {
               this.InlineButton(btn)
-            }, (btn: NoticeButton) => 'bn_' + btn.type + '_' + btn.label)
+            }, (btn: NoticeButton, index: number) => 'bn_' + index + '_' + btn.type)
           }
           .width('100%')
           .margin({ top: HgSpace.xs })
@@ -425,7 +425,7 @@ export struct RemoteNoticeDialog {
         if (this.notice.buttons.length > 0) {
           ForEach(this.notice.buttons, (btn: NoticeButton) => {
             this.WideButton(btn)
-          }, (btn: NoticeButton) => 'fs_' + btn.type + '_' + btn.label)
+          }, (btn: NoticeButton, index: number) => 'fs_' + index + '_' + btn.type)
         }
         if (this.notice.closable) {
           this.WideCloseButton()
@@ -465,7 +465,7 @@ export struct RemoteNoticeDialog {
           Row({ space: HgSpace.s }) {
             ForEach(this.notice.buttons, (btn: NoticeButton) => {
               this.InlineButton(btn)
-            }, (btn: NoticeButton) => 'ts_' + btn.type + '_' + btn.label)
+            }, (btn: NoticeButton, index: number) => 'ts_' + index + '_' + btn.type)
           }
           .width('100%')
           .margin({ top: HgSpace.xs })

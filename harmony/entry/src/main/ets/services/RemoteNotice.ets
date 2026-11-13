@@ -36,7 +36,8 @@ const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGRemoteNotice';
 
 /** 单条通知序列化上限（SPEC §12.4：2 KB，超限整条丢弃）。 */
-const MAX_NOTICE_JSON_CHARS: number = 2048;
+/** 单条通知 JSON 上限（**UTF-8 字节**，不是 UTF-16 字符数：中文 1 字 ≈ 3 字节）。 */
+const MAX_NOTICE_JSON_BYTES: number = 2048;
 /** 通知总数上限（SPEC §12.4：20 条，超出部分忽略）。 */
 const MAX_NOTICES: number = 20;
 /** 标题 / 正文长度上限（正文纯文本，不解析 HTML/Markdown）。 */
@@ -137,6 +138,31 @@ export function emptyNotice(): NoticeData {
 }
 
 /* ── 解析工具 ─────────────────────────────────────── */
+
+/**
+ * 统计 UTF-8 字节数。
+ * 为什么不用 TextEncoder：避免为一个上限检查引入额外 import；
+ * 为什么不能直接用 String.length：那是 UTF-16 code unit 数，
+ * 中文 1 字约 3 字节，用 length 卡 2048 实际可到 ~6KB，超出 SPEC §12.4 的 2KB 限制。
+ */
+function utf8Bytes(text: string): number {
+  let bytes: number = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code: number = text.charCodeAt(i);
+    if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < text.length) {
+      // 代理对：两个 UTF-16 单元合成一个 4 字节码点
+      bytes += 4;
+      i += 1;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
 
 /** Object → Record（非对象/数组返回 null）。 */
 function asRecord(value: Object | undefined | null): Record<string, Object> | null {
@@ -332,7 +358,7 @@ function parseNotice(raw: Object): NoticeData | null {
   }
   // 单条 2KB 上限（SPEC §12.4）：序列化长度超限整条丢弃。
   try {
-    if (JSON.stringify(raw).length > MAX_NOTICE_JSON_CHARS) {
+    if (utf8Bytes(JSON.stringify(raw)) > MAX_NOTICE_JSON_BYTES) {
       return null;
     }
   } catch (err) {

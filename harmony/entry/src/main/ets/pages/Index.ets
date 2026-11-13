@@ -128,6 +128,8 @@ struct Index {
   private tabletDialog: CustomDialogController | null = null;
   /** 远程通知：pick() 命中的一条；noticeVisible=false 时不渲染任何节点（无下发即零行为）。 */
   @State noticeVisible: boolean = false;
+  /** 当前通知是否为模态（dialog / fullscreen）；banner / toast 不拦截返回键。 */
+  @State noticeModal: boolean = false;
   private noticeData: NoticeData = emptyNotice();
   /** applyNavSplit 重入保护：复位全屏标记会触发 @Watch，避免一次返回重算/重播两次模式动画。 */
   private navApplying: boolean = false;
@@ -246,6 +248,8 @@ struct Index {
       }
       RemoteNotice.markShown(notice.id);
       this.noticeData = notice;
+      // 只有 dialog / fullscreen 是模态的，需要拦截返回键；banner / toast 不阻断页面。
+      this.noticeModal = notice.mode === 'dialog' || notice.mode === 'fullscreen';
       this.noticeVisible = true;
     } catch (err) {
     }
@@ -487,8 +491,10 @@ struct Index {
       this.lineVisible = false;
       return true;
     }
-    // 远程通知浮层：返回键关闭（closable 只控制关闭按钮显隐，返回键始终可退出，避免把用户困住）。
-    if (this.noticeVisible) {
+    // 远程通知浮层：只有模态模式（dialog / fullscreen）才拦截返回键。
+    // banner / toast 不阻断页面操作，用户可能已经打开了详情页——此时返回键应优先 pop 页面，
+    // 否则会「先关通知再返回」，改变既有路由行为。
+    if (this.noticeVisible && this.noticeModal) {
       this.noticeVisible = false;
       return true;
     }
