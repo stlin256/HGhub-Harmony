@@ -41,11 +41,11 @@ import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
 import { TabletNoticeDialog } from '../components/TabletNoticeDialog';
 import {
-import { I18n } from '../utils/I18n';
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
   ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC, ROUTE_USER, ROUTE_FOLLOW, ROUTE_ABOUT,
   PlayerParam, ChannelParam, PostParam, VideoParam, TopicParam, UserParam
 } from '../state/Routes';
+import { I18n } from '../utils/I18n';
 
 /** 服务卡片「继续观看」携带的最近一条历史。 */
 interface FormContinuePayload {

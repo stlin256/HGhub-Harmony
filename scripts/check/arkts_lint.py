@@ -281,7 +281,27 @@ def check_imports():
     print("  相对导入检查完成，缺失 %d 处" % missing)
 
 
-# ---------- 6. 单文件行数 ----------
+# ---------- 6. import 块完整性 ----------
+def check_import_blocks():
+    """多行 import 块中间被插入新 import 会导致语法错误：
+       import {
+       import { X } from 'y';   ← 坏
+         A, B
+       } from 'z';
+    """
+    bad = 0
+    for path in iter_ets():
+        lines = open(path, encoding="utf-8").read().split("\n")
+        for i, ln in enumerate(lines):
+            if ln.strip() != "import {":
+                continue
+            if i + 1 < len(lines) and lines[i + 1].strip().startswith("import "):
+                fail("import 块被插入 %s:%d" % (os.path.relpath(path, ROOT), i + 2))
+                bad += 1
+    print("  import 块检查完成，异常 %d 处" % bad)
+
+
+# ---------- 7. 单文件行数 ----------
 def load_large_allowlist():
     """大文件允许清单：path<TAB>max_lines（含 headroom，防止继续膨胀）。"""
     path = os.path.join(ROOT, "scripts", "check", "large_files_allowlist.txt")
@@ -320,20 +340,22 @@ def check_file_size():
 
 def main():
     skip_syntax = "--skip-syntax" in sys.argv
-    print("[1/6] ArkTS 语法")
+    print("[1/7] ArkTS 语法")
     if skip_syntax:
         print("  已跳过")
     else:
         check_syntax()
-    print("[2/6] JSON5")
+    print("[2/7] JSON5")
     check_json5()
-    print("[3/6] 资源引用")
+    print("[3/7] 资源引用")
     check_resources()
-    print("[4/6] 路由注册")
+    print("[4/7] 路由注册")
     check_routes()
-    print("[5/6] 相对导入")
+    print("[5/7] 相对导入")
     check_imports()
-    print("[6/6] 单文件行数")
+    print("[6/7] import 块完整性")
+    check_import_blocks()
+    print("[7/7] 单文件行数")
     check_file_size()
 
     if errors:
