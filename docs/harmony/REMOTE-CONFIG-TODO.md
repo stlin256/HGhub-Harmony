@@ -278,6 +278,6 @@ P0-P14 全部落地，三项遗留收口完成：
 ```
 Worker secret 需配置：
 ```
-CONFIG_SIGNING_KEY = 9f2c7a41e8b3d6509c4f1a7e2b8d3506   ✅ 已配置
+CONFIG_SIGNING_KEY = <redacted: 客户端内置验签密钥>   ✅ 已配置
 CONFIG_ADMIN_KEY   = <独立的管理口令>                     ✅ 已配置
 ```
