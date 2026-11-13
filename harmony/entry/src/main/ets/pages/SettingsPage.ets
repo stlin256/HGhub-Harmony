@@ -4,6 +4,7 @@ import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
 import { K_LINE_BASE, Lines } from '../services/Lines';
 import { Ipv6Preference } from '../services/Ipv6Preference';
+import { PowerGuard } from '../services/PowerGuard';
 import { ImageCache } from '../services/ImageCache';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
@@ -57,6 +58,10 @@ export struct SettingsPage {
   @State muteOnStartup: boolean = true;
   /** 优先高清（HEVC）：有高清源时优先播放。 */
   @State preferHevc: boolean = false;
+  /** AI 超分开关（默认开）。 */
+  @State superResolution: boolean = true;
+  /** 超分状态说明（省电/低电量会显示暂停原因）。 */
+  @State srStatusText: string = '';
   @State multiSource: boolean = true;
   /** IPv6 优先（默认开）。 */
   @State ipv6Prefer: boolean = true;
@@ -107,6 +112,8 @@ export struct SettingsPage {
     this.themeMode = UserPrefs.themeMode();
     this.muteOnStartup = UserPrefs.muteOnStartup();
     this.preferHevc = UserPrefs.preferHevc();
+    this.superResolution = UserPrefs.superResolution();
+    this.srStatusText = PowerGuard.superResolutionStatusText();
     this.multiSource = UserPrefs.multiSource();
     this.ipv6Prefer = Ipv6Preference.enabled();
     this.crashCount = CrashGuard.count();
@@ -505,6 +512,38 @@ export struct SettingsPage {
       }
       .width('100%')
       .height(HgSize.listRowDouble)
+
+      Divider()
+        .width('100%')
+        .strokeWidth(0.5)
+        .color(HgColor.hairline(this.dark))
+
+      Row({ space: HgSpace.m }) {
+        this.RowIcon($r('sys.symbol.sparkles'))
+        Column({ space: 2 }) {
+          Text('AI 超分')
+            .fontSize(HgFont.rowTitle)
+            .fontColor(HgColor.textPrimary(this.dark))
+          Text(this.srStatusText)
+            .fontSize(HgFont.micro)
+            .fontColor(HgColor.textTertiary(this.dark))
+            .maxLines(2)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.superResolution })
+          .selectedColor(HgColor.accent(this.dark))
+          .onChange((isOn: boolean) => {
+            this.superResolution = isOn;
+            UserPrefs.setSuperResolution(isOn);
+            // 立即重算并让当前播放器生效（省电/低电量时仍保持关闭）。
+            PowerGuard.refresh(true);
+            this.srStatusText = PowerGuard.superResolutionStatusText();
+          })
+      }
+      .width('100%')
+      .height(HgSize.listRowDouble)
+      .accessibilityText('AI 超分，' + this.srStatusText)
 
       Divider()
         .width('100%')
