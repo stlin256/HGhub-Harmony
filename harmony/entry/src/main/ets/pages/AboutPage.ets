@@ -6,7 +6,6 @@ import { K_BOTTOM_INSET, K_DARK } from '../state/UserPrefs';
 
 /** 作者与仓库信息（展示用常量，链接点击走系统浏览器）。 */
 const AUTHOR_NAME: string = 'stlin256';
-const AUTHOR_AVATAR: string = 'https://github.com/stlin256.png';
 const REPO_URL: string = 'https://github.com/stlin256/HGhub-Harmony';
 const REPO_LABEL: string = 'github.com/stlin256/HGhub-Harmony';
 
@@ -23,8 +22,6 @@ export struct AboutPage {
 
   /** 版本号（进入页面时从包信息读取）。 */
   @State version: string = '';
-  /** 头像加载失败时回退为首字母。 */
-  @State avatarOk: boolean = true;
 
   aboutToAppear(): void {
     this.version = Api.appVersion();
@@ -49,31 +46,13 @@ export struct AboutPage {
 
   @Builder
   AuthorAvatar() {
-    if (this.avatarOk) {
-      Image(AUTHOR_AVATAR)
-        .width(44)
-        .height(44)
-        .borderRadius(22)
-        .objectFit(ImageFit.Cover)
-        .backgroundColor(HgColor.surface3(this.dark))
-        .onError(() => {
-          this.avatarOk = false;
-        })
-    } else {
-      Stack({ alignContent: Alignment.Center }) {
-        Row()
-          .width(44)
-          .height(44)
-          .backgroundColor(HgColor.accentSoft(this.dark))
-          .borderRadius(22)
-        Text('S')
-          .fontSize(HgFont.section)
-          .fontWeight(HgFont.weightMedium)
-          .fontColor(HgColor.accent(this.dark))
-      }
+    Image($r('app.media.author_avatar'))
       .width(44)
       .height(44)
-    }
+      .borderRadius(22)
+      .objectFit(ImageFit.Cover)
+      .backgroundColor(HgColor.surface3(this.dark))
+      .accessibilityText('作者头像')
   }
 
   @Builder
