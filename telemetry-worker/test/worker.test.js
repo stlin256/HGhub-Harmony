@@ -922,7 +922,7 @@ test('行为计数超上限被裁剪', async () => {
 
 /* ── 远程配置下发（/v1/config）────────────────────── */
 
-const CONFIG_KEY = 'test-config-signing-key';
+const CONFIG_KEY = 'test-config-signing-key-0123456789abcdef';
 
 /** 带签名密钥的环境（STATS_KEY 沿用 env() 的 'k'）。 */
 function configEnv(extra = {}) {

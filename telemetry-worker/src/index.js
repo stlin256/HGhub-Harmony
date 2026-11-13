@@ -82,7 +82,9 @@ export default {
       return withCors(await handleConfig(url, env));
     }
     if (url.pathname === '/admin/config' && request.method === 'POST') {
-      return withCors(await handleAdminConfig(request, env));
+      // 管理写端点**不套 CORS**：它不需要浏览器跨域调用，
+      // 套上 Access-Control-Allow-Origin: * 会让任意网页在知道 key 时跨域写配置。
+      return await handleAdminConfig(request, env);
     }
     if (url.pathname === '/badge' && request.method === 'GET') {
       return withCors(await handleBadge(env));
@@ -460,6 +462,10 @@ function clipText(value, max) {
  */
 async function handleConfig(url, env) {
   const signingKey = env.CONFIG_SIGNING_KEY || '';
+  // 密钥过短会静默弱化签名，直接拒绝下发。
+  if (signingKey.length > 0 && signingKey.length < 32) {
+    return json({ error: 'config_unavailable', reason: 'signing_key_too_short' }, 503);
+  }
   if (signingKey.length === 0) {
     return json({ error: 'config_unavailable' }, 503);
   }
@@ -467,8 +473,8 @@ async function handleConfig(url, env) {
   let row;
   try {
     row = await env.DB.prepare(
-      'SELECT version, payload, updated_at FROM remote_config ORDER BY version DESC LIMIT 1'
-    ).first();
+      'SELECT version, payload, updated_at FROM remote_config WHERE id = ? ORDER BY version DESC LIMIT 1'
+    ).bind(CONFIG_ROW_ID).first();
   } catch {
     return json({ error: 'storage_failed' }, 500);
   }
@@ -532,7 +538,10 @@ async function handleConfig(url, env) {
  * 字段不做深度校验（客户端负责合并与类型/范围校验）。
  */
 async function handleAdminConfig(request, env) {
-  const adminKey = env.STATS_KEY || '';
+  // 写权限用独立的 CONFIG_ADMIN_KEY；未配置时回落到 STATS_KEY 以兼容旧部署。
+  // 建议生产环境单独配置：STATS_KEY 是只读统计口令，曾出现在 /dashboard?key= 的 URL 里，
+  // 复用它做写权限会把「读统计」的泄漏面放大成「配置注入」。
+  const adminKey = (env.CONFIG_ADMIN_KEY || '').length > 0 ? env.CONFIG_ADMIN_KEY : (env.STATS_KEY || '');
   if (adminKey.length === 0) {
     return json({ error: 'admin_unavailable' }, 503);
   }
@@ -597,8 +606,8 @@ async function handleAdminConfig(request, env) {
   let current = 0;
   try {
     const row = await env.DB.prepare(
-      'SELECT MAX(version) AS max_version FROM remote_config'
-    ).first();
+      'SELECT MAX(version) AS max_version FROM remote_config WHERE id = ?'
+    ).bind(CONFIG_ROW_ID).first();
     current = row && typeof row.max_version === 'number' ? row.max_version : 0;
   } catch {
     return json({ error: 'storage_failed' }, 500);
@@ -1326,7 +1335,7 @@ function withCors(response) {
   const headers = new Headers(response.headers);
   headers.set('access-control-allow-origin', '*');
   headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
-  headers.set('access-control-allow-headers', 'content-type, x-client-ts, x-client-sig, x-admin-key');
+  headers.set('access-control-allow-headers', 'content-type, x-client-ts, x-client-sig');
   headers.set('access-control-max-age', '86400');
   return new Response(response.body, { status: response.status, headers });
 }
