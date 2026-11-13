@@ -239,25 +239,30 @@ P8、P9 收尾
 | P3-A services 层 | `6ec5476` | ✅ |
 | P3-B 播放器/网络层 | `3c13f81` | ✅ |
 | P3-C UI 功能入口（第一批） | `f27db95` | ✅ |
-| P3-C 剩余（分享/评论/推荐/搜索/用户页开关 + 列表分页） | — | ⬜ 未做 |
-| P4 更新闸门 | — | ⬜ 未做 |
-| P5 资源热更新 | — | ⬜ 未做 |
-| P6-3~6 摇一摇 + 调试菜单 | — | ⬜ 未做 |
+| P3-C 剩余（5 开关 + 分页） | `0fd746c` | ✅ |
+| P4 更新闸门 | `600d07e` | ✅ |
+| P5 资源热更新 | `ea9d4c9` | ✅ |
+| P6-3~6 摇一摇 + 调试菜单 | `85891d9` | ✅ |
+| 远程通知 3 个 P1 修复 | `9d0c443` | ✅ |
+| 资源下载空 body 修复 | `b5750f6` | ✅ |
 | P7 面板（配置版本/灰度/A-B） | — | 部分（配置应用已做） |
 | P8 CI config 覆盖率检查 | — | ⬜ 未做 |
 | P9 文档收口 | 本次 | 🟡 |
-| P12 UI 下发 | — | ⬜ 未做 |
+| P12 UI 下发 | — | 接口已备，未接线 |
+| 资源 UI 接入（首页 banner） | — | ⬜ 未做 |
 
 ### 部署前置（未执行）
 
 线上 D1 需执行迁移：
 ```
-0008_remote_config.sql
-0009_config_id.sql
-0010_config_applies.sql
+0008_remote_config.sql   ✅ 已执行
+0009_config_id.sql       ✅ 已执行
+0010_config_applies.sql  ✅ 已执行
+0011_app_release.sql     ✅ 已执行
+0012_remote_assets.sql   ✅ 已执行
 ```
 Worker secret 需配置：
 ```
-CONFIG_SIGNING_KEY = 9f2c7a41e8b3d6509c4f1a7e2b8d3506   （与客户端常量一致，32 hex）
-CONFIG_ADMIN_KEY   = <独立的管理口令，建议与 STATS_KEY 不同>
+CONFIG_SIGNING_KEY = 9f2c7a41e8b3d6509c4f1a7e2b8d3506   ✅ 已配置
+CONFIG_ADMIN_KEY   = <独立的管理口令>                     ✅ 已配置
 ```
