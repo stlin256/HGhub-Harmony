@@ -12,6 +12,7 @@ import { ROUTE_PLAYER, ROUTE_TOPIC, TopicParam, PlayerParam } from '../state/Rou
 import { fmt } from '../utils/Format';
 import { ActionStats, ACT_TOPIC } from '../services/ActionStats';
 
+// @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 20;
 
 /** 专题详情：封面头图 + 简介 + 视频瀑布流（触底分页），点击进入播放。 */

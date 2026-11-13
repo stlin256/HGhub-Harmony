@@ -20,6 +20,7 @@ import { I18n } from '../utils/I18n';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 
 /** 首屏 / 每次滚动加载的条数（分页大小）。 */
+// @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 12;
 const FETCH_CONCURRENCY: number = 4;
 /** 距列表底部小于该值（vp）时触发加载更多。 */

@@ -13,6 +13,7 @@ import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { PostParam, ROUTE_POST } from '../state/Routes';
 import { fmt } from '../utils/Format';
 
+// @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 20;
 
 /** 黄果吃瓜列表：响应式瀑布流（手机 2 列 / 平板 3–4 列，内容区最大 960vp 居中）+ 下拉刷新 + 触底分页 + 骨架/错误态。 */
