@@ -13,6 +13,7 @@ import { PowerGuard } from '../services/PowerGuard';
 import { Analytics } from '../services/Analytics';
 import { PlaybackLog } from '../player/PlaybackLog';
 import { ClipboardLink } from '../services/ClipboardLink';
+import { CrashReporter } from '../services/CrashReporter';
 import { UiBus } from '../services/UiBus';
 import { Net } from '../services/Net';
 import { PerfMark } from '../utils/PerfMark';
@@ -177,8 +178,10 @@ export default class EntryAbility extends UIAbility {
       PowerGuard.init();
       // 播放诊断日志：恢复上次缓冲（导出诊断包时用）。
       PlaybackLog.restore();
-      // 匿名使用统计：随机 UUID + 版本/型号 + 当日聚合（设置页可关）。
+      // 匿名使用统计：随机 UUID + 版本/型号 + 当日聚合。
       Analytics.onLaunch();
+      // 崩溃堆栈自动上报：把上次会话遗留的崩溃记录（已脱敏）批量上传。
+      CrashReporter.reportPending();
       // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
       LineAuto.init();
       // 离线推荐：异步载入随包目录（3,388 条）+ 本地画像，并按冷却时间静默同步增量目录。

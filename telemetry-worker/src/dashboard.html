@@ -125,6 +125,33 @@
   .bar-row .num{ font-size:12px; color:var(--muted); min-width:52px; text-align:right; }
   @keyframes grow{ from{ transform:scaleX(0); } to{ transform:scaleX(1); } }
 
+  /* 崩溃聚合 */
+  .crash-list{ display:flex; flex-direction:column; }
+  .crash-item{ border-top:1px solid var(--rule); padding:12px 0; }
+  .crash-item:first-child{ border-top:0; }
+  .crash-head{ display:flex; align-items:baseline; gap:10px; cursor:pointer; }
+  .crash-count{
+    font-size:18px; font-weight:700; color:var(--danger); min-width:44px;
+    font-variant-numeric:tabular-nums;
+  }
+  .crash-type{ font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+  .crash-reason{ font-size:13px; color:var(--ink); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .crash-meta{ font-size:11px; color:var(--faint); margin-left:auto; white-space:nowrap; }
+  .crash-stack{
+    margin-top:8px; padding:10px 12px; background:#fafafa; border-left:2px solid var(--danger);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11px; line-height:1.6; color:var(--muted); white-space:pre-wrap;
+    word-break:break-all; max-height:0; overflow:hidden;
+    transition:max-height var(--dur-base) var(--ease), opacity var(--dur-fast) var(--ease);
+    opacity:0;
+  }
+  .crash-item.open .crash-stack{ max-height:400px; opacity:1; overflow:auto; }
+  .crash-versions{ margin-top:6px; display:flex; gap:8px; flex-wrap:wrap; }
+  .crash-versions span{
+    font-size:10px; letter-spacing:.04em; color:var(--muted);
+    border:1px solid var(--rule); padding:1px 6px;
+  }
+
   /* 明细表 */
   .table-wrap{ overflow-x:auto; }
   table{ width:100%; border-collapse:collapse; font-size:12px; }
@@ -544,6 +571,12 @@
     ];
     grid.appendChild(section('页面访问', '按进入次数', barList(pageItems), 'col-6'));
 
+    /* 崩溃聚合 */
+    var cr = d.crash || { total: 0, groups: [] };
+    grid.appendChild(section('崩溃聚合',
+      '共 ' + cr.total + ' 次 · ' + cr.groups.length + ' 个分组 · 点击展开堆栈',
+      crashPanel(d), 'col-12'));
+
     /* 明细表 */
     grid.appendChild(section('按天明细', '点击表头排序', buildTable(d), 'col-12'));
 
@@ -556,6 +589,38 @@
     });
 
     elStamp.textContent = '更新于 ' + new Date(d.generated_at).toLocaleString('zh-CN', { hour12:false });
+  }
+
+  function crashPanel(d){
+    var c = d.crash || { total: 0, groups: [] };
+    var box = document.createElement('div');
+    box.className = 'crash-list';
+    if (!c.groups.length){
+      box.innerHTML = '<div class="state" style="padding:24px 0">暂无崩溃记录</div>';
+      return box;
+    }
+    c.groups.forEach(function(g){
+      var item = document.createElement('div');
+      item.className = 'crash-item';
+      var versions = (g.versions || []).map(function(v){
+        return '<span>v' + esc(v.version) + ' ×' + v.count + '</span>';
+      }).join('');
+      var last = g.last_seen ? new Date(g.last_seen * 1000).toLocaleString('zh-CN', { hour12:false }) : '—';
+      item.innerHTML =
+        '<div class="crash-head">' +
+          '<span class="crash-count">' + g.count + '×</span>' +
+          '<span class="crash-type">' + esc(g.type) + '</span>' +
+          '<span class="crash-reason">' + esc(g.reason || g.message || '(无原因)') + '</span>' +
+          '<span class="crash-meta">最近 ' + esc(last) + '</span>' +
+        '</div>' +
+        '<div class="crash-versions">' + versions + '</div>' +
+        '<div class="crash-stack">' + esc(g.stack || g.message || '(无堆栈)') + '</div>';
+      item.querySelector('.crash-head').addEventListener('click', function(){
+        item.classList.toggle('open');
+      });
+      box.appendChild(item);
+    });
+    return box;
   }
 
   function buildTable(d){

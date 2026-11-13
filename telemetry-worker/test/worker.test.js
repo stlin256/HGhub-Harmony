@@ -9,11 +9,15 @@ function makeDB() {
   const rates = new Map();
   const dailyActive = new Set();
   const dailyStats = new Map();
+  const crashGroups = new Map();
+  const crashVersions = new Map();
   return {
     devices,
     rates,
     dailyActive,
     dailyStats,
+    crashGroups,
+    crashVersions,
     prepare(sql) {
       let args = [];
       const stmt = {
@@ -24,6 +28,11 @@ function makeDB() {
         async first() {
           if (sql.includes('COUNT(*) AS n FROM devices')) {
             return { n: devices.size };
+          }
+          if (sql.includes('SUM(count)') && sql.includes('FROM crash_groups')) {
+            let n = 0;
+            for (const g of crashGroups.values()) n += g.count;
+            return { n };
           }
           if (sql.includes('SUM(sessions)')) {
             const acc = {
@@ -53,6 +62,13 @@ function makeDB() {
           return null;
         },
         async all() {
+          if (sql.includes('FROM crash_groups')) {
+            const rows = [...crashGroups.values()].sort((a, b) => b.count - a.count);
+            return { results: rows };
+          }
+          if (sql.includes('FROM crash_versions')) {
+            return { results: [...crashVersions.values()] };
+          }
           if (sql.includes('FROM daily_active')) {
             const from = args[0];
             const byDay = new Map();
@@ -93,6 +109,24 @@ function makeDB() {
               next[f] = (f === 'startup_p50_ms' || f === 'startup_p90_ms') ? v : (cur[f] || 0) + v;
             });
             dailyStats.set(k, next);
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.includes('INSERT INTO crash_groups')) {
+            const [fp, type, reason, message, stack, thread, first, last] = args;
+            const cur = crashGroups.get(fp);
+            crashGroups.set(fp, {
+              fingerprint: fp, type, reason, message, stack, thread,
+              count: (cur ? cur.count : 0) + 1,
+              first_seen_epoch: cur ? cur.first_seen_epoch : first,
+              last_seen_epoch: last,
+            });
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.includes('INSERT INTO crash_versions')) {
+            const k = `${args[0]}:${args[1]}`;
+            const cur = crashVersions.get(k) || { fingerprint: args[0], version: args[1], count: 0 };
+            cur.count += 1;
+            crashVersions.set(k, cur);
             return { success: true, meta: { changes: 1 } };
           }
           if (sql.includes('INSERT INTO devices')) {
@@ -492,4 +526,105 @@ test('/api/stats：也接受 ?key=', async () => {
   const res = await worker.fetch(new Request('https://w/api/stats?key=k&days=30'), e, ctx);
   assert.equal(res.status, 200);
   assert.equal((await res.json()).window_days, 30);
+});
+
+/* ── 崩溃堆栈聚合 ──────────────────────────────────── */
+
+function crashPost(body, headers = {}) {
+  return new Request('https://w/v1/crash', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+
+const STACK_A = 'TypeError: undefined is not a function\n    at foo (entry/src/main/ets/pages/A.ets:12:5)\n    at bar (entry/src/main/ets/pages/B.ets:34:9)';
+const STACK_B = 'RangeError: invalid array length\n    at baz (entry/src/main/ets/pages/C.ets:7:1)';
+
+test('崩溃上报：首次写入一个分组', async () => {
+  const e = env();
+  const res = await worker.fetch(crashPost({
+    id: UUID, ver: '2.3.0', model: 'ALN-AL00', os: 'HarmonyOS 7.0',
+    crashes: [{ type: 'app_crash', reason: 'TypeError', message: 'boom', stack: STACK_A, thread: 'main', at: 1731600000 }],
+  }), e, ctx);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.accepted, 1);
+  assert.equal(e.DB.crashGroups.size, 1);
+  assert.equal(e.DB.crashVersions.size, 1);
+});
+
+test('崩溃上报：同一堆栈聚合到同一分组，count 累加', async () => {
+  const e = env();
+  const payload = {
+    id: UUID, ver: '2.3.0',
+    crashes: [{ type: 'app_crash', reason: 'TypeError', message: 'boom', stack: STACK_A, thread: 'main', at: 1 }],
+  };
+  await worker.fetch(crashPost(payload), e, ctx);
+  await worker.fetch(crashPost(payload), e, ctx);
+  await worker.fetch(crashPost(payload), e, ctx);
+  assert.equal(e.DB.crashGroups.size, 1);
+  const g = [...e.DB.crashGroups.values()][0];
+  assert.equal(g.count, 3);
+});
+
+test('崩溃上报：不同堆栈分成不同分组', async () => {
+  const e = env();
+  await worker.fetch(crashPost({
+    id: UUID, ver: '2.3.0',
+    crashes: [
+      { type: 'app_crash', reason: 'TypeError', stack: STACK_A, at: 1 },
+      { type: 'app_crash', reason: 'RangeError', stack: STACK_B, at: 2 },
+    ],
+  }), e, ctx);
+  assert.equal(e.DB.crashGroups.size, 2);
+});
+
+test('崩溃上报：无堆栈时按 type+reason+message 归组', async () => {
+  const e = env();
+  const payload = {
+    id: UUID, ver: '2.3.0',
+    crashes: [{ type: 'app_freeze', reason: 'THREAD_BLOCK_6S', message: 'main thread blocked', at: 1 }],
+  };
+  await worker.fetch(crashPost(payload), e, ctx);
+  await worker.fetch(crashPost(payload), e, ctx);
+  assert.equal(e.DB.crashGroups.size, 1);
+  assert.equal([...e.DB.crashGroups.values()][0].count, 2);
+});
+
+test('崩溃上报：非法 id / 版本 / 空批次被拒', async () => {
+  const e = env();
+  assert.equal((await worker.fetch(crashPost({ id: 'bad', ver: '2.3.0', crashes: [{ type: 'x' }] }), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(crashPost({ id: UUID, ver: 'x', crashes: [{ type: 'x' }] }), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(crashPost({ id: UUID, ver: '2.3.0', crashes: [] }), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(crashPost({ id: UUID, ver: '2.3.0' }), e, ctx)).status, 400);
+});
+
+test('崩溃上报：超大请求体被拒', async () => {
+  const e = env();
+  const big = JSON.stringify({
+    id: UUID, ver: '2.3.0',
+    crashes: [{ type: 'x', stack: 'A'.repeat(40000) }],
+  });
+  const res = await worker.fetch(crashPost(big), e, ctx);
+  assert.equal(res.status, 413);
+});
+
+test('/stats 返回崩溃聚合', async () => {
+  const e = env();
+  await worker.fetch(crashPost({
+    id: UUID, ver: '2.3.0',
+    crashes: [
+      { type: 'app_crash', reason: 'TypeError', stack: STACK_A, at: 1 },
+      { type: 'app_crash', reason: 'TypeError', stack: STACK_A, at: 2 },
+      { type: 'app_crash', reason: 'RangeError', stack: STACK_B, at: 3 },
+    ],
+  }), e, ctx);
+  const res = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await res.json();
+  assert.equal(body.crash.total, 3);
+  assert.equal(body.crash.groups.length, 2);
+  assert.equal(body.crash.groups[0].count, 2);
+  assert.ok(Array.isArray(body.crash.groups[0].versions));
+  assert.equal(body.crash.groups[0].versions[0].version, '2.3.0');
 });

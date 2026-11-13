@@ -33,6 +33,10 @@ const SIG_WINDOW_SEC = 300;
 const BADGE_CACHE_SEC = 21600;
 const RATE_CLEANUP_EVERY = 200;
 const MAX_STATS_DAYS = 90;
+/** 崩溃上报单批上限与堆栈长度上限。 */
+const MAX_CRASH_BATCH = 10;
+const MAX_STACK_LEN = 2000;
+const MAX_CRASH_BODY_BYTES = 32768;
 /** 面板登录 cookie 名与有效期（180 天）。 */
 const DASH_COOKIE = 'hg_dash';
 const DASH_COOKIE_MAX_AGE = 180 * 86400;
@@ -58,6 +62,9 @@ export default {
     }
     if ((url.pathname === '/v1/report' || url.pathname === '/v1/install') && request.method === 'POST') {
       return withCors(await handleReport(request, env, ctx));
+    }
+    if (url.pathname === '/v1/crash' && request.method === 'POST') {
+      return withCors(await handleCrash(request, env));
     }
     if (url.pathname === '/badge' && request.method === 'GET') {
       return withCors(await handleBadge(env));
@@ -247,6 +254,122 @@ async function handleReport(request, env, ctx) {
   }
 
   return json({ ok: true, counted: true }, 200);
+}
+
+/* ── 崩溃堆栈上报 ──────────────────────────────────── */
+
+/**
+ * POST /v1/crash
+ * body: { id, ver, model, os, crashes: [{ type, reason, message, stack, thread, at }] }
+ *
+ * 服务端按「堆栈指纹」聚合：fingerprint = SHA-256(type + '|' + 规范化堆栈) 前 16 位。
+ * 同一处崩溃在不同设备上只占一行，count 累加。
+ */
+async function handleCrash(request, env) {
+  const now = Math.floor(Date.now() / 1000);
+
+  const declared = Number(request.headers.get('content-length') || '0');
+  if (declared > MAX_CRASH_BODY_BYTES) {
+    return json({ error: 'payload_too_large' }, 413);
+  }
+  let raw;
+  try {
+    raw = await request.text();
+  } catch {
+    return json({ error: 'bad_body' }, 400);
+  }
+  if (raw.length === 0 || raw.length > MAX_CRASH_BODY_BYTES) {
+    return json({ error: 'payload_too_large' }, 413);
+  }
+
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ error: 'bad_json' }, 400);
+  }
+  if (!body || typeof body !== 'object') {
+    return json({ error: 'bad_json' }, 400);
+  }
+
+  const id = typeof body.id === 'string' ? body.id.trim() : '';
+  const version = typeof body.ver === 'string' ? body.ver.trim() : '';
+  if (!UUID_RE.test(id)) {
+    return json({ error: 'bad_id' }, 400);
+  }
+  if (!VERSION_RE.test(version)) {
+    return json({ error: 'bad_version' }, 400);
+  }
+  const crashes = Array.isArray(body.crashes) ? body.crashes : [];
+  if (crashes.length === 0 || crashes.length > MAX_CRASH_BATCH) {
+    return json({ error: 'bad_batch' }, 400);
+  }
+
+  // 限流：单 IP 每小时 30 次（崩溃上报不频繁，正常远低于此）。
+  const salt = env.HASH_SALT || 'hghub-default-salt';
+  const ip = request.headers.get('cf-connecting-ip') || '';
+  if (ip.length > 0) {
+    const ipHash = await sha256Hex(`${ip}:${salt}`);
+    const hour = Math.floor(now / IP_WINDOW_SEC);
+    const allowed = await bumpRate(env, `ip:${ipHash}:${hour}`, IP_HOURLY_LIMIT, IP_WINDOW_SEC);
+    if (!allowed) {
+      return json({ error: 'rate_limited' }, 429);
+    }
+  }
+
+  let accepted = 0;
+  try {
+    for (let i = 0; i < crashes.length; i++) {
+      const c = crashes[i];
+      if (!c || typeof c !== 'object') {
+        continue;
+      }
+      const type = clipText(c.type, 32) || 'unknown';
+      const reason = clipText(c.reason, 200);
+      const message = clipText(c.message, 300);
+      const stack = clipText(c.stack, MAX_STACK_LEN);
+      const thread = clipText(c.thread, 64);
+
+      // 指纹：优先用堆栈；没有堆栈时退回 type+reason+message。
+      const basis = stack.length > 0 ? `${type}|${stack}` : `${type}|${reason}|${message}`;
+      const fingerprint = (await sha256Hex(basis)).slice(0, 16);
+
+      await env.DB.prepare(
+        `INSERT INTO crash_groups
+           (fingerprint, type, reason, message, stack, thread, count, first_seen_epoch, last_seen_epoch)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+         ON CONFLICT(fingerprint) DO UPDATE SET
+           count = crash_groups.count + 1,
+           last_seen_epoch = excluded.last_seen_epoch,
+           message = CASE WHEN length(excluded.message) > length(COALESCE(crash_groups.message, ''))
+                          THEN excluded.message ELSE crash_groups.message END,
+           stack = CASE WHEN length(excluded.stack) > length(COALESCE(crash_groups.stack, ''))
+                        THEN excluded.stack ELSE crash_groups.stack END`
+      ).bind(fingerprint, type, reason, message, stack, thread, now, now).run();
+
+      await env.DB.prepare(
+        `INSERT INTO crash_versions (fingerprint, version, count) VALUES (?, ?, 1)
+         ON CONFLICT(fingerprint, version) DO UPDATE SET count = crash_versions.count + 1`
+      ).bind(fingerprint, version).run();
+
+      accepted++;
+    }
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+
+  return json({ ok: true, accepted }, 200);
+}
+
+/** 截断并去掉控制字符。 */
+function clipText(value, max) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  let text = String(value);
+  // 去掉控制字符（保留换行/制表）。
+  text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  return text.length > max ? text.substring(0, max) : text;
 }
 
 /* ── 徽章（只显示安装数）───────────────────────────── */
@@ -530,6 +653,21 @@ async function handleStats(url, env, preAuthorized) {
       returning7 = row ? row.n : 0;
     }
 
+    // 崩溃聚合：按指纹分组，取 top 20。
+    const crashTotal = await env.DB.prepare(
+      'SELECT COALESCE(SUM(count), 0) AS n FROM crash_groups'
+    ).first();
+    const crashGroups = await env.DB.prepare(
+      `SELECT fingerprint, type, reason, message, stack, thread, count,
+              first_seen_epoch, last_seen_epoch
+         FROM crash_groups
+        ORDER BY count DESC, last_seen_epoch DESC
+        LIMIT 20`
+    ).all();
+    const crashVersions = await env.DB.prepare(
+      'SELECT fingerprint, version, count FROM crash_versions'
+    ).all();
+
     const totalDevices = total ? total.n : 0;
     const sumSessions = totals ? totals.sessions : 0;
     const sumDuration = totals ? totals.duration_sec : 0;
@@ -597,6 +735,24 @@ async function handleStats(url, env, preAuthorized) {
         sr_supported: totals ? totals.sr_supported : 0,
         sr_support_rate: pct(totals ? totals.sr_supported : 0, totalDevices),
         sr_on_rate: pct(totals ? totals.sr_on : 0, totalDevices),
+      },
+      // 崩溃聚合
+      crash: {
+        total: crashTotal ? crashTotal.n : 0,
+        groups: (crashGroups && crashGroups.results ? crashGroups.results : []).map((g) => ({
+          fingerprint: g.fingerprint,
+          type: g.type,
+          reason: g.reason,
+          message: g.message,
+          stack: g.stack,
+          thread: g.thread,
+          count: g.count,
+          first_seen: g.first_seen_epoch,
+          last_seen: g.last_seen_epoch,
+          versions: (crashVersions && crashVersions.results ? crashVersions.results : [])
+            .filter((v) => v.fingerprint === g.fingerprint)
+            .map((v) => ({ version: v.version, count: v.count })),
+        })),
       },
       // 页面访问分布
       pages: {

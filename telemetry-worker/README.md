@@ -66,6 +66,7 @@ Worker 校验后种一个 **180 天**的 `HttpOnly; Secure; SameSite=Strict` coo
 | 播放质量 | 失败分桶、启动耗时 p50/p90 |
 | 画质与超分 | HD/SD 占比、超分支持率与开启率 |
 | 页面访问 | 首页 / 搜索 / 分类 / 我的 / 播放页 |
+| 崩溃聚合 | 按堆栈指纹分组，显示次数 / 类型 / 原因 / 版本分布 / 最近时间，点击展开堆栈 |
 | 明细表 | 按天数据，表头可排序 |
 
 ### 交互与适配
@@ -163,6 +164,15 @@ npm run deploy
 | `playback` | `vv` / `play_fail` / `play_fail_rate` / `play_complete` / `play_complete_rate` / `fail_breakdown` |
 | `quality` | `hd` / `sd` / `hd_ratio` / `sr_on` / `sr_supported` / `sr_support_rate` / `sr_on_rate` |
 | `pages` | `home` / `search` / `category` / `profile` / `player` 访问计数 |
+
+### 崩溃聚合
+
+客户端在崩溃后把记录存本地（最多 10 条），下次冷启动批量上报到 `POST /v1/crash`：
+
+- 堆栈在客户端先**规范化**：只留帧行（最多 8 帧）、去掉绝对路径/行号/内存地址、截断 2000 字
+- 服务端按 `SHA-256(type + '|' + 规范化堆栈)` 前 16 位做**指纹**，同一处崩溃只占一行
+- `crash_groups.count` 累加，`crash_versions` 记录各版本命中次数
+- 上报成功后客户端把记录标记为 `uploaded`，不会重复上报
 
 ### 采集边界
 
