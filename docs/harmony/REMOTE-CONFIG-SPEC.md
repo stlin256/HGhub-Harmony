@@ -121,7 +121,64 @@
 | `SearchPage` / `CommentsSheet` | 分页大小 | 列表 |
 | `RecService` | 探索比例 / 池大小 | 推荐 |
 
-> Phase 2 会做一次**全量审计**，把上表补全到逐项清单，确保没有遗漏。
+### 4.4 全量审计结果（158 个数值常量）
+
+已扫描 `harmony/entry/src/main/ets/**`，共 **158 个 `const` 数值常量**，分三类：
+
+| 类别 | 数量 | 处置 |
+|---|---:|---|
+| **业务可调**（应接入下发） | ~62 | 注册到 `ConfigRegistry` |
+| **安全/协议常量**（保持硬编码） | ~34 | 标注 `@config-exempt` |
+| **UI 尺寸/动效常量**（保持硬编码） | ~62 | 标注 `@config-exempt` |
+
+#### 业务可调清单（按模块）
+
+| 模块 | 常量 | 建议 key |
+|---|---|---|
+| `PlayerQuality` | `RETRY_DELAYS_MS` / `MAX_ATTEMPTS` | `retry_delay_1/2/3_ms` / `retry_max` |
+| `PlayerSeekPolicy` | `END_RATIO` | `seek_end_ratio` |
+| `PowerGuard` | `BATTERY_MIN_SOC` | `sr_battery_min` |
+| `PlayerService` | `CONN_INACTIVITY_MS` / `POOL_MAX` / `PLAY_CACHE_TTL_MS` / `NEAR_END_MS` / `HISTORY_INTERVAL_MS` | `conn_inactivity_ms` / `conn_pool_max` / `play_cache_ttl_ms` / `near_end_ms` / `history_interval_ms` |
+| `Net` | `API_RETRY_TIMES` / `DEFAULT_TIMEOUT` | `api_retry_times` / `net_timeout_ms` |
+| `LineAuto` | `PROBE_TIMEOUT_MS` / `PROBE_BATCH` / `CANDIDATE_LIMIT` / `INIT_DELAY_MS` / `WATCH_INTERVAL_MS` / `WATCH_FAIL_THRESHOLD` / `PROBE_CACHE_TTL_MS` / `MANUAL_COOLDOWN_MS` | `line_probe_timeout_ms` / `line_probe_batch` / `line_candidate_limit` / `line_init_delay_ms` / `line_watch_interval_ms` / `line_fail_threshold` / `line_probe_ttl_ms` / `line_manual_cooldown_ms` |
+| `Lines` | `MIRROR_MAX` / `MIRROR_CACHE_MAX` / `PROBE_TIMEOUT` / `PAGE_TIMEOUT` | `line_mirror_max` / `line_mirror_cache_max` / `line_probe_timeout` / `line_page_timeout` |
+| `MediaCache` | `MEMORY_MAX_BYTES` / `MEMORY_MAX_ENTRIES` / `DISK_MAX_BYTES` / `DISK_MAX_FILES` / `*_TTL_MS` / `FETCH_MAX_CONCURRENCY` | `media_cache_mem_mb` / `media_cache_mem_entries` / `media_cache_disk_mb` / `media_cache_disk_files` / `media_cache_ttl_*` / `media_fetch_concurrency` |
+| `MediaPrefetch` | `URL_TTL_MS` / `DONE_TTL_MS` / `STAGGER_*` / `SLOW_FETCH_MS` | `prefetch_url_ttl_ms` / `prefetch_done_ttl_ms` / `prefetch_stagger_*` / `prefetch_slow_ms` |
+| `ImageCache` | `DEFAULT_DECODE_W/H` / `DISK_MAX_FILES` | `cover_decode_w` / `cover_decode_h` / `cover_cache_files` |
+| `Analytics` | `REPORT_INTERVAL_MS` / `STARTUP_SAMPLES` | `analytics_interval_ms` / `startup_sample_max` |
+| `DeviceMetrics` | `SAMPLE_INTERVAL_MS` | `device_sample_interval_ms` |
+| `CrashGuard` | `MAX_RECORDS` / `MAX_FRAMES` / `MAX_STACK_LEN` | `crash_max_records` / `crash_max_frames` / `crash_max_stack_len` |
+| `CrashReporter` | `BATCH` / `RETRY_INTERVAL_MS` | `crash_batch` / `crash_retry_interval_ms` |
+| `UpdateChecker` | `LAUNCH_DELAY_MS` | `update_delay_ms` |
+| `ClipboardLink` | `CHECK_INTERVAL_MS` | `clipboard_check_interval_ms` |
+| `Ipv6Preference` | `CACHE_TTL_MS` | `ipv6_cache_ttl_ms` |
+| `Api` | `DETAIL_TTL_MS` / `DETAIL_MAX_ENTRIES` / `WARM_HISTORY_CONCURRENCY` / `LINE_RETRY_COOLDOWN_MS` | `detail_cache_ttl_ms` / `detail_cache_entries` / `warm_history_concurrency` / `line_retry_cooldown_ms` |
+| `CategoryCatalog` | `CACHE_TTL_MS` | `catalog_cache_ttl_ms` |
+| `ScreenPrefetch` | `WARM_DELAY_MS` / `RANK_TTL_MS` / `LIST_TTL_MS` | `screen_warm_delay_ms` / `rank_cache_ttl_ms` / `list_cache_ttl_ms` |
+| `UserListPrefetch` | `WARM_DELAY_MS` / `WARM_MAX_IDS` / `WARM_CONCURRENCY` | `userlist_warm_delay_ms` / `userlist_max_ids` / `userlist_concurrency` |
+| `UserPrefs` | `HISTORY_MAX` / `SEARCH_HIST_MAX` | `history_max` / `search_hist_max` |
+| `HomePage` | `PAGE_SIZE` / `HERO_COUNT` / `HERO_AUTO_PLAY_MS` / `LOAD_MORE_AHEAD` / `PREFETCH_PER_PAGE` / `POOL_MAX` / `POOL_INIT_PAGES` / `PREFETCH_AHEAD_ROWS` | `home_page_size` / `home_hero_count` / `home_hero_autoplay_ms` / `home_load_ahead` / `home_prefetch_per_page` / `home_pool_max` / `home_pool_init_pages` / `home_prefetch_rows` |
+| 各列表页 | `PAGE_SIZE`（Channel/Follow/Posts/Profile/Search/Topic/Topics/User/Comments） | `page_size_*` |
+| `SearchPage` | `HOT_RANK_SIZE` | `hot_rank_size` |
+| `VideoDetailPage` | `PREVIEW_COUNT` | `episode_preview_count` |
+| `CategoryPage` | `PREVIEW_SIZE` | `category_preview_size` |
+| `PlayerPage` | `CHROME_HIDE_MS` / `LONG_PRESS_MS` / `SEEK_*` / `PIP_HINT_MS` | `chrome_hide_ms` / `long_press_ms` / `seek_*` / `pip_hint_ms` |
+| `HgPosterFlow` | `PREFETCH_*` | `flow_prefetch_*` |
+| `RecService` | 探索比例 / 池大小 | `recommend_explore_pct` / `recommend_pool_size` |
+
+#### 保持硬编码（标注 `@config-exempt`）
+
+| 模块 | 常量 | 原因 |
+|---|---|---|
+| `Security` | `MAX_HEADER_*` / `MAX_EXTERNAL_URL_LEN` / `MAX_RESPONSE_HEADER_LEN` | 安全上限，放宽有风险 |
+| `Session` | `SESSION_MAX_*` | 同上 |
+| `Net` | `RESPONSE_MAX_TEXT_BYTES` / `RESPONSE_MAX_BINARY_BYTES` / `CONN_TUNING_MIN_API` | 协议/平台常量 |
+| `LocalProxy` | `MAX_HEADER_BYTES` / `MAX_PLAYLIST_BYTES` / `MAX_MEDIA_BYTES` / `MAX_CONNECTIONS` | 同上 |
+| `RecModel` | `BUCKETS` / `ITEM_EXTRA` / `TEXT_DIM` / `BATCH` / `CATES` | 模型结构，改了模型就废了 |
+| `EntryFormAbility` | `THUMB_W/H` / `COVER_JPEG_QUALITY` | 卡片规格 |
+| `WatchCoverCache` | `THUMB_W/H` / `JPEG_QUALITY` | 同上 |
+| UI 尺寸 | `COMMENT_PANEL_W` / `REC_STEP_DOT` / `HERO_DECODE_W` 等 | 设计 token，走 `HgTokens` 而非下发 |
+| 动效 | `HgMotion.*` | 已有独立标准，不做远程下发 |
 
 ## 5. Worker 端点设计
 
