@@ -9,6 +9,7 @@ import { UserListPrefetch } from '../services/UserListPrefetch';
 import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { LineAuto } from '../services/LineAuto';
 import { CrashGuard } from '../services/CrashGuard';
+import { PowerGuard } from '../services/PowerGuard';
 import { Net } from '../services/Net';
 import { PerfMark } from '../utils/PerfMark';
 import { ContinuationState } from '../services/ContinuationState';
@@ -154,6 +155,8 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, TAG, 'services ready, base=%{public}s', Lines.current());
       // 崩溃监控：监听系统 fault 事件并落本地（不上报）。
       CrashGuard.init();
+      // 电源守卫：跟踪省电模式与电量，供 AI 超分自动降级。
+      PowerGuard.init();
       // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
       LineAuto.init();
       // 离线推荐：异步载入随包目录（3,388 条）+ 本地画像，并按冷却时间静默同步增量目录。
@@ -304,6 +307,7 @@ export default class EntryAbility extends UIAbility {
   onDestroy(): void {
     // 释放 HTTP 连接池（按 host 复用的 HttpRequest 实例）。
     Net.dispose();
+    PowerGuard.release();
     hilog.info(DOMAIN, TAG, 'EntryAbility destroyed');
   }
 }
