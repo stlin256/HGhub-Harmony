@@ -959,7 +959,10 @@ export struct CategoryPage {
               this.CateSection(index)
             }, (info: CateInfo) => info.route)
 
-            this.PostsSection()
+            // 吃瓜入口：远程 ui.entries.tab_posts 可隐藏（当前无独立吃瓜 Tab，入口在本页）。
+            if (ConfigRegistry.entryVisible(UiEntryKey.TAB_POSTS)) {
+              this.PostsSection()
+            }
 
             Text($r('app.string.ui_c24aa538'))
               .width('100%')
