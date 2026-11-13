@@ -162,6 +162,19 @@ export class Net {
     return Net.deviceApiVersion() >= CONN_TUNING_MIN_API;
   }
 
+  /** 请求失败后丢弃该 host 的实例，避免复用异常连接/已失效 request。 */
+  private static invalidate(host: string): void {
+    const cached: http.HttpRequest | undefined = Net.pool.get(host);
+    if (cached === undefined) {
+      return;
+    }
+    Net.pool.delete(host);
+    try {
+      cached.destroy();
+    } catch (err) {
+    }
+  }
+
   /** 取（或创建）该 host 对应的 HttpRequest。 */
   private static httpFor(host: string): http.HttpRequest {
     const cached: http.HttpRequest | undefined = Net.pool.get(host);
@@ -297,10 +310,19 @@ export class Net {
       // IPv6 优先失败：标记该 host 不支持 IPv6，回退默认地址族重试一次（只回退一次）。
       if (family === http.AddressFamily.ONLY_V6) {
         Ipv6Preference.markUnsupported(host);
-        return await Net.requestOnce(url, host, http.AddressFamily.DEFAULT,
-          method, headers, body, timeoutMs, asBytes);
+        Net.invalidate(host);
+        try {
+          return await Net.requestOnce(url, host, http.AddressFamily.DEFAULT,
+            method, headers, body, timeoutMs, asBytes);
+        } catch (retryErr) {
+          Net.invalidate(host);
+          throw new Error(Net.errorText(retryErr));
+        }
       }
-      throw new Error(err !== undefined && err !== null ? String(err) : 'request failed');
+      // 失败后丢弃该 host 的 HttpRequest 实例，下一次重试创建干净连接；
+      // 同时把 BusinessError/对象异常统一成可读文本，避免 UI 出现 [object Object]。
+      Net.invalidate(host);
+      throw new Error(Net.errorText(err));
     }
   }
 
