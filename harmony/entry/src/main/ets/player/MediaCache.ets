@@ -21,6 +21,7 @@ import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { AppContext } from '../services/AppContext';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { Lines } from '../services/Lines';
 import { USER_AGENT } from '../services/Net';
 import { isPlaylistBytes, isPlaylistText, normalizeCacheKey } from './PlaylistRewrite';
@@ -32,37 +33,53 @@ export const MEDIA_KIND_PLAYLIST: string = 'playlist';
 /** 缓存 kind：分片 / AES KEY / 其它二进制（内存 TTL 30min）。 */
 export const MEDIA_KIND_MEDIA: string = 'media';
 
-/** 内存上限（字节）：分片 1-2MB 一个，约可放 24-48 个。 */
+/** 内存上限（字节）：ConfigRegistry 未注册内存上限 key（MEDIA_CACHE_MB 是磁盘上限），保持迁移前 48MB。 */
+// @config-exempt: 未注册（ConfigRegistry 仅有磁盘上限 MEDIA_CACHE_MB，无内存上限 key）
 const MEMORY_MAX_BYTES: number = 48 * 1024 * 1024;
-/** 内存条数上限（兜底，防大量小文本把数组撑大）。 */
+/** 内存条数上限（兜底，防大量小文本把数组撑大）：未注册，保持迁移前 320。 */
+// @config-exempt: 未注册（ConfigRegistry 无内存条数上限 key）
 const MEMORY_MAX_ENTRIES: number = 320;
 /** 单文件上限：HLS 分片通常 1-4MB；更大视为异常响应，不缓存也不落盘。 */
+// @config-exempt: 协议/安全上限（单文件响应体上限）
 const ENTRY_MAX_BYTES: number = 8 * 1024 * 1024;
 /** m3u8 文本上限（解码校验用，避免把大文件当文本解码）。 */
+// @config-exempt: 协议/安全上限（播放列表文本上限）
 const PLAYLIST_MAX_BYTES: number = 2 * 1024 * 1024;
 /** 小于该值的响应不落盘（AES key 只有 16 字节，写文件无意义）。 */
+// @config-exempt: 未注册（ConfigRegistry 无最小落盘阈值 key）
 const MIN_DISK_BYTES: number = 1024;
-/** 磁盘全局上限。 */
-const DISK_MAX_BYTES: number = 192 * 1024 * 1024;
+/** 磁盘文件数上限：字节上限走 MEDIA_CACHE_MB，文件数无注册 key，保持迁移前 600。 */
+// @config-exempt: 未注册（ConfigRegistry 无磁盘文件数 key）
 const DISK_MAX_FILES: number = 600;
 /** 磁盘 m3u8 可恢复窗口（超过即过期，prune 删除）。 */
+// @config-exempt: 未注册（ConfigRegistry 无磁盘 TTL key）
 const DISK_PLAYLIST_TTL_MS: number = 5 * 60 * 1000;
 /** 磁盘分片可恢复窗口。 */
+// @config-exempt: 未注册（ConfigRegistry 无磁盘 TTL key）
 const DISK_MEDIA_TTL_MS: number = 2 * 60 * 60 * 1000;
 /** 内存 TTL：播放列表 60s（VOD 内重复请求直接命中；超时重取避免签名/内容过期）。 */
+// @config-exempt: 未注册（ConfigRegistry 无内存 TTL key）
 const MEMORY_PLAYLIST_TTL_MS: number = 60 * 1000;
 /** 内存 TTL：分片 30min（单次播放内足够）。 */
+// @config-exempt: 未注册（ConfigRegistry 无内存 TTL key）
 const MEMORY_MEDIA_TTL_MS: number = 30 * 60 * 1000;
 /** 上游 HTTP 超时（与 LocalProxy 原 FETCH_TIMEOUT_MS 一致）。 */
+// @config-exempt: 未注册（ConfigRegistry 无上游抓取超时 key）
 const FETCH_CONNECT_TIMEOUT_MS: number = 10000;
+// @config-exempt: 未注册（ConfigRegistry 无上游抓取超时 key）
 const FETCH_READ_TIMEOUT_MS: number = 20000;
 /** 抓取并发上限：预加载最多占 2 个任务，保证播放请求至少有 2 个槽位。 */
+// @config-exempt: 未注册（ConfigRegistry 无 media_fetch_concurrency；并发闸门与播放优先级耦合）
 const FETCH_MAX_CONCURRENCY: number = 4;
 /** http 请求优先级（1-1000，越大越先调度）：播放请求压过预加载。 */
+// @config-exempt: 平台调度常量（http 优先级取值）
 const FOREGROUND_PRIORITY: number = 600;
+// @config-exempt: 平台调度常量（http 优先级取值）
 const PREFETCH_PRIORITY: number = 20;
 /** 首次/写入若干次后的磁盘清理节奏。 */
+// @config-exempt: 未注册（ConfigRegistry 无清理节奏 key）
 const PRUNE_INITIAL_DELAY_MS: number = 2500;
+// @config-exempt: 未注册（ConfigRegistry 无清理节奏 key）
 const PRUNE_AFTER_WRITES: number = 24;
 
 /** 一次媒体读取结果：可能来自内存/磁盘缓存，也可能是本次上游抓取。 */
@@ -448,6 +465,11 @@ export class MediaCache {
     return MediaCache.dirPath;
   }
 
+  /** 磁盘全局上限（字节）：由 ConfigRegistry 的 MEDIA_CACHE_MB 换算（默认 192MB，与迁移前一致）。 */
+  private static diskMaxBytes(): number {
+    return ConfigRegistry.getNumber(ConfigKey.MEDIA_CACHE_MB) * 1024 * 1024;
+  }
+
   private static hashOf(text: string): string {
     let hash: number = 5381;
     for (let i = 0; i < text.length; i++) {
@@ -634,10 +656,11 @@ export class MediaCache {
       MediaCache.schedulePrune(1500);
       return;
     }
-    if (files > DISK_MAX_FILES || bytes > DISK_MAX_BYTES) {
+    const maxBytes: number = MediaCache.diskMaxBytes();
+    if (files > DISK_MAX_FILES || bytes > maxBytes) {
       items.sort((left: DiskItem, right: DiskItem): number => left.mtime - right.mtime);
       for (let i = 0; i < items.length; i++) {
-        if (files <= DISK_MAX_FILES && bytes <= DISK_MAX_BYTES) {
+        if (files <= DISK_MAX_FILES && bytes <= maxBytes) {
           break;
         }
         const item: DiskItem = items[i];

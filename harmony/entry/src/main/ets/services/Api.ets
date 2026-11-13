@@ -59,16 +59,21 @@ class DetailEntry {
 }
 
 /** 详情缓存有效期。 */
+// @config-exempt: 未注册（ConfigRegistry 无 detail_cache_ttl_ms）
 const DETAIL_TTL_MS: number = 10 * 60 * 1000;
 /** 详情缓存条数上限（LRU 淘汰）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 detail_cache_entries）
 const DETAIL_MAX_ENTRIES: number = 120;
 /** 启动预热历史详情的并发上限。 */
+// @config-exempt: 未注册（ConfigRegistry 无 warm_history_concurrency）
 const WARM_HISTORY_CONCURRENCY: number = 3;
 /** 换线冷却：避免每个并发失败请求都触发一次线路探测。 */
+// @config-exempt: 未注册（ConfigRegistry 无 line_retry_cooldown_ms）
 const LINE_RETRY_COOLDOWN_MS: number = 15000;
 const API_LOG_DOMAIN: number = 0x0000;
 const API_LOG_TAG: string = 'HGApi';
 /** GitHub Release 响应的大小上限（标准 JSON 解析前先卡住，防超大响应拖垮解析）。 */
+// @config-exempt: 协议/安全上限（更新接口响应体上限）
 const UPDATE_MAX_BODY_LEN: number = 1024 * 1024;
 
 function requireObject(data: Object | null): Object {

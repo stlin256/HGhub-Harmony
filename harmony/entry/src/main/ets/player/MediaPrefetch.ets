@@ -18,6 +18,7 @@
 import { BusinessError } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
 import { Api } from '../services/Api';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { Lines } from '../services/Lines';
 import { USER_AGENT } from '../services/Net';
 import { PlaybackInfo } from '../models/Types';
@@ -33,19 +34,27 @@ import {
 } from './PlaylistRewrite';
 
 /** 播放地址（/playback 解析结果）缓存有效期，与 PlayerService 的 8 分钟一致。 */
+// @config-exempt: 未注册（ConfigRegistry 无 prefetch_url_ttl_ms）
 const URL_TTL_MS: number = 8 * 60 * 1000;
 /** 预热成功后同一目标的冷却时间。 */
+// @config-exempt: 未注册（ConfigRegistry 无 prefetch_done_ttl_ms）
 const DONE_TTL_MS: number = 5 * 60 * 1000;
 /** 播放请求安静多久后才继续预加载（毫秒）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 prefetch 让路参数）
 const FOREGROUND_QUIET_MS: number = 600;
 /** 等待播放请求安静的最长时间；超时也继续（避免预加载永远被饿死）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 prefetch 让路参数）
 const FOREGROUND_WAIT_MS: number = 4000;
 /** 暂停（后台）时的最长等待；超过则放弃本任务剩余抓取。 */
+// @config-exempt: 未注册（ConfigRegistry 无 prefetch 让路参数）
 const PAUSE_WAIT_MS: number = 30000;
 /** 任务启动错峰：下一集稍慢（让当前起播），feed 下一条稍快。 */
+// @config-exempt: 未注册（ConfigRegistry 无 prefetch 错峰参数）
 const STAGGER_EPISODE_MS: number = 500;
+// @config-exempt: 未注册（ConfigRegistry 无 prefetch 错峰参数）
 const STAGGER_URL_MS: number = 200;
 /** 单个资源抓取超过该耗时视为网络慢：立刻放弃本任务剩余抓取，避免和播放抢带宽。 */
+// @config-exempt: 未注册（ConfigRegistry 无 prefetch 慢网判定 key）
 const SLOW_FETCH_MS: number = 6000;
 /** 队列任务状态。 */
 const JOB_KIND_URL: string = 'url';
@@ -98,15 +107,21 @@ function sleep(ms: number): Promise<void> {
 export class MediaPrefetch {
   /** 总开关：false 时所有 warm* 立即返回（对照测试用）。 */
   static enabled: boolean = true;
-  /** 单集预热最多抓几个分片。 */
-  static maxSegments: number = 3;
+  /** 单集预热最多抓几个分片：读 ConfigRegistry（默认 3，与迁移前一致）。 */
+  private static maxSegments(): number {
+    return ConfigRegistry.getNumber(ConfigKey.HLS_PREFETCH_SEGMENTS);
+  }
   /** 单集预热流量上限（字节，分片数先到先停）。 */
+  // @config-exempt: 未注册（ConfigRegistry 无预取流量上限 key）
   static maxEpisodeBytes: number = 2 * 1024 * 1024;
   /** feed 预热最多看几个后续条目（任务要求不超过 2）。 */
+  // @config-exempt: 未注册（ConfigRegistry 无 feed 预取条数 key）
   static maxFeedCount: number = 2;
   /** 全局并发任务数（每个任务同一时刻只抓一个资源）。 */
+  // @config-exempt: 未注册（ConfigRegistry 无预取并发 key）
   static maxActive: number = 2;
   /** 排队任务上限：快速连续滑动时丢弃最旧任务，避免预热已滑过的视频浪费流量。 */
+  // @config-exempt: 未注册（ConfigRegistry 无预取队列上限 key）
   static maxQueued: number = 8;
 
   private static generation: number = 0;
@@ -433,7 +448,7 @@ export class MediaPrefetch {
     }
     // 开头分片：预算 3 个或 2MB，先到先停；已缓存跳过且不占预算
     for (let i = 0; i < summary.segments.length; i++) {
-      if (result.segments >= MediaPrefetch.maxSegments || result.bytes >= MediaPrefetch.maxEpisodeBytes) {
+      if (result.segments >= MediaPrefetch.maxSegments() || result.bytes >= MediaPrefetch.maxEpisodeBytes) {
         result.budgetHit = true;
         break;
       }
@@ -468,7 +483,7 @@ export class MediaPrefetch {
     }
     if (result.budgetHit) {
       PlaybackLog.info('prefetch.budget', 'segs=' + result.segments + ' bytes=' + result.bytes +
-        ' maxSegs=' + MediaPrefetch.maxSegments + ' maxBytes=' + MediaPrefetch.maxEpisodeBytes);
+        ' maxSegs=' + MediaPrefetch.maxSegments() + ' maxBytes=' + MediaPrefetch.maxEpisodeBytes);
     }
     return result;
   }

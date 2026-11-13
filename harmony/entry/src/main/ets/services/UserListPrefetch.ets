@@ -9,10 +9,13 @@ const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGUserList';
 
 /** 启动预热延迟（ms）：让首屏与启动线路探测先跑，避免抢首屏带宽。 */
+// @config-exempt: 未注册（ConfigRegistry 无 userlist_warm_delay_ms）
 const WARM_DELAY_MS: number = 1200;
 /** 单次预热 id 上限（收藏 + 历史去重后）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 userlist_max_ids）
 const WARM_MAX_IDS: number = 24;
 /** 预热并发条数（3~4 条，与 Api.warmHistory 一致）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 userlist_concurrency）
 const WARM_CONCURRENCY: number = 4;
 
 /**

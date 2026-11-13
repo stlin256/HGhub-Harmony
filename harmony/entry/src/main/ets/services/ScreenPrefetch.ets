@@ -6,10 +6,14 @@ import { Paged, Post, RankResult, Topic, VideoCard } from '../models/Types';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGScreenWarm';
+/** 启动后延迟预热（毫秒），让首屏请求先跑。 */
+// @config-exempt: 未注册（ConfigRegistry 无 screen_warm_delay_ms）
 const WARM_DELAY_MS: number = 1200;
 /** 榜单快照有效期（长会话内过期后页面回源）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 rank_cache_ttl_ms）
 const RANK_TTL_MS: number = 3 * 60 * 1000;
 /** 列表页与频道首屏快照有效期。 */
+// @config-exempt: 未注册（ConfigRegistry 无 list_cache_ttl_ms）
 const LIST_TTL_MS: number = 5 * 60 * 1000;
 
 class RankEntry {
