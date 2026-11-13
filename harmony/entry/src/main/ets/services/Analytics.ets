@@ -3,6 +3,8 @@ import { deviceInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Api } from './Api';
 import { CrashGuard } from './CrashGuard';
+import { DeviceMetrics, DeviceMetricsSnapshot } from './DeviceMetrics';
+import { LineStats, LineStatsSnapshot } from './LineStats';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
 
@@ -70,6 +72,25 @@ interface DayStats {
   pageCategory: number;
   pageProfile: number;
   pagePlayer: number;
+  // 设备侧指标
+  memPssKb: number;
+  memPeakKb: number;
+  memVssKb: number;
+  diskAppBytes: number;
+  diskCacheBytes: number;
+  diskDataBytes: number;
+  socStart: number;
+  socEnd: number;
+  tempMaxC: number;
+  charging: number;
+  // 线路指标
+  linePrimaryOk: number;
+  linePrimaryFail: number;
+  lineMirrorOk: number;
+  lineMirrorFail: number;
+  lineSwitches: number;
+  lineLatencyAvgMs: number;
+  lineLatencyP90Ms: number;
 }
 
 /**
@@ -109,6 +130,11 @@ export class Analytics {
         Analytics.resetCounters(today);
       } else if (statDay === 0) {
         Analytics.resetCounters(today);
+      }
+      if (statDay !== 0 && statDay !== today) {
+        // 跨天：线路与功耗计数按日重置（内存/磁盘是快照，不清）。
+        LineStats.resetDaily();
+        DeviceMetrics.resetDaily();
       }
 
       // 本次启动计入今天的 sessions。
@@ -329,6 +355,8 @@ export class Analytics {
   }
 
   private static readStats(day: number): DayStats {
+    const dm: DeviceMetricsSnapshot = DeviceMetrics.snapshot();
+    const ls: LineStatsSnapshot = LineStats.snapshot();
     const list: number[] = Analytics.readStartupList();
     const sorted: number[] = list.slice().sort((a: number, b: number) => a - b);
     let sum: number = 0;
@@ -360,7 +388,24 @@ export class Analytics {
       pageSearch: Prefs.getNumber(KEY_PAGE_SEARCH, 0),
       pageCategory: Prefs.getNumber(KEY_PAGE_CATEGORY, 0),
       pageProfile: Prefs.getNumber(KEY_PAGE_PROFILE, 0),
-      pagePlayer: Prefs.getNumber(KEY_PAGE_PLAYER, 0)
+      pagePlayer: Prefs.getNumber(KEY_PAGE_PLAYER, 0),
+      memPssKb: dm.memPssKb,
+      memPeakKb: dm.memPssPeakKb,
+      memVssKb: dm.memVssKb,
+      diskAppBytes: dm.diskAppBytes,
+      diskCacheBytes: dm.diskCacheBytes,
+      diskDataBytes: dm.diskDataBytes,
+      socStart: dm.socStart,
+      socEnd: dm.socEnd,
+      tempMaxC: dm.tempMax,
+      charging: dm.charging ? 1 : 0,
+      linePrimaryOk: ls.primaryOk,
+      linePrimaryFail: ls.primaryFail,
+      lineMirrorOk: ls.mirrorOk,
+      lineMirrorFail: ls.mirrorFail,
+      lineSwitches: ls.switches,
+      lineLatencyAvgMs: ls.latencyAvgMs,
+      lineLatencyP90Ms: ls.latencyP90Ms
     };
   }
 
@@ -452,7 +497,24 @@ export class Analytics {
         'page_search': pending.pageSearch,
         'page_category': pending.pageCategory,
         'page_profile': pending.pageProfile,
-        'page_player': pending.pagePlayer
+        'page_player': pending.pagePlayer,
+        'mem_pss_kb': pending.memPssKb,
+        'mem_peak_kb': pending.memPeakKb,
+        'mem_vss_kb': pending.memVssKb,
+        'disk_app_bytes': pending.diskAppBytes,
+        'disk_cache_bytes': pending.diskCacheBytes,
+        'disk_data_bytes': pending.diskDataBytes,
+        'soc_start': pending.socStart,
+        'soc_end': pending.socEnd,
+        'temp_max_c': pending.tempMaxC,
+        'charging': pending.charging,
+        'line_primary_ok': pending.linePrimaryOk,
+        'line_primary_fail': pending.linePrimaryFail,
+        'line_mirror_ok': pending.lineMirrorOk,
+        'line_mirror_fail': pending.lineMirrorFail,
+        'line_switches': pending.lineSwitches,
+        'line_latency_avg_ms': pending.lineLatencyAvgMs,
+        'line_latency_p90_ms': pending.lineLatencyP90Ms
       };
       payload['stats'] = stats;
     }

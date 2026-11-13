@@ -66,6 +66,25 @@ CREATE TABLE IF NOT EXISTS daily_stats (
   page_category  INTEGER NOT NULL DEFAULT 0,
   page_profile   INTEGER NOT NULL DEFAULT 0,
   page_player    INTEGER NOT NULL DEFAULT 0,
+  -- 设备侧指标（内存 / 磁盘 / 功耗）
+  mem_pss_kb        INTEGER NOT NULL DEFAULT 0,
+  mem_peak_kb       INTEGER NOT NULL DEFAULT 0,
+  mem_vss_kb        INTEGER NOT NULL DEFAULT 0,
+  disk_app_bytes    INTEGER NOT NULL DEFAULT 0,
+  disk_cache_bytes  INTEGER NOT NULL DEFAULT 0,
+  disk_data_bytes   INTEGER NOT NULL DEFAULT 0,
+  soc_start         INTEGER NOT NULL DEFAULT 0,
+  soc_end           INTEGER NOT NULL DEFAULT 0,
+  temp_max_c        REAL    NOT NULL DEFAULT 0,
+  charging          INTEGER NOT NULL DEFAULT 0,
+  -- 线路指标（主站/镜像请求成败、换线次数、探测延迟）
+  line_primary_ok   INTEGER NOT NULL DEFAULT 0,
+  line_primary_fail INTEGER NOT NULL DEFAULT 0,
+  line_mirror_ok    INTEGER NOT NULL DEFAULT 0,
+  line_mirror_fail  INTEGER NOT NULL DEFAULT 0,
+  line_switches     INTEGER NOT NULL DEFAULT 0,
+  line_latency_avg_ms INTEGER NOT NULL DEFAULT 0,
+  line_latency_p90_ms INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, id_hash)
 );
 

@@ -42,6 +42,11 @@ function makeDB() {
               quality_hd: 0, quality_sd: 0, play_complete: 0,
               startup_ms_sum: 0, startup_ms_count: 0, avg_p50: 0, avg_p90: 0,
               page_home: 0, page_search: 0, page_category: 0, page_profile: 0, page_player: 0,
+              line_primary_ok: 0, line_primary_fail: 0, line_mirror_ok: 0, line_mirror_fail: 0,
+              line_switches: 0, soc_drain_sum: 0, soc_drain_samples: 0,
+              avg_mem_pss: 0, max_mem_peak: 0, avg_mem_vss: 0,
+              avg_disk_app: 0, avg_disk_cache: 0, avg_disk_data: 0,
+              avg_temp: 0, max_temp: 0, avg_latency: 0, avg_latency_p90: 0,
             };
             let p50Sum = 0, p50N = 0, p90Sum = 0, p90N = 0;
             for (const v of dailyStats.values()) {
@@ -53,6 +58,37 @@ function makeDB() {
             }
             acc.avg_p50 = p50N > 0 ? p50Sum / p50N : 0;
             acc.avg_p90 = p90N > 0 ? p90Sum / p90N : 0;
+
+            // 设备/线路派生量
+            let memSum = 0, memN = 0, vssSum = 0, vssN = 0;
+            let appSum = 0, appN = 0, cacheSum = 0, cacheN = 0, dataSum = 0, dataN = 0;
+            let tempSum = 0, tempN = 0, latSum = 0, latN = 0, latP90Sum = 0, latP90N = 0;
+            for (const v of dailyStats.values()) {
+              if (v.mem_pss_kb > 0) { memSum += v.mem_pss_kb; memN += 1; }
+              if (v.mem_vss_kb > 0) { vssSum += v.mem_vss_kb; vssN += 1; }
+              if (v.disk_app_bytes > 0) { appSum += v.disk_app_bytes; appN += 1; }
+              if (v.disk_cache_bytes > 0) { cacheSum += v.disk_cache_bytes; cacheN += 1; }
+              if (v.disk_data_bytes > 0) { dataSum += v.disk_data_bytes; dataN += 1; }
+              if (v.temp_max_c > 0) { tempSum += v.temp_max_c; tempN += 1; }
+              if (v.line_latency_avg_ms > 0) { latSum += v.line_latency_avg_ms; latN += 1; }
+              if (v.line_latency_p90_ms > 0) { latP90Sum += v.line_latency_p90_ms; latP90N += 1; }
+              if (v.charging === 0 && v.soc_start > 0 && v.soc_end > 0) {
+                acc.soc_drain_sum += Math.max(v.soc_start - v.soc_end, 0);
+                acc.soc_drain_samples += 1;
+              }
+            }
+            for (const v of dailyStats.values()) {
+              if (v.mem_peak_kb > acc.max_mem_peak) acc.max_mem_peak = v.mem_peak_kb;
+              if (v.temp_max_c > acc.max_temp) acc.max_temp = v.temp_max_c;
+            }
+            acc.avg_mem_pss = memN > 0 ? memSum / memN : 0;
+            acc.avg_mem_vss = vssN > 0 ? vssSum / vssN : 0;
+            acc.avg_disk_app = appN > 0 ? appSum / appN : 0;
+            acc.avg_disk_cache = cacheN > 0 ? cacheSum / cacheN : 0;
+            acc.avg_disk_data = dataN > 0 ? dataSum / dataN : 0;
+            acc.avg_temp = tempN > 0 ? tempSum / tempN : 0;
+            acc.avg_latency = latN > 0 ? latSum / latN : 0;
+            acc.avg_latency_p90 = latP90N > 0 ? latP90Sum / latP90N : 0;
             return acc;
           }
           if (sql.includes('SELECT count, expires_at FROM rate_limits')) {
@@ -101,6 +137,11 @@ function makeDB() {
               'play_fail', 'fail_network', 'fail_auth', 'fail_notfound', 'fail_server', 'fail_other',
               'sr_on', 'sr_supported', 'quality_hd', 'quality_sd', 'play_complete',
               'page_home', 'page_search', 'page_category', 'page_profile', 'page_player',
+              'mem_pss_kb', 'mem_peak_kb', 'mem_vss_kb',
+              'disk_app_bytes', 'disk_cache_bytes', 'disk_data_bytes',
+              'soc_start', 'soc_end', 'temp_max_c', 'charging',
+              'line_primary_ok', 'line_primary_fail', 'line_mirror_ok', 'line_mirror_fail',
+              'line_switches', 'line_latency_avg_ms', 'line_latency_p90_ms',
             ];
             const next = { ...cur };
             fields.forEach((f, i) => {
@@ -627,4 +668,86 @@ test('/stats 返回崩溃聚合', async () => {
   assert.equal(body.crash.groups[0].count, 2);
   assert.ok(Array.isArray(body.crash.groups[0].versions));
   assert.equal(body.crash.groups[0].versions[0].version, '2.3.0');
+});
+
+/* ── 设备侧指标（内存/磁盘/功耗）与线路指标 ────────── */
+
+test('设备与线路指标写入并聚合', async () => {
+  const e = env();
+  const day = todayStamp();
+  const stats = {
+    day, sessions: 1, duration_sec: 600, vv: 5, crash: 0,
+    mem_pss_kb: 180000, mem_peak_kb: 240000, mem_vss_kb: 900000,
+    disk_app_bytes: 52000000, disk_cache_bytes: 12000000, disk_data_bytes: 3000000,
+    soc_start: 80, soc_end: 76, temp_max_c: 36.5, charging: 0,
+    line_primary_ok: 40, line_primary_fail: 2,
+    line_mirror_ok: 10, line_mirror_fail: 1,
+    line_switches: 1,
+    line_latency_avg_ms: 120, line_latency_p90_ms: 260,
+  };
+  const res = await worker.fetch(post({ id: UUID, ver: '2.3.0', day, stats }), e, ctx);
+  assert.equal(res.status, 200);
+
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.mem_pss_kb, 180000);
+  assert.equal(row.disk_app_bytes, 52000000);
+  assert.equal(row.soc_start, 80);
+  assert.equal(row.temp_max_c, 36.5);
+  assert.equal(row.line_primary_ok, 40);
+
+  const sres = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await sres.json();
+
+  assert.equal(body.device.mem_pss_avg_kb, 180000);
+  assert.equal(body.device.mem_peak_kb, 240000);
+  assert.equal(body.device.disk_app_avg_bytes, 52000000);
+  assert.equal(body.device.soc_drain_avg_pct, 4);
+  assert.equal(body.device.soc_drain_samples, 1);
+  assert.equal(body.device.temp_max_c, 36.5);
+
+  assert.equal(body.lines.primary_ok, 40);
+  assert.equal(body.lines.primary_fail, 2);
+  assert.equal(body.lines.primary_fail_rate, 4.8);
+  assert.equal(body.lines.mirror_ok, 10);
+  assert.equal(body.lines.switches, 1);
+  assert.equal(body.lines.latency_avg_ms, 120);
+  assert.equal(body.lines.latency_p90_ms, 260);
+});
+
+test('充电中的会话不计入耗电统计', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, soc_start: 50, soc_end: 62, charging: 1 },
+  }), e, ctx);
+  const sres = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await sres.json();
+  assert.equal(body.device.soc_drain_samples, 0);
+  assert.equal(body.device.soc_drain_avg_pct, 0);
+});
+
+test('设备指标缺省时安全为 0', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({ id: UUID, ver: '2.3.0', day, stats: { day, sessions: 1 } }), e, ctx);
+  const sres = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await sres.json();
+  assert.equal(body.device.mem_pss_avg_kb, 0);
+  assert.equal(body.device.disk_app_avg_bytes, 0);
+  assert.equal(body.lines.primary_ok, 0);
+  assert.equal(body.lines.latency_avg_ms, 0);
+});
+
+test('设备指标超上限被裁剪', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, mem_pss_kb: 9e12, soc_start: 999, temp_max_c: -5 },
+  }), e, ctx);
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.mem_pss_kb, 16 * 1024 * 1024);
+  assert.equal(row.soc_start, 100);
+  assert.equal(row.temp_max_c, 0);
 });

@@ -125,6 +125,13 @@
   .bar-row .num{ font-size:12px; color:var(--muted); min-width:52px; text-align:right; }
   @keyframes grow{ from{ transform:scaleX(0); } to{ transform:scaleX(1); } }
 
+  /* 指标网格 */
+  .metrics{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:16px 24px; }
+  .metric .k{ font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+  .metric .v{ font-size:22px; font-weight:700; letter-spacing:-.02em; margin-top:3px; }
+  .metric .v small{ font-size:11px; font-weight:400; color:var(--muted); margin-left:3px; }
+  .metric .s{ font-size:10px; color:var(--faint); margin-top:2px; }
+
   /* 崩溃聚合 */
   .crash-list{ display:flex; flex-direction:column; }
   .crash-item{ border-top:1px solid var(--rule); padding:12px 0; }
@@ -571,6 +578,12 @@
     ];
     grid.appendChild(section('页面访问', '按进入次数', barList(pageItems), 'col-6'));
 
+    /* 设备指标 */
+    grid.appendChild(section('设备指标', '内存 / 磁盘 / 功耗 · 区间均值', devicePanel(d), 'col-6'));
+
+    /* 线路质量 */
+    grid.appendChild(section('线路质量', '主站 / 镜像请求与延迟', linePanel(d), 'col-6'));
+
     /* 崩溃聚合 */
     var cr = d.crash || { total: 0, groups: [] };
     grid.appendChild(section('崩溃聚合',
@@ -589,6 +602,72 @@
     });
 
     elStamp.textContent = '更新于 ' + new Date(d.generated_at).toLocaleString('zh-CN', { hour12:false });
+  }
+
+  function fmtBytes(b){
+    if (!b || b <= 0) return '—';
+    if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+    if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+    if (b >= 1024) return (b / 1024).toFixed(0) + ' KB';
+    return b + ' B';
+  }
+
+  function metricItem(k, v, unit, sub){
+    return '<div class="metric"><div class="k">' + esc(k) + '</div>' +
+      '<div class="v">' + esc(v) + (unit ? '<small>' + esc(unit) + '</small>' : '') + '</div>' +
+      (sub ? '<div class="s">' + esc(sub) + '</div>' : '') + '</div>';
+  }
+
+  function devicePanel(d){
+    var dv = d.device || {};
+    var box = document.createElement('div');
+    box.className = 'metrics';
+    box.innerHTML =
+      metricItem('内存 PSS 均值', fmt(dv.mem_pss_avg_kb), 'KB') +
+      metricItem('内存 PSS 峰值', fmt(dv.mem_peak_kb), 'KB') +
+      metricItem('虚拟内存 VSS', fmt(dv.mem_vss_avg_kb), 'KB') +
+      metricItem('磁盘 · 安装', fmtBytes(dv.disk_app_avg_bytes)) +
+      metricItem('磁盘 · 缓存', fmtBytes(dv.disk_cache_avg_bytes)) +
+      metricItem('磁盘 · 数据', fmtBytes(dv.disk_data_avg_bytes)) +
+      metricItem('平均耗电', dv.soc_drain_avg_pct, '%',
+        dv.soc_drain_samples ? dv.soc_drain_samples + ' 个未充电会话' : '无有效样本') +
+      metricItem('电池温度', dv.temp_max_c, '°C', '均值 ' + (dv.temp_avg_c || 0) + '°C');
+    return box;
+  }
+
+  function linePanel(d){
+    var ln = d.lines || {};
+    var box = document.createElement('div');
+    var totalReq = (ln.primary_ok || 0) + (ln.primary_fail || 0) +
+                   (ln.mirror_ok || 0) + (ln.mirror_fail || 0);
+    var bars = document.createElement('div');
+    bars.className = 'metrics';
+    bars.innerHTML =
+      metricItem('主站请求', fmt(ln.primary_ok), '',
+        '失败 ' + (ln.primary_fail || 0) + ' · ' + (ln.primary_fail_rate || 0) + '%') +
+      metricItem('镜像请求', fmt(ln.mirror_ok), '',
+        '失败 ' + (ln.mirror_fail || 0) + ' · ' + (ln.mirror_fail_rate || 0) + '%') +
+      metricItem('镜像占比', ln.mirror_share || 0, '%', '共 ' + fmt(totalReq) + ' 次请求') +
+      metricItem('换线次数', fmt(ln.switches), '', '自动 + 手动') +
+      metricItem('延迟均值', fmt(ln.latency_avg_ms), 'ms') +
+      metricItem('延迟 P90', fmt(ln.latency_p90_ms), 'ms');
+    box.appendChild(bars);
+    if (totalReq > 0) {
+      var bar = document.createElement('div');
+      bar.style.cssText = 'margin-top:16px;display:flex;height:10px;background:var(--rule)';
+      var pPct = ((ln.primary_ok || 0) + (ln.primary_fail || 0)) / totalReq * 100;
+      bar.innerHTML =
+        '<div style="width:' + pPct + '%;background:' + ACCENT + '"></div>' +
+        '<div style="width:' + (100 - pPct) + '%;background:' + WARN + '"></div>';
+      box.appendChild(bar);
+      var legend = document.createElement('div');
+      legend.style.cssText = 'margin-top:8px;display:flex;gap:16px;font-size:11px;color:var(--muted)';
+      legend.innerHTML =
+        '<span><span style="display:inline-block;width:8px;height:8px;background:' + ACCENT + ';margin-right:6px"></span>主站</span>' +
+        '<span><span style="display:inline-block;width:8px;height:8px;background:' + WARN + ';margin-right:6px"></span>镜像</span>';
+      box.appendChild(legend);
+    }
+    return box;
   }
 
   function crashPanel(d){

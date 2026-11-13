@@ -208,8 +208,14 @@ async function handleReport(request, env, ctx) {
            startup_p50_ms, startup_p90_ms, startup_ms_sum, startup_ms_count,
            play_fail, fail_network, fail_auth, fail_notfound, fail_server, fail_other,
            sr_on, sr_supported, quality_hd, quality_sd, play_complete,
-           page_home, page_search, page_category, page_profile, page_player)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           page_home, page_search, page_category, page_profile, page_player,
+           mem_pss_kb, mem_peak_kb, mem_vss_kb,
+           disk_app_bytes, disk_cache_bytes, disk_data_bytes,
+           soc_start, soc_end, temp_max_c, charging,
+           line_primary_ok, line_primary_fail, line_mirror_ok, line_mirror_fail,
+           line_switches, line_latency_avg_ms, line_latency_p90_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(day, id_hash) DO UPDATE SET
            sessions = daily_stats.sessions + excluded.sessions,
            duration_sec = daily_stats.duration_sec + excluded.duration_sec,
@@ -234,13 +240,35 @@ async function handleReport(request, env, ctx) {
            page_search = daily_stats.page_search + excluded.page_search,
            page_category = daily_stats.page_category + excluded.page_category,
            page_profile = daily_stats.page_profile + excluded.page_profile,
-           page_player = daily_stats.page_player + excluded.page_player`
+           page_player = daily_stats.page_player + excluded.page_player,
+           mem_pss_kb = excluded.mem_pss_kb,
+           mem_peak_kb = MAX(daily_stats.mem_peak_kb, excluded.mem_peak_kb),
+           mem_vss_kb = excluded.mem_vss_kb,
+           disk_app_bytes = excluded.disk_app_bytes,
+           disk_cache_bytes = excluded.disk_cache_bytes,
+           disk_data_bytes = excluded.disk_data_bytes,
+           soc_start = CASE WHEN daily_stats.soc_start = 0 THEN excluded.soc_start ELSE daily_stats.soc_start END,
+           soc_end = excluded.soc_end,
+           temp_max_c = MAX(daily_stats.temp_max_c, excluded.temp_max_c),
+           charging = excluded.charging,
+           line_primary_ok = daily_stats.line_primary_ok + excluded.line_primary_ok,
+           line_primary_fail = daily_stats.line_primary_fail + excluded.line_primary_fail,
+           line_mirror_ok = daily_stats.line_mirror_ok + excluded.line_mirror_ok,
+           line_mirror_fail = daily_stats.line_mirror_fail + excluded.line_mirror_fail,
+           line_switches = daily_stats.line_switches + excluded.line_switches,
+           line_latency_avg_ms = excluded.line_latency_avg_ms,
+           line_latency_p90_ms = excluded.line_latency_p90_ms`
       ).bind(
         stats.day, idHash, stats.sessions, stats.durationSec, stats.vv, stats.crash,
         stats.startupP50, stats.startupP90, stats.startupSum, stats.startupCount,
         stats.playFail, stats.failNetwork, stats.failAuth, stats.failNotFound, stats.failServer, stats.failOther,
         stats.srOn, stats.srSupported, stats.qualityHd, stats.qualitySd, stats.playComplete,
-        stats.pageHome, stats.pageSearch, stats.pageCategory, stats.pageProfile, stats.pagePlayer
+        stats.pageHome, stats.pageSearch, stats.pageCategory, stats.pageProfile, stats.pagePlayer,
+        stats.memPssKb, stats.memPeakKb, stats.memVssKb,
+        stats.diskAppBytes, stats.diskCacheBytes, stats.diskDataBytes,
+        stats.socStart, stats.socEnd, stats.tempMaxC, stats.charging,
+        stats.linePrimaryOk, stats.linePrimaryFail, stats.lineMirrorOk, stats.lineMirrorFail,
+        stats.lineSwitches, stats.lineLatencyAvgMs, stats.lineLatencyP90Ms
       ).run();
     }
   } catch {
@@ -622,6 +650,25 @@ async function handleStats(url, env, preAuthorized) {
               COALESCE(SUM(startup_ms_count), 0) AS startup_ms_count,
               COALESCE(AVG(NULLIF(startup_p50_ms, 0)), 0) AS avg_p50,
               COALESCE(AVG(NULLIF(startup_p90_ms, 0)), 0) AS avg_p90,
+              COALESCE(AVG(NULLIF(mem_pss_kb, 0)), 0) AS avg_mem_pss,
+              COALESCE(MAX(mem_peak_kb), 0) AS max_mem_peak,
+              COALESCE(AVG(NULLIF(mem_vss_kb, 0)), 0) AS avg_mem_vss,
+              COALESCE(AVG(NULLIF(disk_app_bytes, 0)), 0) AS avg_disk_app,
+              COALESCE(AVG(NULLIF(disk_cache_bytes, 0)), 0) AS avg_disk_cache,
+              COALESCE(AVG(NULLIF(disk_data_bytes, 0)), 0) AS avg_disk_data,
+              COALESCE(SUM(CASE WHEN charging = 0 AND soc_start > 0 AND soc_end > 0
+                                THEN MAX(soc_start - soc_end, 0) ELSE 0 END), 0) AS soc_drain_sum,
+              COALESCE(SUM(CASE WHEN charging = 0 AND soc_start > 0 AND soc_end > 0
+                                THEN 1 ELSE 0 END), 0) AS soc_drain_samples,
+              COALESCE(AVG(NULLIF(temp_max_c, 0)), 0) AS avg_temp,
+              COALESCE(MAX(temp_max_c), 0) AS max_temp,
+              COALESCE(SUM(line_primary_ok), 0) AS line_primary_ok,
+              COALESCE(SUM(line_primary_fail), 0) AS line_primary_fail,
+              COALESCE(SUM(line_mirror_ok), 0) AS line_mirror_ok,
+              COALESCE(SUM(line_mirror_fail), 0) AS line_mirror_fail,
+              COALESCE(SUM(line_switches), 0) AS line_switches,
+              COALESCE(AVG(NULLIF(line_latency_avg_ms, 0)), 0) AS avg_latency,
+              COALESCE(AVG(NULLIF(line_latency_p90_ms, 0)), 0) AS avg_latency_p90,
               COALESCE(SUM(page_home), 0) AS page_home,
               COALESCE(SUM(page_search), 0) AS page_search,
               COALESCE(SUM(page_category), 0) AS page_category,
@@ -736,6 +783,37 @@ async function handleStats(url, env, preAuthorized) {
         sr_support_rate: pct(totals ? totals.sr_supported : 0, totalDevices),
         sr_on_rate: pct(totals ? totals.sr_on : 0, totalDevices),
       },
+      // 设备侧指标
+      device: {
+        mem_pss_avg_kb: totals ? Math.round(totals.avg_mem_pss) : 0,
+        mem_peak_kb: totals ? totals.max_mem_peak : 0,
+        mem_vss_avg_kb: totals ? Math.round(totals.avg_mem_vss) : 0,
+        disk_app_avg_bytes: totals ? Math.round(totals.avg_disk_app) : 0,
+        disk_cache_avg_bytes: totals ? Math.round(totals.avg_disk_cache) : 0,
+        disk_data_avg_bytes: totals ? Math.round(totals.avg_disk_data) : 0,
+        soc_drain_avg_pct: totals && totals.soc_drain_samples > 0 ?
+          Math.round((totals.soc_drain_sum / totals.soc_drain_samples) * 10) / 10 : 0,
+        soc_drain_samples: totals ? totals.soc_drain_samples : 0,
+        temp_avg_c: totals ? Math.round(totals.avg_temp * 10) / 10 : 0,
+        temp_max_c: totals ? Math.round(totals.max_temp * 10) / 10 : 0,
+      },
+      // 线路指标
+      lines: {
+        primary_ok: totals ? totals.line_primary_ok : 0,
+        primary_fail: totals ? totals.line_primary_fail : 0,
+        mirror_ok: totals ? totals.line_mirror_ok : 0,
+        mirror_fail: totals ? totals.line_mirror_fail : 0,
+        primary_fail_rate: pct(totals ? totals.line_primary_fail : 0,
+          (totals ? totals.line_primary_ok + totals.line_primary_fail : 0)),
+        mirror_fail_rate: pct(totals ? totals.line_mirror_fail : 0,
+          (totals ? totals.line_mirror_ok + totals.line_mirror_fail : 0)),
+        mirror_share: pct(totals ? totals.line_mirror_ok + totals.line_mirror_fail : 0,
+          (totals ? totals.line_primary_ok + totals.line_primary_fail +
+            totals.line_mirror_ok + totals.line_mirror_fail : 0)),
+        switches: totals ? totals.line_switches : 0,
+        latency_avg_ms: totals ? Math.round(totals.avg_latency) : 0,
+        latency_p90_ms: totals ? Math.round(totals.avg_latency_p90) : 0,
+      },
       // 崩溃聚合
       crash: {
         total: crashTotal ? crashTotal.n : 0,
@@ -814,6 +892,25 @@ function parseStats(raw) {
     pageCategory: n(raw.page_category),
     pageProfile: n(raw.page_profile),
     pagePlayer: n(raw.page_player),
+    // 设备侧指标
+    memPssKb: toSafeInt(raw.mem_pss_kb, 0, 0, 16 * 1024 * 1024),
+    memPeakKb: toSafeInt(raw.mem_peak_kb, 0, 0, 16 * 1024 * 1024),
+    memVssKb: toSafeInt(raw.mem_vss_kb, 0, 0, 64 * 1024 * 1024),
+    diskAppBytes: toSafeInt(raw.disk_app_bytes, 0, 0, 1e12),
+    diskCacheBytes: toSafeInt(raw.disk_cache_bytes, 0, 0, 1e12),
+    diskDataBytes: toSafeInt(raw.disk_data_bytes, 0, 0, 1e12),
+    socStart: toSafeInt(raw.soc_start, 0, 0, 100),
+    socEnd: toSafeInt(raw.soc_end, 0, 0, 100),
+    tempMaxC: toSafeFloat(raw.temp_max_c, 0, 0, 100),
+    charging: toSafeInt(raw.charging, 0, 0, 1),
+    // 线路指标
+    linePrimaryOk: n(raw.line_primary_ok),
+    linePrimaryFail: n(raw.line_primary_fail),
+    lineMirrorOk: n(raw.line_mirror_ok),
+    lineMirrorFail: n(raw.line_mirror_fail),
+    lineSwitches: n(raw.line_switches),
+    lineLatencyAvgMs: toSafeInt(raw.line_latency_avg_ms, 0, 0, 600000),
+    lineLatencyP90Ms: toSafeInt(raw.line_latency_p90_ms, 0, 0, 600000),
   };
 }
 
@@ -827,6 +924,18 @@ function parseDay(value) {
     return 0;
   }
   return DAY_RE.test(String(n)) ? n : 0;
+}
+
+/** 安全取浮点：缺省/非数字/NaN 返回 fallback，再夹到 [min, max]。 */
+function toSafeFloat(value, fallback, min, max) {
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) {
+    return fallback;
+  }
+  return clamp(n, min, max);
 }
 
 /** 安全取整：缺省/非数字/NaN 返回 fallback，再夹到 [min, max]。 */

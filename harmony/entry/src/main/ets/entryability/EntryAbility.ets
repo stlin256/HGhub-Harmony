@@ -14,6 +14,7 @@ import { Analytics } from '../services/Analytics';
 import { PlaybackLog } from '../player/PlaybackLog';
 import { ClipboardLink } from '../services/ClipboardLink';
 import { CrashReporter } from '../services/CrashReporter';
+import { DeviceMetrics } from '../services/DeviceMetrics';
 import { UiBus } from '../services/UiBus';
 import { Net } from '../services/Net';
 import { PerfMark } from '../utils/PerfMark';
@@ -159,6 +160,8 @@ export default class EntryAbility extends UIAbility {
     Analytics.onBackground();
     // 播放诊断日志落盘（避免频繁写 preferences，只在后台时写一次）。
     PlaybackLog.persist();
+    // 设备指标：结算本次会话的结束电量与温度峰值。
+    DeviceMetrics.onSessionEnd();
     // 兜底：播放页可能为了全屏隐藏了状态栏，退到后台时统一走 WindowChrome 串行队列恢复，避免竞态。
     WindowChrome.showStatusBar();
   }
@@ -182,6 +185,11 @@ export default class EntryAbility extends UIAbility {
       Analytics.onLaunch();
       // 崩溃堆栈自动上报：把上次会话遗留的崩溃记录（已脱敏）批量上传。
       CrashReporter.reportPending();
+      // 设备指标：记录会话起始电量，延迟采样内存/磁盘（30 分钟节流）。
+      DeviceMetrics.onSessionStart();
+      setTimeout(() => {
+        DeviceMetrics.sampleAsync();
+      }, 8000);
       // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
       LineAuto.init();
       // 离线推荐：异步载入随包目录（3,388 条）+ 本地画像，并按冷却时间静默同步增量目录。

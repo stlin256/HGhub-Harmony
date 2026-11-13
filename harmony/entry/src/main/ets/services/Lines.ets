@@ -2,6 +2,7 @@ import { JSON } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Net, RawText } from './Net';
 import { Prefs } from './Prefs';
+import { LineStats } from './LineStats';
 import { Session } from './Session';
 import { LineItem, LineMirrors, LineProbe } from '../models/Types';
 import { parseHttpsUrl } from '../utils/Security';
@@ -294,6 +295,8 @@ export class Lines {
     Lines.addAllowed(next);
     hilog.info(0x0000, 'HGLine', 'line switched: %{public}s -> %{public}s', previous, next);
     if (previous !== next) {
+      // 线路统计：只记次数，不记具体域名。
+      LineStats.recordSwitch();
       Session.clear();
     }
     return next;

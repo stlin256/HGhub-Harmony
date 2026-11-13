@@ -3,6 +3,7 @@ import { LineItem, LineProbe } from '../models/Types';
 import { Lines, PREF_LINE_LAST_GOOD } from './Lines';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
+import { LineStats } from './LineStats';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGLine';
@@ -243,13 +244,19 @@ export class LineAuto {
       return out;
     }
     const results: LineProbe[] = await Lines.probe(pending);
+    const latencies: number[] = [];
     for (let i = 0; i < results.length; i++) {
       const r: LineProbe = results[i];
       const ms: number = r.ok ? r.ms : -1;
       LineAuto.probeCache.set(r.url, ms);
       LineAuto.probeCacheAt.set(r.url, now);
       out.set(r.url, ms);
+      if (r.ok && r.ms > 0) {
+        latencies.push(r.ms);
+      }
     }
+    // 线路统计：记录本批探测延迟（只记数值，不记域名）。
+    LineStats.recordLatencies(latencies);
     return out;
   }
 
