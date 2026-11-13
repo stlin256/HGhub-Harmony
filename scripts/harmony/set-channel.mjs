@@ -18,7 +18,7 @@ if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(channel)) {
 }
 mkdirSync(dirname(TARGET), { recursive: true });
 writeFileSync(TARGET,
-  "// 由 scripts/harmony/set-channel.mjs 生成，不入库。\n" +
+  "// 构建时由 scripts/harmony/set-channel.mjs 覆盖；默认值入库以兼容 CI/IDE。\n" +
   "export const BUILD_CHANNEL: string = '" + channel + "';\n",
   'utf8');
 console.log('[set-channel] BUILD_CHANNEL = ' + channel);
