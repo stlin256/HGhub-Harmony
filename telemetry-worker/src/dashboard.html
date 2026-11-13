@@ -159,6 +159,12 @@
     border:1px solid var(--rule); padding:1px 6px;
   }
 
+  /* 配置应用 */
+  .cfg-id{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px; color:var(--muted); }
+  .cfg-key{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px; }
+  .cfg-arrow{ color:var(--faint); padding:0 5px; }
+  tr.cfg-group td{ background:#fafafa; font-weight:600; border-top:1px solid var(--rule-strong); }
+
   /* 明细表 */
   .table-wrap{ overflow-x:auto; }
   table{ width:100%; border-collapse:collapse; font-size:12px; }
@@ -593,6 +599,13 @@
       '共 ' + cr.total + ' 次 · ' + cr.groups.length + ' 个分组 · 点击展开堆栈',
       crashPanel(d), 'col-12'));
 
+    /* 配置应用（C10 / SPEC §15） */
+    var ca = d.config_apply || { total: 0, configs: [] };
+    grid.appendChild(section('配置应用',
+      '共 ' + fmtExact(ca.total || 0) + ' 次变化 · ' + (ca.configs || []).length +
+        ' 次下发 · 设备·天口径',
+      configApplyPanel(d), 'col-12'));
+
     /* 明细表 */
     grid.appendChild(section('按天明细', '点击表头排序', buildTable(d), 'col-12'));
 
@@ -736,6 +749,48 @@
       });
       box.appendChild(item);
     });
+    return box;
+  }
+
+  function configApplyPanel(d){
+    var ca = d.config_apply || { total: 0, configs: [] };
+    var box = document.createElement('div');
+    var configs = ca.configs || [];
+    if (!configs.length){
+      box.innerHTML = '<div class="state" style="padding:24px 0">暂无配置应用记录</div>';
+      return box;
+    }
+    var wrap = document.createElement('div');
+    wrap.className = 'table-wrap';
+    var html = ['<table><thead><tr>' +
+      '<th>配置 config_id</th><th>版本</th><th>配置项</th><th>变化</th><th>来源</th><th>影响设备数</th>' +
+      '</tr></thead><tbody>'];
+    configs.forEach(function(c){
+      var cid = c.config_id || '(未关联 config_id)';
+      var short = cid.length > 26 ? cid.slice(0, 10) + '…' + cid.slice(-6) : cid;
+      var changes = c.changes || [];
+      html.push('<tr class="cfg-group">' +
+        '<td title="' + esc(cid) + '"><span class="cfg-id">' + esc(short) + '</span></td>' +
+        '<td>v' + esc(c.config_version) + '</td>' +
+        '<td>' + changes.length + ' 项</td>' +
+        '<td>—</td><td>—</td>' +
+        '<td>' + fmtExact(c.devices || 0) + '</td>' +
+        '</tr>');
+      changes.forEach(function(ch){
+        var oldV = ch.old === '' ? '∅' : ch.old;
+        var newV = ch.new === '' ? '∅' : ch.new;
+        html.push('<tr>' +
+          '<td></td><td></td>' +
+          '<td><span class="cfg-key">' + esc(ch.key) + '</span></td>' +
+          '<td>' + esc(oldV) + '<span class="cfg-arrow">→</span>' + esc(newV) + '</td>' +
+          '<td>' + esc(ch.source || '—') + '</td>' +
+          '<td>' + fmtExact(ch.count || 0) + '</td>' +
+          '</tr>');
+      });
+    });
+    html.push('</tbody></table>');
+    wrap.innerHTML = html.join('');
+    box.appendChild(wrap);
     return box;
   }
 

@@ -12,6 +12,7 @@ function makeDB() {
   const crashGroups = new Map();
   const crashVersions = new Map();
   const remoteConfig = new Map();
+  const configApplies = new Map();
   return {
     devices,
     rates,
@@ -20,6 +21,7 @@ function makeDB() {
     crashGroups,
     crashVersions,
     remoteConfig,
+    configApplies,
     prepare(sql) {
       let args = [];
       const stmt = {
@@ -145,6 +147,9 @@ function makeDB() {
           if (sql.includes('FROM crash_versions')) {
             return { results: [...crashVersions.values()] };
           }
+          if (sql.includes('FROM config_applies')) {
+            return { results: [...configApplies.values()] };
+          }
           if (sql.includes('FROM daily_active')) {
             const from = args[0];
             const byDay = new Map();
@@ -246,6 +251,23 @@ function makeDB() {
             const r = rates.get(args[0]);
             if (r) r.count += 1;
             return { success: true };
+          }
+          if (sql.includes('INSERT INTO config_applies')) {
+            const [configId, version, key, oldValue, newValue, source, count, firstAt, lastAt] = args;
+            const k = `${configId}\u0000${key}\u0000${oldValue}\u0000${newValue}\u0000${source}`;
+            const cur = configApplies.get(k);
+            if (cur) {
+              // 模拟 ON CONFLICT ... DO UPDATE：累加计数、更新最近时间。
+              cur.count += count;
+              cur.last_at = Math.max(cur.last_at, lastAt);
+            } else {
+              configApplies.set(k, {
+                config_id: configId, config_version: version, key,
+                old_value: oldValue, new_value: newValue, source,
+                count, first_at: firstAt, last_at: lastAt,
+              });
+            }
+            return { success: true, meta: { changes: 1 } };
           }
           if (sql.includes('INSERT INTO remote_config')) {
             const [id, version, payload, updatedAt, configId] = args;
@@ -1183,4 +1205,169 @@ test('/v1/config：config_id 参与签名，篡改后签名不再匹配', async 
   const tampered = { ...unsigned, config_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' };
   const tamperedSig = (await hmacSha256Hex(CONFIG_KEY, JSON.stringify(tampered))).slice(0, 32);
   assert.notEqual(tamperedSig, body.sig);
+});
+
+/* ── 配置应用回报（config_apply / SPEC §15）────────── */
+
+const CONFIG_APPLY_ID = '5f0c2a11-7d4e-4a3b-9c8d-1e2f3a4b5c6d';
+
+/** 一条合法的配置应用记录（可覆盖字段）。 */
+function applyItem(over = {}) {
+  return {
+    config_id: CONFIG_APPLY_ID,
+    config_version: 12,
+    key: 'super_resolution',
+    old: 'true',
+    new: 'false',
+    source: 'remote',
+    applied_at: 1731600123,
+    ...over,
+  };
+}
+
+test('/v1/report：config_apply 写入并按主键聚合计数', async () => {
+  const e = env();
+  const first = await worker.fetch(post({
+    id: UUID, ver: '2.2.0', config_apply: [applyItem()],
+  }), e, ctx);
+  assert.equal(first.status, 200);
+  // 第二台设备上报同一变化 → 同一行 count=2
+  const second = await worker.fetch(post({
+    id: '3f2504e0-4f89-41d3-9a0c-0305e82c3302', ver: '2.2.0', config_apply: [applyItem()],
+  }), e, ctx);
+  assert.equal(second.status, 200);
+
+  assert.equal(e.DB.configApplies.size, 1);
+  const row = [...e.DB.configApplies.values()][0];
+  assert.equal(row.config_id, CONFIG_APPLY_ID);
+  assert.equal(row.config_version, 12);
+  assert.equal(row.key, 'super_resolution');
+  assert.equal(row.old_value, 'true');
+  assert.equal(row.new_value, 'false');
+  assert.equal(row.source, 'remote');
+  assert.equal(row.count, 2);
+  assert.equal(row.first_at, 1731600123);
+});
+
+test('/v1/report：config_apply 按 (key, old, new, source) 分行，同批重复合并', async () => {
+  const e = env();
+  const res = await worker.fetch(post({
+    id: UUID, ver: '2.2.0',
+    config_apply: [
+      applyItem(),
+      applyItem(), // 同批重复 → 合并成 count=2
+      applyItem({ key: 'retry_max', old: '3', new: '5' }),
+      applyItem({ old: 'false', new: 'true' }), // 反向变化单独一行
+    ],
+  }), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(e.DB.configApplies.size, 3);
+  const rows = [...e.DB.configApplies.values()];
+  const merged = rows.find((r) => r.key === 'super_resolution' && r.old_value === 'true');
+  assert.equal(merged.count, 2);
+  assert.equal(rows.filter((r) => r.key === 'super_resolution').length, 2);
+});
+
+test('/v1/report：config_apply 超过 20 条时丢弃最旧的', async () => {
+  const e = env();
+  const items = [];
+  for (let i = 0; i < 25; i++) {
+    items.push(applyItem({ key: 'k' + i, old: '0', new: '1' }));
+  }
+  const res = await worker.fetch(post({ id: UUID, ver: '2.2.0', config_apply: items }), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(e.DB.configApplies.size, 20);
+  const keys = new Set([...e.DB.configApplies.values()].map((r) => r.key));
+  assert.equal(keys.has('k0'), false);
+  assert.equal(keys.has('k4'), false);
+  assert.equal(keys.has('k5'), true);
+  assert.equal(keys.has('k24'), true);
+});
+
+test('/v1/report：config_apply 缺省或非法条目安全忽略', async () => {
+  // 缺省：旧客户端行为不变
+  const e = env();
+  assert.equal((await worker.fetch(post({ id: UUID, ver: '2.2.0' }), e, ctx)).status, 200);
+  assert.equal(e.DB.configApplies.size, 0);
+
+  // 非数组 / 非法条目：全部忽略，但主统计照常
+  const e2 = env();
+  const res = await worker.fetch(post({
+    id: UUID, ver: '2.2.0',
+    config_apply: [
+      'not-an-object',
+      applyItem({ key: 'Bad Key' }),
+      applyItem({ key: 'UPPER' }),
+      applyItem({ source: 'hack' }),
+      applyItem({ old: 'same', new: 'same' }),
+      applyItem({ config_id: 'x'.repeat(80) }),
+    ],
+  }), e2, ctx);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).counted, true);
+  assert.equal(e2.DB.configApplies.size, 0);
+});
+
+test('/v1/report：config_applies 写入失败不影响主统计', async () => {
+  const e = env();
+  const realPrepare = e.DB.prepare.bind(e.DB);
+  e.DB.prepare = (sql) => {
+    if (sql.includes('config_applies')) {
+      throw new Error('d1 down for config_applies');
+    }
+    return realPrepare(sql);
+  };
+  const res = await worker.fetch(post({
+    id: UUID, ver: '2.2.0', config_apply: [applyItem()],
+  }), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).counted, true);
+  assert.equal(e.DB.devices.size, 1);
+});
+
+test('/v1/report：带 config_apply 的请求体可超过 2 KB，不带仍按 2 KB 拒绝', async () => {
+  // 旧客户端：> 2 KB 仍 413（行为不变）
+  const e = env();
+  const big = JSON.stringify({ id: UUID, ver: '2.2.0', pad: 'A'.repeat(2000) });
+  assert.ok(big.length > 2048);
+  assert.equal((await worker.fetch(post(big), e, ctx)).status, 413);
+
+  // 新客户端：带 config_apply 时放宽到 16 KB
+  const e2 = env();
+  const ok = JSON.stringify({
+    id: UUID, ver: '2.2.0', pad: 'A'.repeat(2000), config_apply: [applyItem()],
+  });
+  assert.ok(ok.length > 2048);
+  const res = await worker.fetch(post(ok), e2, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(e2.DB.configApplies.size, 1);
+});
+
+test('/stats：config_apply 段按 config_id 分组输出', async () => {
+  const e = env();
+  await worker.fetch(post({ id: UUID, ver: '2.2.0', config_apply: [applyItem()] }), e, ctx);
+  await worker.fetch(post({
+    id: '3f2504e0-4f89-41d3-9a0c-0305e82c3302', ver: '2.2.0',
+    config_apply: [applyItem({ key: 'retry_max', old: '3', new: '5' })],
+  }), e, ctx);
+  await worker.fetch(post({
+    id: '3f2504e0-4f89-41d3-9a0c-0305e82c3303', ver: '2.2.0',
+    config_apply: [applyItem({ config_id: 'other-config-id', config_version: 13 })],
+  }), e, ctx);
+
+  const res = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.config_apply.total, 3);
+  assert.equal(body.config_apply.configs.length, 2);
+
+  const first = body.config_apply.configs.find((c) => c.config_id === CONFIG_APPLY_ID);
+  assert.equal(first.config_version, 12);
+  assert.equal(first.devices, 2);
+  assert.equal(first.changes.length, 2);
+  const superRes = first.changes.find((c) => c.key === 'super_resolution');
+  assert.equal(superRes.old, 'true');
+  assert.equal(superRes.new, 'false');
+  assert.equal(superRes.source, 'remote');
+  assert.equal(superRes.count, 1);
 });

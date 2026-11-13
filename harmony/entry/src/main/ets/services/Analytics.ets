@@ -6,6 +6,7 @@ import { CrashGuard } from './CrashGuard';
 import { DeviceMetrics, DeviceMetricsSnapshot } from './DeviceMetrics';
 import { LineStats, LineStatsSnapshot } from './LineStats';
 import { ActionSnapshot, ActionStats } from './ActionStats';
+import { ConfigChange, ConfigRegistry } from './ConfigRegistry';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
 
@@ -16,6 +17,8 @@ const LOG_TAG: string = 'HGAnalytics';
 const ENDPOINT: string = 'https://hghub-telemetry.stlin256.workers.dev/v1/report';
 /** 同一设备两次上报的最小间隔：1 小时（服务端按天去重，这里只防频繁请求）。 */
 const REPORT_INTERVAL_MS: number = 3600 * 1000;
+/** 单次上报最多携带的配置变化条数（SPEC §15.4：超出丢弃最旧的）。 */
+const MAX_CONFIG_APPLY: number = 20;
 
 const KEY_INSTALL_ID: string = 'install_id';
 const KEY_INSTALL_AT: string = 'install_at';
@@ -503,6 +506,37 @@ export class Analytics {
     }
   }
 
+  /**
+   * 取走 ConfigRegistry 里待上报的配置变化，转成上报结构（SPEC §15.2）。
+   * 单次最多 MAX_CONFIG_APPLY 条，超出丢弃最旧的（保留最近生效的）；取走即清空本地队列。
+   * 任何异常都静默返回空数组：配置回报失败不能影响主统计上报。
+   */
+  private static takeConfigApplies(): Record<string, Object>[] {
+    const out: Record<string, Object>[] = [];
+    try {
+      const changes: ConfigChange[] = ConfigRegistry.takeChanges();
+      if (changes.length === 0) {
+        return out;
+      }
+      const start: number = Math.max(0, changes.length - MAX_CONFIG_APPLY);
+      for (let i = start; i < changes.length; i++) {
+        const change: ConfigChange = changes[i];
+        const item: Record<string, Object> = {
+          'config_id': change.configId,
+          'config_version': change.configVersion,
+          'key': change.key,
+          'old': change.oldValue,
+          'new': change.newValue,
+          'source': change.source,
+          'applied_at': change.appliedAt
+        };
+        out.push(item);
+      }
+    } catch (err) {
+    }
+    return out;
+  }
+
   private static async post(id: string, today: number, pending: DayStats | undefined): Promise<void> {
     const payload: Record<string, Object> = {
       'id': id,
@@ -576,6 +610,11 @@ export class Analytics {
         'act_user': pending.actUser
       };
       payload['stats'] = stats;
+    }
+    // 配置应用回报（SPEC §15）：只上报真正生效过的变化，取走即清空；单次最多 20 条。
+    const applies: Record<string, Object>[] = Analytics.takeConfigApplies();
+    if (applies.length > 0) {
+      payload['config_apply'] = applies;
     }
     const raw = await Net.postJson(ENDPOINT, JSON.stringify(payload), 8000);
     if (raw.code >= 200 && raw.code < 300) {

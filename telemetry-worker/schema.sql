@@ -151,3 +151,21 @@ CREATE TABLE IF NOT EXISTS remote_config (
   -- 配置唯一 ID（C11 / SPEC §16）：每次发布生成，全局唯一、永不复用
   config_id TEXT NOT NULL DEFAULT ''
 );
+
+-- 配置应用回报（C10 / SPEC §15）：按 (config_id, key, old, new, source) 聚合计数，
+-- 不存设备标识；count 是设备·天口径（每台设备每天只上报一次日聚合）
+CREATE TABLE IF NOT EXISTS config_applies (
+  config_id      TEXT NOT NULL,
+  config_version INTEGER NOT NULL,
+  key            TEXT NOT NULL,
+  old_value      TEXT,
+  new_value      TEXT,
+  source         TEXT,
+  count          INTEGER NOT NULL DEFAULT 1,
+  first_at       INTEGER NOT NULL,
+  last_at        INTEGER NOT NULL,
+  PRIMARY KEY (config_id, key, old_value, new_value, source)
+);
+
+CREATE INDEX IF NOT EXISTS idx_config_applies_version ON config_applies(config_version);
+CREATE INDEX IF NOT EXISTS idx_config_applies_last_at ON config_applies(last_at);

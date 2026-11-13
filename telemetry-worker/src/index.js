@@ -33,7 +33,10 @@
 
 import DASHBOARD_HTML from './dashboard.generated.js';
 
+/** 旧客户端（不带 config_apply）的请求体上限：保持不变，避免改变现有行为。 */
 const MAX_BODY_BYTES = 2048;
+/** 带 config_apply 的新客户端请求体上限（20 条变化 + 完整日聚合，留足余量）。 */
+const MAX_REPORT_BODY_BYTES = 16384;
 const IP_HOURLY_LIMIT = 30;
 const IP_WINDOW_SEC = 3600;
 const SIG_WINDOW_SEC = 300;
@@ -55,6 +58,11 @@ const CONFIG_CACHE_CONTROL = 'public, max-age=300';
 const CONFIG_ROW_ID = 'global';
 const MAX_CONFIG_VERSION = 2147483647;
 const MAX_ADMIN_BODY_BYTES = 32768;
+/** 配置应用回报（SPEC §15）：单次最多 20 条，字段长度上限防止异常客户端把库撑大。 */
+const MAX_CONFIG_APPLY = 20;
+const MAX_CONFIG_ID_LEN = 64;
+const MAX_CONFIG_KEY_LEN = 64;
+const MAX_CONFIG_VALUE_LEN = 128;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VERSION_RE = /^[0-9]{1,3}(\.[0-9]{1,3}){0,3}$/;
@@ -62,6 +70,12 @@ const MODEL_RE = /^[A-Za-z0-9 _\-.]{0,32}$/;
 const OS_RE = /^[A-Za-z0-9 ._\-]{0,24}$/;
 /** YYYYMMDD。 */
 const DAY_RE = /^20[0-9]{6}$/;
+/** 配置应用 key：小写 snake_case（与客户端 ConfigRegistry 的 ConfigKey 一致）。 */
+const CONFIG_KEY_RE = /^[a-z][a-z0-9_]{0,63}$/;
+/** config_id：UUID 或未来格式的短标识；空串表示「无远程配置时的本地变化」。 */
+const CONFIG_ID_RE = /^[A-Za-z0-9_-]{0,64}$/;
+/** 变化来源白名单（SPEC §15.2）。 */
+const CONFIG_SOURCES = new Set(['remote', 'local_override', 'default']);
 
 export default {
   async fetch(request, env, ctx) {
@@ -109,7 +123,7 @@ async function handleReport(request, env, ctx) {
   const now = Math.floor(Date.now() / 1000);
 
   const declared = Number(request.headers.get('content-length') || '0');
-  if (declared > MAX_BODY_BYTES) {
+  if (declared > MAX_REPORT_BODY_BYTES) {
     return json({ error: 'payload_too_large' }, 413);
   }
   let raw;
@@ -118,7 +132,7 @@ async function handleReport(request, env, ctx) {
   } catch {
     return json({ error: 'bad_body' }, 400);
   }
-  if (raw.length === 0 || raw.length > MAX_BODY_BYTES) {
+  if (raw.length === 0 || raw.length > MAX_REPORT_BODY_BYTES) {
     return json({ error: 'payload_too_large' }, 413);
   }
 
@@ -130,6 +144,13 @@ async function handleReport(request, env, ctx) {
   }
   if (!body || typeof body !== 'object') {
     return json({ error: 'bad_json' }, 400);
+  }
+
+  // 配置应用回报（SPEC §15）：旧客户端不带该字段，行为完全不变。
+  const configApplies = parseConfigApplies(body.config_apply, now);
+  // 兼容旧行为：不带 config_apply 的请求仍按 2 KB 限制，避免放宽刷量面。
+  if (raw.length > MAX_BODY_BYTES && configApplies.length === 0) {
+    return json({ error: 'payload_too_large' }, 413);
   }
 
   // 基础字段校验。
@@ -321,6 +342,15 @@ async function handleReport(request, env, ctx) {
     }
   } catch {
     return json({ error: 'storage_failed' }, 500);
+  }
+
+  // 配置应用回报（SPEC §15）：独立 try/catch——config_applies 表缺失或写入失败
+  // 不应影响既有上报链路（迁移未执行时旧客户端仍能正常上报）。
+  if (configApplies.length > 0) {
+    try {
+      await writeConfigApplies(env, configApplies);
+    } catch {
+    }
   }
 
   if (Math.random() < 1 / RATE_CLEANUP_EVERY) {
@@ -983,6 +1013,20 @@ async function handleStats(url, env, preAuthorized) {
       'SELECT fingerprint, version, count FROM crash_versions'
     ).all();
 
+    // 配置应用回报（C10 / SPEC §15）：按 (config_id, key, old, new, source) 聚合，取最近 200 行。
+    // 迁移 0010 未执行时 /stats 仍可用（只是没有配置应用段），不影响既有统计。
+    let configApplyRows = { results: [] };
+    try {
+      configApplyRows = await env.DB.prepare(
+        `SELECT config_id, config_version, key, old_value, new_value, source,
+                count, first_at, last_at
+           FROM config_applies
+          ORDER BY config_version DESC, count DESC, last_at DESC
+          LIMIT 200`
+      ).all();
+    } catch {
+    }
+
     const totalDevices = total ? total.n : 0;
     const sumSessions = totals ? totals.sessions : 0;
     const sumDuration = totals ? totals.duration_sec : 0;
@@ -994,6 +1038,40 @@ async function handleStats(url, env, preAuthorized) {
     const startupCount = totals ? totals.startup_ms_count : 0;
     const startupSum = totals ? totals.startup_ms_sum : 0;
     const pct = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
+
+    // 配置应用：按 config_id 分组，展示「哪一次下发改了哪些 key、影响多少设备」。
+    // count 是设备·天口径（每台设备每天只上报一次），没有设备标识可做精确去重。
+    const configApplyConfigs = [];
+    const configApplyIndex = new Map();
+    let configApplyTotal = 0;
+    const configApplyResultRows = configApplyRows && configApplyRows.results ?
+      configApplyRows.results : [];
+    for (const row of configApplyResultRows) {
+      const configId = typeof row.config_id === 'string' ? row.config_id : '';
+      let group = configApplyIndex.get(configId);
+      if (!group) {
+        group = {
+          config_id: configId,
+          config_version: toSafeInt(row.config_version, 0, 0, MAX_CONFIG_VERSION),
+          devices: 0,
+          changes: [],
+        };
+        configApplyIndex.set(configId, group);
+        configApplyConfigs.push(group);
+      }
+      const count = toSafeInt(row.count, 0, 0, MAX_COUNTER);
+      group.devices += count;
+      configApplyTotal += count;
+      group.changes.push({
+        key: typeof row.key === 'string' ? row.key : '',
+        old: typeof row.old_value === 'string' ? row.old_value : '',
+        new: typeof row.new_value === 'string' ? row.new_value : '',
+        source: typeof row.source === 'string' ? row.source : '',
+        count,
+        first_at: toSafeInt(row.first_at, 0, 0, Number.MAX_SAFE_INTEGER),
+        last_at: toSafeInt(row.last_at, 0, 0, Number.MAX_SAFE_INTEGER),
+      });
+    }
 
     return json({
       // 徽章口径
@@ -1121,6 +1199,11 @@ async function handleStats(url, env, preAuthorized) {
             .map((v) => ({ version: v.version, count: v.count })),
         })),
       },
+      // 配置应用回报（C10 / SPEC §15）：按 config_id 分组
+      config_apply: {
+        total: configApplyTotal,
+        configs: configApplyConfigs,
+      },
       // 页面访问分布
       pages: {
         home: totals ? totals.page_home : 0,
@@ -1221,6 +1304,96 @@ function parseStats(raw) {
     actTopic: n(raw.act_topic),
     actUser: n(raw.act_user),
   };
+}
+
+/**
+ * 解析并裁剪客户端上报的配置应用记录（SPEC §15.2 / C10）。
+ *
+ * 安全与兼容约定：
+ * - 非数组/缺省 → 空数组（旧客户端不带该字段，行为不变）；
+ * - 单条非法（key 不是 snake_case、source 不在白名单、字段类型不符）→ 丢弃该条；
+ * - old === new 不算「应用」（客户端已过滤，服务端再兜一层）；
+ * - 单条字段超长裁剪，最多 MAX_CONFIG_APPLY 条（超出丢弃最旧的，保留数组末尾）；
+ * - 同一批里主键 (config_id, key, old, new, source) 相同的条目合并计数，
+ *   避免 UPSERT 自冲突，也避免一次上报灌出大量行。
+ *
+ * 返回 [{ configId, configVersion, key, oldValue, newValue, source, count, firstAt, lastAt }]。
+ */
+function parseConfigApplies(raw, now) {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const start = Math.max(0, raw.length - MAX_CONFIG_APPLY);
+  const merged = new Map();
+  for (let i = start; i < raw.length; i++) {
+    const item = raw[i];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const configId = typeof item.config_id === 'string' ? item.config_id.trim() : '';
+    if (configId.length > MAX_CONFIG_ID_LEN || !CONFIG_ID_RE.test(configId)) {
+      continue;
+    }
+    const key = typeof item.key === 'string' ? item.key.trim() : '';
+    if (key.length > MAX_CONFIG_KEY_LEN || !CONFIG_KEY_RE.test(key)) {
+      continue;
+    }
+    const source = typeof item.source === 'string' ? item.source : '';
+    if (!CONFIG_SOURCES.has(source)) {
+      continue;
+    }
+    const oldValue = clipText(item.old, MAX_CONFIG_VALUE_LEN);
+    const newValue = clipText(item.new, MAX_CONFIG_VALUE_LEN);
+    if (oldValue === newValue) {
+      continue;
+    }
+    const configVersion = toSafeInt(item.config_version, 0, 0, MAX_CONFIG_VERSION);
+    // applied_at 缺省/为 0 时按服务端收到的时间计；未来时间最多容忍 1 天（客户端时钟偏差）。
+    const appliedAt = toSafeInt(item.applied_at, now, 0, now + 86400) || now;
+    const mergeKey = `${configId}\u0000${key}\u0000${oldValue}\u0000${newValue}\u0000${source}`;
+    const cur = merged.get(mergeKey);
+    if (cur) {
+      cur.count += 1;
+      cur.firstAt = Math.min(cur.firstAt, appliedAt);
+      cur.lastAt = Math.max(cur.lastAt, appliedAt);
+      if (configVersion > cur.configVersion) {
+        cur.configVersion = configVersion;
+      }
+    } else {
+      merged.set(mergeKey, {
+        configId,
+        configVersion,
+        key,
+        oldValue,
+        newValue,
+        source,
+        count: 1,
+        firstAt: appliedAt,
+        lastAt: appliedAt,
+      });
+    }
+  }
+  return [...merged.values()];
+}
+
+/**
+ * 写入配置应用聚合表（SPEC §15.3）：按主键累加计数，只存聚合值、不存设备标识。
+ * 调用方负责 try/catch：写失败不能影响主统计上报。
+ */
+async function writeConfigApplies(env, applies) {
+  for (const apply of applies) {
+    await env.DB.prepare(
+      `INSERT INTO config_applies
+         (config_id, config_version, key, old_value, new_value, source, count, first_at, last_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(config_id, key, old_value, new_value, source) DO UPDATE SET
+         count = config_applies.count + excluded.count,
+         last_at = MAX(config_applies.last_at, excluded.last_at)`
+    ).bind(
+      apply.configId, apply.configVersion, apply.key, apply.oldValue, apply.newValue,
+      apply.source, apply.count, apply.firstAt, apply.lastAt
+    ).run();
+  }
 }
 
 /**
