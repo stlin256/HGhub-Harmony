@@ -14,6 +14,7 @@ import {
   ROUTE_POSTS, ROUTE_RANKS, ROUTE_TOPICS
 } from '../state/Routes';
 import { fmt } from '../utils/Format';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 
 const PREVIEW_SIZE: number = 8;
 
@@ -941,11 +942,13 @@ export struct CategoryPage {
               .width('100%')
               .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
 
-              Column() {
-                this.TopicsEntry()
+              if (ConfigRegistry.getBool(ConfigKey.TOPICS_ENABLED)) {
+                Column() {
+                  this.TopicsEntry()
+                }
+                .width('100%')
+                .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
               }
-              .width('100%')
-              .padding({ left: HgSpace.pageInset, right: HgSpace.pageInset })
             }
             .width('100%')
             .margin({ bottom: HgSpace.xl })
