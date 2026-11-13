@@ -40,3 +40,6 @@ AGENTS.md
 # 遥测 Worker 依赖
 telemetry-worker/node_modules/
 telemetry-worker/.wrangler/
+
+# 编译期分发渠道（set-channel.mjs 生成）
+harmony/entry/src/main/ets/utils/BuildChannel.local.ets

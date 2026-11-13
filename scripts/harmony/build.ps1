@@ -33,7 +33,9 @@ param(
   [string]$LogDir = '',
   [string]$ServerIp = '',
   [int]$ServerPort = 0,
-  [string]$ServerKey = ''
+  [string]$ServerKey = '',
+  # 分发渠道（编译期标识，如 github / sydxky / official）；不入库，写入 BuildChannel.local.ets。
+  [string]$Channel = ''
 )
 
 . (Join-Path $PSScriptRoot 'env.ps1') -DevEcoHome $DevEcoHome -Quiet
@@ -44,6 +46,31 @@ if (-not $LogDir) {
   $LogDir = Join-Path $PSScriptRoot '.local\logs'
 }
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+# 编译期注入分发渠道：每次构建写入 BuildChannel.local.ets（不入库）。
+$channelOut = Join-Path $repoRoot 'harmony\entry\src\main\ets\utils\BuildChannel.local.ets'
+if ($Channel) {
+  if ($Channel -notmatch '^[a-z0-9][a-z0-9_-]{0,31}$') {
+    throw "非法 -Channel：$Channel（只允许小写字母/数字/_/-，长度 1-32）"
+  }
+  $channelOutput = & $toolchain.NodeExe (Join-Path $PSScriptRoot 'set-channel.mjs') $Channel 2>&1
+  Write-Host (($channelOutput | Out-String).Trim())
+  if ($LASTEXITCODE -ne 0) {
+    throw "生成分发渠道失败（exit=$LASTEXITCODE）"
+  }
+} elseif (-not (Test-Path -LiteralPath $channelOut -PathType Leaf)) {
+  $channelOutput = & $toolchain.NodeExe (Join-Path $PSScriptRoot 'set-channel.mjs') 'official' 2>&1
+  Write-Host (($channelOutput | Out-String).Trim())
+}
+$buildChannel = 'official'
+if ($Channel) {
+  $buildChannel = $Channel
+} elseif (Test-Path -LiteralPath $channelOut) {
+  $m = Select-String -LiteralPath $channelOut -Pattern "BUILD_CHANNEL: string = '([^']+)'"
+  if ($m) {
+    $buildChannel = $m.Matches[0].Groups[1].Value
+  }
+}
 
 # 编译期注入服务器端点：IP / 端口 / 128 位接入密钥都不入库，由参数传入。
 $serverOut = Join-Path $repoRoot 'harmony\entry\src\main\ets\services\ServerEndpoint.local.ets'
@@ -85,7 +112,7 @@ $stopwatch = [Diagnostics.Stopwatch]::StartNew()
 $results = [Collections.Generic.List[object]]::new()
 
 Write-Host ''
-Write-Host "HarmonyOS build: project=$project product=$($Product -join ',') mode=$BuildMode bundle=$bundleName signingMaterial=$hasSigningMaterial" -ForegroundColor Cyan
+Write-Host "HarmonyOS build: project=$project product=$($Product -join ',') mode=$BuildMode channel=$buildChannel bundle=$bundleName signingMaterial=$hasSigningMaterial" -ForegroundColor Cyan
 Write-Host ('-' * 78)
 
 Push-Location -LiteralPath $project
