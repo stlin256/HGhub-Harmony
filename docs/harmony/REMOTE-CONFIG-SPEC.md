@@ -171,6 +171,19 @@
 | `HgPosterFlow` | `PREFETCH_*` | `flow_prefetch_*` |
 | `RecService` | 探索比例 / 池大小 | `recommend_explore_pct` / `recommend_pool_size` |
 
+#### 迁移状态（P3 已完成，2026-11-13）
+
+| 批次 | 提交 | 覆盖 |
+|---|---|---|
+| P3-A | `6ec5476` | services 层 8 key + 3 开关检查（UserPrefs / Ipv6 / Analytics / CrashReporter / CrashGuard / DeviceMetrics / UpdateChecker / ClipboardLink / PowerGuard） |
+| P3-B | `3c13f81` | 播放器与网络层 15 key（PlayerQuality / PlayerSeekPolicy / PlayerService / MediaCache / MediaPrefetch / Net / LineAuto） |
+| P3-C | `f27db95` | UI 层功能入口 3 项（专题 / 关注 / 画中画 + 投播） |
+
+**未迁移项**：17 个文件里的常量标注了 `// @config-exempt: 原因`，分三类：
+1. ConfigRegistry 未注册（如 `analytics_interval_ms` / `crash_retry_interval_ms` / `history_max`）
+2. 语义不匹配（如 `Ipv6Preference.CACHE_TTL_MS` 是 5min，`line_probe_ttl_ms` 是 60s）
+3. 协议/安全/平台常量
+
 #### 保持硬编码（标注 `@config-exempt`）
 
 | 模块 | 常量 | 原因 |
