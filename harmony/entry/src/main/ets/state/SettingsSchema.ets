@@ -359,7 +359,7 @@ export class SettingsSchema {
     const preferHevc: SettingsItem = switchRow('prefer_hevc', $r('app.string.ui_167667a8'),
       $r('app.string.ui_72429b8a'), $r('sys.symbol.aspect_ratio'), ConfigKey.PREFER_HEVC, 1);
     const superResolution: SettingsItem = switchRow('super_resolution', $r('app.string.ui_1ac5f1f7'),
-      $r('app.string.ui_191e4ae3'), $r('sys.symbol.sparkles'), ConfigKey.SUPER_RESOLUTION, 2);
+      $r('app.string.ui_191e4ae3'), $r('sys.symbol.aspect_ratio'), ConfigKey.SUPER_RESOLUTION, 2);
     superResolution.accessibility = $r('app.string.ui_1ac5f1f7');
     const scale: SettingsItem = row('video_scale', SettingsItemType.CHIPS, $r('app.string.ui_f07fc510'), 3);
     scale.key = ConfigKey.VIDEO_SCALE;

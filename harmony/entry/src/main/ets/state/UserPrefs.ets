@@ -138,6 +138,7 @@ export class UserPrefs {
     AppStorage.setOrCreate<boolean>(K_MULTI_SOURCE, Prefs.getBool('multi_source', true));
     // AI 超分默认开启；省电模式/低电量时由 PowerGuard 自动暂停，恢复后按此偏好复原。
     AppStorage.setOrCreate<boolean>(K_SUPER_RESOLUTION, Prefs.getBool('super_resolution', true));
+    AppStorage.setOrCreate<boolean>('hgSrUnsupported', Prefs.getBool('sr_unsupported', false));
     AppStorage.setOrCreate<number>(K_VOLUME, Prefs.getNumber('volume', 0.7));
     AppStorage.setOrCreate<string>(K_VIDEO_SCALE, UserPrefs.normalizeVideoScale(Prefs.getString('video_scale', 'contain')));
     AppStorage.setOrCreate<string>(K_LIKES, Prefs.getString('likes', '[]'));

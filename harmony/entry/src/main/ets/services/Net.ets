@@ -300,7 +300,7 @@ export class Net {
         return await Net.requestOnce(url, host, http.AddressFamily.DEFAULT,
           method, headers, body, timeoutMs, asBytes);
       }
-      throw err;
+      throw new Error(err !== undefined && err !== null ? String(err) : 'request failed');
     }
   }
 
