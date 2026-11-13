@@ -129,7 +129,8 @@ App 冷启动时会上报一次**匿名设备标识**，只用于统计「有多
 
 - 服务端只保存 UUID 的 **SHA-256**，原始 UUID 不落库、不打日志；IP 仅在内存用于限流
 - 设置页「匿名使用统计」可随时关闭，关闭后立即停止上报
-- 上报实现见 [`services/InstallReporter.ets`](harmony/entry/src/main/ets/services/InstallReporter.ets)，服务端见 [`telemetry-worker/`](telemetry-worker/README.md)
+- 上报内容：安装时间、App 版本、设备型号、系统版本、当日启动次数 / 使用时长 / 播放次数（VV）/ 崩溃次数
+- 上报实现见 [`services/Analytics.ets`](harmony/entry/src/main/ets/services/Analytics.ets)，服务端见 [`telemetry-worker/`](telemetry-worker/README.md)
 
 ## 使用须知
 
