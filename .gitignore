@@ -46,3 +46,6 @@ telemetry-worker/.wrangler/
 # 本地内容数据（不入库，保留在本机）
 harmony/entry/src/main/resources/rawfile/recommend/catalog_full.json
 harmony/entry/src/main/resources/rawfile/recommend/genre_dict.json
+
+# 本地交接文档（不入库，保留在本机）
+docs/harmony/HANDOVER.md
