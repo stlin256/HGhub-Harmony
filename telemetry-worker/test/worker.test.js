@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import worker, { sha256Hex, timingSafeEqual, verifySignature, parseStats, dayStamp } from '../src/index.js';
+import worker, { sha256Hex, timingSafeEqual, verifySignature, parseStats, parseDay, dayStamp, toSafeInt } from '../src/index.js';
 
 /** 极简 D1 内存替身：只实现 Worker 实际用到的几条 SQL。 */
 function makeDB() {
@@ -307,4 +307,14 @@ test('/stats 返回 daily 数组与 totals', async () => {
   assert.equal(body.totals.sessions, 2);
   assert.equal(body.totals.vv, 4);
   assert.equal(body.avg_duration_sec_per_session, 300);
+});
+
+test('toSafeInt：缺省值走 fallback，不传 0', () => {
+  assert.equal(toSafeInt(null, 30, 1, 90), 30);
+  assert.equal(toSafeInt(undefined, 30, 1, 90), 30);
+  assert.equal(toSafeInt('', 30, 1, 90), 30);
+  assert.equal(toSafeInt('0', 30, 1, 90), 1);
+  assert.equal(toSafeInt('7', 30, 1, 90), 7);
+  assert.equal(toSafeInt('abc', 30, 1, 90), 30);
+  assert.equal(toSafeInt(999, 30, 1, 90), 90);
 });
