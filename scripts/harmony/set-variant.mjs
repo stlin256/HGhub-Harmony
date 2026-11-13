@@ -23,8 +23,9 @@ const VARIANTS = {
   test: { isTest: true, name: 'test' },
 };
 
-const IS_TEST_RE = /(IS_TEST_VARIANT\s*:\s*boolean\s*=\s*)(?:true|false)/;
-const VARIANT_NAME_RE = /(VARIANT_NAME\s*:\s*string\s*=\s*')(?:release|test)(')/;
+// 锚定到声明行（^ + m），避免把注释里的示例文字也改掉。
+const IS_TEST_RE = /^(export const IS_TEST_VARIANT\s*:\s*boolean\s*=\s*)(?:true|false)(\s*;)/m;
+const VARIANT_NAME_RE = /^(export const VARIANT_NAME\s*:\s*string\s*=\s*')(?:release|test)(')(\s*;)/m;
 
 function fail(message) {
   console.error(`[set-variant] 失败：${message}`);
@@ -45,8 +46,8 @@ try {
 }
 
 const next = text
-  .replace(IS_TEST_RE, `$1${target.isTest}`)
-  .replace(VARIANT_NAME_RE, `$1${target.name}$2`);
+  .replace(IS_TEST_RE, `$1${target.isTest}$2`)
+  .replace(VARIANT_NAME_RE, `$1${target.name}$2$3`);
 
 if (next === text) {
   console.log(`[set-variant] 当前已是 ${variant} 变体，无需修改`);
@@ -57,8 +58,8 @@ if (next === text) {
 
 // 回读校验：两个常量必须都落到目标值，避免只改到一半。
 const check = readFileSync(TARGET, 'utf8');
-const isTest = check.match(/IS_TEST_VARIANT\s*:\s*boolean\s*=\s*(true|false)/);
-const name = check.match(/VARIANT_NAME\s*:\s*string\s*=\s*'([^']+)'/);
+const isTest = check.match(/^export const IS_TEST_VARIANT\s*:\s*boolean\s*=\s*(true|false)\s*;/m);
+const name = check.match(/^export const VARIANT_NAME\s*:\s*string\s*=\s*'([^']+)'/m);
 if (!isTest || !name) {
   fail('BuildVariant.ets 中未找到 IS_TEST_VARIANT / VARIANT_NAME，文件可能被改动');
 }
