@@ -18,6 +18,11 @@
 | C4 | **A/B 测试** | 同一功能多组参数，按桶分配，指标按桶对比 |
 | C5 | **资源热更新** | 下发图片/文案等数据资源，校验哈希后本地缓存 |
 | C6 | **强制更新闸门** | 低于最低版本强制提示；新版本按灰度比例提示 |
+| C7 | **远程通知** | 服务端下发通知，可设频率/呈现模式/内容/窗口按钮 |
+| C8 | **设置页远程化** | 远程控制设置页任何文本、新增/隐藏选项、新增二级界面 |
+| C9 | **UI 下发** | 颜色/尺寸/入口显隐/排序等 UI 参数可远程覆盖 |
+| C10 | **配置应用回报** | 每个设置项收到下发策略后回报：生效时间/前值/新值/配置版本 |
+| C11 | **配置唯一 ID** | 每次配置更新与下发都有全局唯一 `config_id` |
 
 附加要求：
 
@@ -371,7 +376,7 @@ bucket = parseInt(sha256(install_id).slice(0, 8), 16) % 100
 仓库根目录 `AGENTS.md`（本地文件，不入库）新增一节：
 
 ```markdown
-## 远程下发约束（强制）
+### 9.1 远程下发约束（强制）
 
 新增以下任意内容时，**必须同时**接入 `ConfigRegistry` 下发，否则 PR 不予合并：
 
@@ -416,7 +421,226 @@ CI 增加检查：`scripts/check/config_coverage.py` —— 扫描新增的 `con
 | 调试菜单泄漏到正式包 | `IS_TEST_VARIANT` 门禁 + 摇一摇仅在首页 Tab |
 | 签名密钥泄漏 | 可轮换；密钥仅作防篡改门槛 |
 
-## 12. 验收标准
+## 12. 远程通知（C7）
+
+### 12.1 数据结构
+
+```json
+"notices": [
+  {
+    "id": "notice_20261113_1",
+    "title": "新版本已发布",
+    "body": "v2.3.0 修复了播放失败问题。",
+    "mode": "dialog",
+    "frequency": "once",
+    "priority": 10,
+    "start_at": 1731600000,
+    "end_at": 1732200000,
+    "target": { "min_ver": "2.2.0", "max_ver": "2.3.9", "platform": "harmonyos" },
+    "window": {
+      "closable": true,
+      "close_label": "知道了",
+      "buttons": [
+        { "type": "copy", "label": "复制链接", "value": "https://..." },
+        { "type": "link", "label": "打开", "url": "https://..." }
+      ]
+    }
+  }
+]
+```
+
+### 12.2 字段约束
+
+| 字段 | 取值 | 默认 |
+|---|---|---|
+| `mode` | `dialog` / `banner` / `fullscreen` / `toast` | `dialog` |
+| `frequency` | `once` / `once_per_day` / `once_per_week` / `every_launch` | `once` |
+| `priority` | 0-100，越大越优先 | `0` |
+| `start_at` / `end_at` | epoch 秒，`0` 表示不限 | `0` |
+| `window.closable` | 是否显示关闭按钮 | `true` |
+| `window.buttons[].type` | `copy` / `link` / `dismiss` | — |
+
+### 12.3 展示规则
+
+1. 过滤：时间窗内 + 版本匹配 + 平台匹配
+2. 频率检查：查本地 `notice_shown_<id>` 记录
+3. 排序：`priority` 降序，同优先级按 `id` 字典序
+4. 每次冷启动最多展示 **1 条**（避免轰炸）
+5. 展示后写本地记录（`id` → 时间戳）
+6. 无 `notices` 或不匹配 → **默认不展示任何东西**
+
+### 12.4 安全
+
+- `body` 纯文本，**不渲染 HTML/Markdown**（防注入）
+- `url` 必须 https 且通过 `isSafeWebUrl` 校验
+- 单条通知上限 2 KB，总数上限 20 条
+- 未知 `mode`/`frequency` 回落默认值
+
+---
+
+## 13. 设置页远程化（C8）
+
+### 13.1 目标
+
+远程可以：
+1. 改任何 section / item 的**标题、副标题**
+2. **隐藏/显示**任何 section / item
+3. **调整顺序**
+4. **新增** item（switch / link / text / slider）
+5. **新增二级界面**（声明式描述，不含代码）
+
+### 13.2 Schema
+
+```json
+"settings": {
+  "sections": [
+    {
+      "id": "play",
+      "title": "播放",
+      "visible": true,
+      "order": 1,
+      "items": [
+        { "id": "prefer_hevc", "visible": true, "order": 1,
+          "title": "优先高清（HEVC）", "subtitle": "有高清源时优先播放" },
+        { "id": "custom_1", "type": "switch", "key": "flag_experimental",
+          "title": "实验功能", "subtitle": "可能不稳定", "order": 99 }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "id": "page_about_plus",
+      "title": "更多信息",
+      "blocks": [
+        { "type": "text", "content": "这是一段远程下发的说明。" },
+        { "type": "link", "title": "项目主页", "url": "https://github.com/..." },
+        { "type": "divider" }
+      ]
+    }
+  ]
+}
+```
+
+### 13.3 渲染规则
+
+- **默认 schema 编译进包**（`SettingsSchema.default()`），远程只做增量覆盖
+- 未在远程出现的 section/item → 用默认值
+- 远程新增的 item → 追加到指定 section
+- 远程新增的 page → 注册为 `ROUTE_DYNAMIC_PAGE`，参数为 `page_id`
+- `blocks` 只支持 4 种：`text` / `link` / `divider` / `image`（**无代码执行**）
+
+### 13.4 安全
+
+- 远程只能**新增** item，不能删除编译期 item（只能 `visible: false`）
+- 新增 item 的 `key` 必须是 `ConfigRegistry` 已注册的 key，否则忽略
+- `blocks` 类型白名单，未知类型忽略
+- 单页 blocks 上限 50，文本上限 2 KB
+
+---
+
+## 14. UI 下发（C9）
+
+### 14.1 可覆盖范围
+
+| 类别 | 示例 | 约束 |
+|---|---|---|
+| 颜色 | `accent` / `surface1` / `textPrimary` | 必须是合法 hex |
+| 尺寸 | `pageInset` / `radiusGroup` | 范围 0-64 |
+| 入口显隐 | `home.hero` / `category.topics` / `profile.follow` | 布尔 |
+| 入口排序 | `tab.order` | 数组，元素为已知 tab id |
+| 文案 | `home.empty_text` | 纯文本，≤200 字 |
+
+### 14.2 实现
+
+- `HgColor` / `HgSpace` 等 token 从 `ConfigRegistry` 读（带默认值）
+- 入口显隐用 `ConfigRegistry.getBool('entry_xxx')`
+- 文案用 `ConfigRegistry.getString('copy_xxx')`
+
+### 14.3 约束
+
+- **不做布局结构下发**（不能改组件树），只做参数覆盖
+- 颜色/尺寸改动立即生效（下次渲染），不需要重启
+- 无下发时行为与现在**完全一致**
+
+---
+
+## 15. 配置应用回报（C10）
+
+### 15.1 目标
+
+每个设置项收到下发策略后，回报：
+- 生效时间
+- 前值 / 新值
+- 配置版本号 + `config_id`
+- 来源（remote / local_override / default）
+
+### 15.2 上报结构
+
+随 `/v1/report` 的日聚合一起上报：
+
+```json
+"config_apply": [
+  {
+    "config_id": "01JABCDEF...",
+    "config_version": 13,
+    "key": "super_resolution",
+    "old": "true",
+    "new": "false",
+    "source": "remote",
+    "applied_at": 1731600123
+  }
+]
+```
+
+### 15.3 服务端存储
+
+```sql
+CREATE TABLE IF NOT EXISTS config_applies (
+  config_id      TEXT NOT NULL,
+  config_version INTEGER NOT NULL,
+  key            TEXT NOT NULL,
+  old_value      TEXT,
+  new_value      TEXT,
+  source         TEXT,
+  count          INTEGER NOT NULL DEFAULT 1,
+  first_at       INTEGER NOT NULL,
+  last_at        INTEGER NOT NULL,
+  PRIMARY KEY (config_id, key, old_value, new_value, source)
+);
+```
+
+按 `(config_id, key, old, new, source)` 聚合计数，不存设备标识。
+
+### 15.4 上报节流
+
+- 只在**值发生变化**时记录（不是每次启动都记）
+- 单次上报最多 20 条，超出丢弃最旧的
+- 上报成功后清空本地队列
+
+---
+
+## 16. 配置唯一 ID（C11）
+
+### 16.1 规则
+
+- 每次 `POST /admin/config` 发布时，服务端生成 **`config_id`**（`crypto.randomUUID()`）
+- `config_id` 全局唯一，**永不复用**
+- `config_version` 单调递增（用于客户端版本比较与 304）
+- 响应同时带两者
+
+### 16.2 客户端用途
+
+- 缓存 `config_id` 用于回报
+- 回报时带上 `config_id` + `config_version`，服务端可精确关联"哪一次下发"被应用
+
+### 16.3 不可变
+
+- 同一 `config_version` 的 `config_id` 不可变
+- 重新发布同 version 会被拒绝（409）
+
+---
+
+## 17. 验收标准
 
 | # | 标准 |
 |---|---|
@@ -432,8 +656,16 @@ CI 增加检查：`scripts/check/config_coverage.py` —— 扫描新增的 `con
 | A10 | 签名校验失败时整包丢弃，不影响启动 |
 | A11 | 全部现有开关/阈值都能在调试菜单里看到并修改 |
 | A12 | CI 的 config 覆盖率检查通过 |
+| A13 | 无 `notices` 下发时，启动不弹任何通知 |
+| A14 | 通知频率控制正确：`once` 只弹一次，`once_per_day` 每天最多一次 |
+| A15 | 通知窗口的关闭/复制/链接按钮按配置呈现，链接过 https 白名单 |
+| A16 | 远程可隐藏设置页 section/item，可新增 switch item 并生效 |
+| A17 | 远程新增的二级页可打开，blocks 按白名单渲染 |
+| A18 | UI 颜色/尺寸覆盖立即生效，无下发时与默认完全一致 |
+| A19 | 每个设置项变化都产生一条 `config_apply` 记录，含 old/new/config_id |
+| A20 | 每次发布生成的 `config_id` 全局唯一，同 version 重发被拒 |
 
-## 13. 实施分期
+## 18. 实施分期
 
 | 期 | 内容 | 产出 |
 |---|---|---|
@@ -447,3 +679,8 @@ CI 增加检查：`scripts/check/config_coverage.py` —— 扫描新增的 `con
 | P7 | 面板：配置版本、灰度、A/B 展示 | Worker |
 | P8 | CI：config 覆盖率检查 | 工程 |
 | P9 | 文档：README 简单提及 + SPEC 收口 | 文档 |
+| P10 | 远程通知：Worker `/v1/config` 的 notices 段 + 客户端 `RemoteNotice` + 展示组件 | 服务端 + 客户端 |
+| P11 | 设置页远程化：`SettingsSchema` + `SettingsPage` 数据驱动改造 + `DynamicPage` | 客户端 |
+| P12 | UI 下发：`HgColor`/`HgSpace` 接 `ConfigRegistry` + 入口显隐/排序 | 客户端 |
+| P13 | 配置应用回报：`ConfigApplyLog` + `/v1/report` 扩展 + 服务端表 + 面板 | 服务端 + 客户端 |
+| P14 | 配置唯一 ID：`/admin/config` 生成 `config_id` + 客户端缓存与回报 | 服务端 + 客户端 |

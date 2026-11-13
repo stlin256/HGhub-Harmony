@@ -116,6 +116,72 @@
 
 ---
 
+## P10 远程通知（子代理 E，依赖 P1+P2）
+
+**写作用域**：`harmony/entry/src/main/ets/services/RemoteNotice.ets`、`components/RemoteNoticeDialog.ets`、`telemetry-worker/src/index.js`（notices 段）
+
+| ID | 任务 | 验收 |
+|---|---|---|
+| P10-1 | Worker：`/v1/config` 支持 `notices` 数组（字段白名单 + 2KB/条、20 条上限） | 单测 |
+| P10-2 | 客户端 `RemoteNotice`：过滤（时间窗/版本/平台）+ 频率控制 + 优先级排序 | 单测 |
+| P10-3 | 展示组件：`dialog` / `banner` / `fullscreen` / `toast` 四种模式 | 逐模式验证 |
+| P10-4 | 窗口按钮：关闭 / 复制 / 链接（https 白名单） | 逐一验证 |
+| P10-5 | 无 notices 时零行为（不弹任何东西） | 断网/空配置验证 |
+
+---
+
+## P11 设置页远程化（子代理 F，依赖 P2）
+
+**写作用域**：`harmony/entry/src/main/ets/state/SettingsSchema.ets`、`pages/SettingsPage.ets`、`pages/DynamicPage.ets`
+
+| ID | 任务 | 验收 |
+|---|---|---|
+| P11-1 | `SettingsSchema`：默认 schema（编译进包）+ 远程增量合并 | 单测 |
+| P11-2 | `SettingsPage` 改数据驱动渲染（section/item 从 schema 来） | 与现有 UI 一致 |
+| P11-3 | 远程隐藏/显示 section/item | 生效 |
+| P11-4 | 远程新增 switch/link item（key 必须是已注册 ConfigKey） | 生效 |
+| P11-5 | `DynamicPage`：渲染远程声明的二级页（text/link/divider/image 白名单） | 可打开 |
+| P11-6 | 无远程 schema 时与现在完全一致 | 回归验证 |
+
+---
+
+## P12 UI 下发（子代理 F，依赖 P2）
+
+**写作用域**：`harmony/entry/src/main/ets/design/HgTokens.ets`、`pages/Index.ets`、`pages/HomePage.ets`、`pages/CategoryPage.ets`、`pages/ProfilePage.ets`
+
+| ID | 任务 | 验收 |
+|---|---|---|
+| P12-1 | `HgColor` / `HgSpace` 关键 token 从 `ConfigRegistry` 读（带默认值） | 无下发时不变 |
+| P12-2 | 入口显隐：首页 Hero、分类页专题、我的页关注 | 可远程关 |
+| P12-3 | 文案覆盖：空态/错误态关键文案 | 可远程改 |
+| P12-4 | 无下发时行为与现在完全一致 | 回归验证 |
+
+---
+
+## P13 配置应用回报（子代理 E，依赖 P2+P4）
+
+**写作用域**：`harmony/entry/src/main/ets/services/ConfigApplyLog.ets`、`services/Analytics.ets`、`telemetry-worker/src/index.js`、`telemetry-worker/migrations/`
+
+| ID | 任务 | 验收 |
+|---|---|---|
+| P13-1 | 客户端 `ConfigApplyLog`：值变化时记录（config_id/version/key/old/new/source/applied_at） | 单测 |
+| P13-2 | 上报：`/v1/report` payload 加 `config_apply` 数组（≤20 条） | 落库 |
+| P13-3 | 服务端表 `config_applies`（按 config_id+key+old+new 聚合计数） | 迁移 |
+| P13-4 | 面板：配置应用明细（哪个 config_id 改了什么、影响多少设备） | 可见 |
+
+---
+
+## P14 配置唯一 ID（子代理 E，依赖 P1）
+
+| ID | 任务 | 验收 |
+|---|---|---|
+| P14-1 | `POST /admin/config` 生成 `config_id = crypto.randomUUID()` | 唯一 |
+| P14-2 | 同 version 重发被拒（409） | 单测 |
+| P14-3 | `/v1/config` 响应带 `config_id` | 客户端可读 |
+| P14-4 | 客户端缓存 `config_id` 用于回报 | 单测 |
+
+---
+
 ## P9 文档收口（Lead）
 
 | ID | 任务 | 验收 |
@@ -129,16 +195,21 @@
 ## 依赖图
 
 ```
-P0 ──┬─→ P1 ──→ P4 ──┐
-     │                ├─→ P7
-     └─→ P2 ──┬─→ P3 ─┘
-              ├─→ P5
-              └─→ P6
+P0 ──┬─→ P1 ──┬─→ P4 ──┐
+     │         ├─→ P14 ─┤
+     │         └────────┼─→ P7
+     └─→ P2 ──┬─→ P3 ───┤
+               ├─→ P5    │
+               ├─→ P6    │
+               ├─→ P10 ──┤
+               ├─→ P11 ──┤
+               ├─→ P12 ──┤
+               └─→ P13 ──┘
 
 P8、P9 收尾
 ```
 
-**可并行**：P1 与 P2 同时开工；P3/P5/P6 在 P2 完成后可并行。
+**可并行**：P1 与 P2 同时开工；P3/P5/P6/P10/P11/P12 在 P2 完成后可并行；P13 需要 P2+P4。
 
 ---
 
@@ -165,3 +236,8 @@ P8、P9 收尾
 | P7 | 待填 | ⬜ |
 | P8 | 待填 | ⬜ |
 | P9 | 待填 | ⬜ |
+| P10 远程通知 | 待填 | ⬜ |
+| P11 设置页远程化 | 待填 | ⬜ |
+| P12 UI 下发 | 待填 | ⬜ |
+| P13 配置应用回报 | 待填 | ⬜ |
+| P14 配置唯一 ID | 待填 | ⬜ |
