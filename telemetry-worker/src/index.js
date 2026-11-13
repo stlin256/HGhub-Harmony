@@ -21,6 +21,8 @@
  *   POST /v1/install   兼容旧路径，等价 /v1/report
  *   GET  /v1/config    远程配置下发（HMAC 签名 + 304 短路 + config_id）
  *   POST /admin/config 发布远程配置（需要 CONFIG_ADMIN_KEY，未配置时回落 STATS_KEY）
+ *   GET  /v1/update    更新闸门（强制/灰度/普通三态判定所需数据）
+ *   POST /admin/release 发布版本信息（鉴权同 /admin/config）
  *   GET  /badge        shields.io endpoint 格式，只显示安装数
  *   GET  /stats?key=   聚合统计（需要 STATS_KEY）
  *   GET  /health       健康检查
@@ -29,6 +31,10 @@
  *   GET /v1/config 从 D1 remote_config 读最新 payload，附加 HMAC-SHA256 签名后下发；
  *   未配置 CONFIG_SIGNING_KEY 时返回 503（不发未签名内容）；cfg 与服务端版本相同返回 304；
  *   响应体带 config_id（每次发布生成的唯一 ID，SPEC §16）。
+ *
+ * 更新闸门（P4）：
+ *   GET /v1/update 从 D1 app_release 读最新版本信息，附加同样的 HMAC-SHA256 签名；
+ *   客户端据 min_version / latest / rollout_pct 判定 force / soft / none 三态。
  */
 
 import DASHBOARD_HTML from './dashboard.generated.js';
@@ -63,6 +69,13 @@ const MAX_CONFIG_APPLY = 20;
 const MAX_CONFIG_ID_LEN = 64;
 const MAX_CONFIG_KEY_LEN = 64;
 const MAX_CONFIG_VALUE_LEN = 128;
+/** 更新闸门（P4）：缓存 5 分钟、响应体上限 8 KB、notes/url 长度上限。 */
+const UPDATE_CACHE_CONTROL = 'public, max-age=300';
+const UPDATE_MAX_BYTES = 8192;
+const RELEASE_ROW_ID = 'global';
+const MAX_RELEASE_NOTES_LEN = 800;
+const MAX_RELEASE_URL_LEN = 512;
+const DEFAULT_RELEASE_URL = 'https://github.com/stlin256/HGhub-Harmony/releases';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VERSION_RE = /^[0-9]{1,3}(\.[0-9]{1,3}){0,3}$/;
@@ -100,6 +113,13 @@ export default {
       // 管理写端点**不套 CORS**：它不需要浏览器跨域调用，
       // 套上 Access-Control-Allow-Origin: * 会让任意网页在知道 key 时跨域写配置。
       return await handleAdminConfig(request, env);
+    }
+    if (url.pathname === '/v1/update' && request.method === 'GET') {
+      return withCors(await handleUpdate(env));
+    }
+    if (url.pathname === '/admin/release' && request.method === 'POST') {
+      // 同 /admin/config：管理写端点不套 CORS。
+      return await handleAdminRelease(request, env);
     }
     if (url.pathname === '/badge' && request.method === 'GET') {
       return withCors(await handleBadge(env));
@@ -565,6 +585,24 @@ async function handleConfig(url, env) {
 }
 
 /**
+ * 管理写端点鉴权：x-admin-key 必须等于 CONFIG_ADMIN_KEY（未配置时回落 STATS_KEY）。
+ * 返回 null 表示通过；否则返回可直接下发的错误响应。
+ *
+ * 写权限优先用独立的 CONFIG_ADMIN_KEY：STATS_KEY 是只读统计口令，曾出现在
+ * /dashboard?key= 的 URL 里，复用它做写权限会把「读统计」的泄漏面放大成「写配置」。
+ */
+function adminAuthError(request, env) {
+  const adminKey = (env.CONFIG_ADMIN_KEY || '').length > 0 ? env.CONFIG_ADMIN_KEY : (env.STATS_KEY || '');
+  if (adminKey.length === 0) {
+    return json({ error: 'admin_unavailable' }, 503);
+  }
+  if (!timingSafeEqual(request.headers.get('x-admin-key') || '', adminKey)) {
+    return json({ error: 'forbidden' }, 401);
+  }
+  return null;
+}
+
+/**
  * POST /admin/config
  * header: x-admin-key = CONFIG_ADMIN_KEY（未配置时回落 STATS_KEY）
  * body: { version: 12, payload: { ... } }
@@ -575,15 +613,9 @@ async function handleConfig(url, env) {
  * 同一 version 重发返回 409，因此同一版本的 config_id 不可变（SPEC §16）。
  */
 async function handleAdminConfig(request, env) {
-  // 写权限用独立的 CONFIG_ADMIN_KEY；未配置时回落到 STATS_KEY 以兼容旧部署。
-  // 建议生产环境单独配置：STATS_KEY 是只读统计口令，曾出现在 /dashboard?key= 的 URL 里，
-  // 复用它做写权限会把「读统计」的泄漏面放大成「配置注入」。
-  const adminKey = (env.CONFIG_ADMIN_KEY || '').length > 0 ? env.CONFIG_ADMIN_KEY : (env.STATS_KEY || '');
-  if (adminKey.length === 0) {
-    return json({ error: 'admin_unavailable' }, 503);
-  }
-  if (!timingSafeEqual(request.headers.get('x-admin-key') || '', adminKey)) {
-    return json({ error: 'forbidden' }, 401);
+  const authError = adminAuthError(request, env);
+  if (authError !== null) {
+    return authError;
   }
 
   const declared = Number(request.headers.get('content-length') || '0');
@@ -678,6 +710,156 @@ async function handleAdminConfig(request, env) {
 
   return json({ ok: true, version, config_id: configId, updated_at: now }, 200,
     { 'cache-control': 'no-store' });
+}
+
+/* ── 更新闸门（P4）──────────────────────────────────── */
+
+/** 下载地址白名单：只接受 https 外链，其余回落官方 Release 页。 */
+function releaseUrlOf(value) {
+  const url = typeof value === 'string' ? value.trim() : '';
+  if (url.length === 0 || url.length > MAX_RELEASE_URL_LEN || !url.startsWith('https://')) {
+    return DEFAULT_RELEASE_URL;
+  }
+  return url;
+}
+
+/**
+ * GET /v1/update?ver=&bucket=
+ *
+ * 从 D1 app_release 读最新版本信息，附加 HMAC-SHA256 签名后下发。
+ * 客户端据 min_version / latest / rollout_pct 判定 force / soft / none 三态：
+ *   force = current < min_version（强制更新）
+ *   soft  = current < latest && bucket < rollout_pct（灰度提示）
+ * 未配置 CONFIG_SIGNING_KEY → 503（不发未签名内容）；无发布记录 → 404。
+ *
+ * ver / bucket 由客户端带上，服务端当前不做定向（rollout_pct 原样下发，客户端分桶判定）。
+ */
+async function handleUpdate(env) {
+  const signingKey = env.CONFIG_SIGNING_KEY || '';
+  if (signingKey.length === 0) {
+    return json({ error: 'update_unavailable' }, 503);
+  }
+  if (signingKey.length < 32) {
+    return json({ error: 'update_unavailable', reason: 'signing_key_too_short' }, 503);
+  }
+
+  let row;
+  try {
+    row = await env.DB.prepare(
+      'SELECT latest, min_version, rollout_pct, notes, url, updated_at FROM app_release WHERE id = ? ORDER BY updated_at DESC LIMIT 1'
+    ).bind(RELEASE_ROW_ID).first();
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  if (!row) {
+    return json({ error: 'release_not_found' }, 404);
+  }
+
+  const latest = typeof row.latest === 'string' ? row.latest.trim() : '';
+  const minVersion = typeof row.min_version === 'string' ? row.min_version.trim() : '';
+  if (!VERSION_RE.test(latest) || !VERSION_RE.test(minVersion)) {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  const rolloutPct = toSafeInt(row.rollout_pct, 0, 0, 100);
+  const body = {
+    latest,
+    min_version: minVersion,
+    rollout_pct: rolloutPct,
+    notes: clipText(row.notes, MAX_RELEASE_NOTES_LEN),
+    url: releaseUrlOf(row.url),
+  };
+
+  // 签名覆盖「去掉 sig 的完整响应体」，客户端删掉 sig 后重新序列化即可校验。
+  const unsigned = JSON.stringify(body);
+  const sig = (await hmacSha256Hex(signingKey, unsigned)).slice(0, 32);
+  const out = JSON.stringify({ ...body, sig });
+  if (new TextEncoder().encode(out).length > UPDATE_MAX_BYTES) {
+    return json({ error: 'update_too_large' }, 500);
+  }
+
+  return new Response(out, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': UPDATE_CACHE_CONTROL,
+    },
+  });
+}
+
+/**
+ * POST /admin/release
+ * header: x-admin-key = CONFIG_ADMIN_KEY（未配置时回落 STATS_KEY）
+ * body: { latest: "2.3.0", min_version: "2.1.0", rollout_pct: 20, notes?: "...", url?: "https://..." }
+ *
+ * 覆盖式写入（单行 id='global'）：版本信息不是配置，没有单调版本语义，
+ * 每次发布直接覆盖；rollout_pct 限制 0-100，url 只接受 https。
+ */
+async function handleAdminRelease(request, env) {
+  const authError = adminAuthError(request, env);
+  if (authError !== null) {
+    return authError;
+  }
+
+  const declared = Number(request.headers.get('content-length') || '0');
+  if (declared > MAX_ADMIN_BODY_BYTES) {
+    return json({ error: 'payload_too_large' }, 413);
+  }
+  let raw;
+  try {
+    raw = await request.text();
+  } catch {
+    return json({ error: 'bad_body' }, 400);
+  }
+  if (raw.length === 0 || raw.length > MAX_ADMIN_BODY_BYTES) {
+    return json({ error: 'payload_too_large' }, 413);
+  }
+
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ error: 'bad_json' }, 400);
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return json({ error: 'bad_json' }, 400);
+  }
+
+  const latest = typeof body.latest === 'string' ? body.latest.trim() : '';
+  const minVersion = typeof body.min_version === 'string' ? body.min_version.trim() : '';
+  if (!VERSION_RE.test(latest) || !VERSION_RE.test(minVersion)) {
+    return json({ error: 'bad_version' }, 400);
+  }
+  const rolloutPct = body.rollout_pct;
+  if (typeof rolloutPct !== 'number' || !Number.isSafeInteger(rolloutPct) ||
+      rolloutPct < 0 || rolloutPct > 100) {
+    return json({ error: 'bad_rollout_pct' }, 400);
+  }
+  const notes = clipText(body.notes, MAX_RELEASE_NOTES_LEN);
+  const rawUrl = typeof body.url === 'string' ? body.url.trim() : '';
+  if (rawUrl.length > 0 && (rawUrl.length > MAX_RELEASE_URL_LEN || !rawUrl.startsWith('https://'))) {
+    return json({ error: 'bad_url' }, 400);
+  }
+  const url = rawUrl.length > 0 ? rawUrl : DEFAULT_RELEASE_URL;
+
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      `INSERT INTO app_release (id, latest, min_version, rollout_pct, notes, url, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         latest = excluded.latest,
+         min_version = excluded.min_version,
+         rollout_pct = excluded.rollout_pct,
+         notes = excluded.notes,
+         url = excluded.url,
+         updated_at = excluded.updated_at`
+    ).bind(RELEASE_ROW_ID, latest, minVersion, rolloutPct, notes, url, now).run();
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+
+  return json({ ok: true, latest, min_version: minVersion, rollout_pct: rolloutPct, updated_at: now },
+    200, { 'cache-control': 'no-store' });
 }
 
 /* ── 徽章（只显示安装数）───────────────────────────── */

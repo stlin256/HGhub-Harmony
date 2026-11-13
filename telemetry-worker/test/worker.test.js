@@ -13,6 +13,7 @@ function makeDB() {
   const crashVersions = new Map();
   const remoteConfig = new Map();
   const configApplies = new Map();
+  const appRelease = new Map();
   return {
     devices,
     rates,
@@ -22,6 +23,7 @@ function makeDB() {
     crashVersions,
     remoteConfig,
     configApplies,
+    appRelease,
     prepare(sql) {
       let args = [];
       const stmt = {
@@ -136,6 +138,10 @@ function makeDB() {
               if (max === null || row.version > max) max = row.version;
             }
             return { max_version: max };
+          }
+          if (sql.includes('FROM app_release')) {
+            const row = appRelease.get(args[0]);
+            return row ? { ...row } : null;
           }
           return null;
         },
@@ -278,6 +284,14 @@ function makeDB() {
             }
             remoteConfig.set(id, {
               id, version, payload, updated_at: updatedAt, config_id: configId || '',
+            });
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.includes('INSERT INTO app_release')) {
+            const [id, latest, minVersion, rolloutPct, notes, url, updatedAt] = args;
+            appRelease.set(id, {
+              id, latest, min_version: minVersion, rollout_pct: rolloutPct,
+              notes, url, updated_at: updatedAt,
             });
             return { success: true, meta: { changes: 1 } };
           }
@@ -1370,4 +1384,151 @@ test('/stats：config_apply 段按 config_id 分组输出', async () => {
   assert.equal(superRes.new, 'false');
   assert.equal(superRes.source, 'remote');
   assert.equal(superRes.count, 1);
+});
+
+/* ── 更新闸门（/v1/update）────────────────────────── */
+
+const RELEASE_URL = 'https://github.com/stlin256/HGhub-Harmony/releases/tag/v2.3.0';
+
+/** 直接向 mock D1 写入一条版本信息（等价于一次成功的 POST /admin/release）。 */
+function seedRelease(db, fields) {
+  db.appRelease.set('global', {
+    id: 'global',
+    latest: '2.3.0',
+    min_version: '2.1.0',
+    rollout_pct: 20,
+    notes: '修复若干问题',
+    url: RELEASE_URL,
+    updated_at: 1731600000,
+    ...fields,
+  });
+}
+
+function updateGet(query = '') {
+  return new Request(`https://w/v1/update?${query}`);
+}
+
+function releasePost(body, headers = {}) {
+  return new Request('https://w/admin/release', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+
+test('/v1/update：返回版本信息 + sig', async () => {
+  const e = configEnv();
+  seedRelease(e.DB, {});
+  const res = await worker.fetch(updateGet('ver=2.2.0&bucket=37'), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=300');
+  assert.equal(res.headers.get('access-control-allow-origin'), '*');
+  const body = await res.json();
+  assert.equal(body.latest, '2.3.0');
+  assert.equal(body.min_version, '2.1.0');
+  assert.equal(body.rollout_pct, 20);
+  assert.equal(body.notes, '修复若干问题');
+  assert.equal(body.url, RELEASE_URL);
+  assert.match(body.sig, /^[0-9a-f]{32}$/);
+});
+
+test('/v1/update：sig 是 body_without_sig 的 HMAC-SHA256 前 32 hex', async () => {
+  const e = configEnv();
+  seedRelease(e.DB, {});
+  const body = await (await worker.fetch(updateGet(), e, ctx)).json();
+  const unsigned = { ...body };
+  delete unsigned.sig;
+  const expected = (await hmacSha256Hex(CONFIG_KEY, JSON.stringify(unsigned))).slice(0, 32);
+  assert.equal(body.sig, expected);
+});
+
+test('/v1/update：版本信息被篡改后原签名不再匹配', async () => {
+  const e = configEnv();
+  seedRelease(e.DB, {});
+  const body = await (await worker.fetch(updateGet(), e, ctx)).json();
+  const tampered = { ...body, min_version: '9.9.9' };
+  delete tampered.sig;
+  const tamperedSig = (await hmacSha256Hex(CONFIG_KEY, JSON.stringify(tampered))).slice(0, 32);
+  assert.notEqual(tamperedSig, body.sig);
+});
+
+test('/v1/update：无发布记录返回 404', async () => {
+  const e = configEnv();
+  const res = await worker.fetch(updateGet(), e, ctx);
+  assert.equal(res.status, 404);
+  assert.equal((await res.json()).error, 'release_not_found');
+});
+
+test('/v1/update：未配置 CONFIG_SIGNING_KEY 返回 503', async () => {
+  const e = env();
+  seedRelease(e.DB, {});
+  const res = await worker.fetch(updateGet(), e, ctx);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'update_unavailable');
+});
+
+test('/v1/update：rollout_pct 越界被裁剪到 0-100', async () => {
+  const e = configEnv();
+  seedRelease(e.DB, { rollout_pct: 150 });
+  assert.equal((await (await worker.fetch(updateGet(), e, ctx)).json()).rollout_pct, 100);
+  seedRelease(e.DB, { rollout_pct: -5 });
+  assert.equal((await (await worker.fetch(updateGet(), e, ctx)).json()).rollout_pct, 0);
+});
+
+test('/v1/update：非 https 的 url 回落官方 Release 页', async () => {
+  const e = configEnv();
+  seedRelease(e.DB, { url: 'http://evil.example/x' });
+  const body = await (await worker.fetch(updateGet(), e, ctx)).json();
+  assert.equal(body.url, 'https://github.com/stlin256/HGhub-Harmony/releases');
+});
+
+test('/admin/release：鉴权通过后写入并可被 /v1/update 读取', async () => {
+  const e = configEnv();
+  const res = await worker.fetch(releasePost({
+    latest: '2.4.0', min_version: '2.2.0', rollout_pct: 50,
+    notes: '新版本说明', url: RELEASE_URL,
+  }, { 'x-admin-key': 'k' }), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.latest, '2.4.0');
+  assert.equal(e.DB.appRelease.get('global').min_version, '2.2.0');
+
+  const got = await (await worker.fetch(updateGet('ver=2.3.0&bucket=0'), e, ctx)).json();
+  assert.equal(got.latest, '2.4.0');
+  assert.equal(got.min_version, '2.2.0');
+  assert.equal(got.rollout_pct, 50);
+});
+
+test('/admin/release：缺少或错误 x-admin-key 返回 401，未配置管理密钥返回 503', async () => {
+  const e = configEnv();
+  assert.equal((await worker.fetch(releasePost({ latest: '2.4.0', min_version: '2.2.0', rollout_pct: 0 }), e, ctx)).status, 401);
+  assert.equal((await worker.fetch(releasePost(
+    { latest: '2.4.0', min_version: '2.2.0', rollout_pct: 0 }, { 'x-admin-key': 'wrong' }), e, ctx)).status, 401);
+
+  const noKey = configEnv({ STATS_KEY: '' });
+  assert.equal((await worker.fetch(releasePost(
+    { latest: '2.4.0', min_version: '2.2.0', rollout_pct: 0 }, { 'x-admin-key': '' }), noKey, ctx)).status, 503);
+});
+
+test('/admin/release：非法版本 / rollout / url 被拒', async () => {
+  const e = configEnv();
+  const h = { 'x-admin-key': 'k' };
+  assert.equal((await worker.fetch(releasePost({ latest: 'x.y', min_version: '2.1.0', rollout_pct: 0 }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(releasePost({ latest: '2.4.0', min_version: '', rollout_pct: 0 }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(releasePost({ latest: '2.4.0', min_version: '2.1.0', rollout_pct: 101 }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(releasePost({ latest: '2.4.0', min_version: '2.1.0', rollout_pct: 1.5 }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(releasePost(
+    { latest: '2.4.0', min_version: '2.1.0', rollout_pct: 0, url: 'http://evil.example/x' }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(releasePost('{bad', h), e, ctx)).status, 400);
+});
+
+test('/admin/release：rollout_pct 边界 0 与 100 可写入', async () => {
+  const e = configEnv();
+  const h = { 'x-admin-key': 'k' };
+  assert.equal((await worker.fetch(releasePost({ latest: '2.4.0', min_version: '2.1.0', rollout_pct: 0 }, h), e, ctx)).status, 200);
+  assert.equal((await (await worker.fetch(updateGet(), e, ctx)).json()).rollout_pct, 0);
+  assert.equal((await worker.fetch(releasePost({ latest: '2.4.0', min_version: '2.1.0', rollout_pct: 100 }, h), e, ctx)).status, 200);
+  assert.equal((await (await worker.fetch(updateGet(), e, ctx)).json()).rollout_pct, 100);
 });
