@@ -133,7 +133,7 @@ export struct AboutPage {
             .padding({ top: HgSpace.xl, bottom: HgSpace.s })
 
             // 简介
-            Text('黄果短剧的 HarmonyOS 原生客户端：ArkTS / ArkUI 直接实现，不套 WebView、不内嵌 H5。')
+            Text('黄果短剧的 HarmonyOS 客户端：发现、搜索、榜单、专题与沉浸播放一站完成，支持端侧个性化推荐、画质切换、画中画、应用接续与投播。')
               .width('100%')
               .fontSize(HgFont.secondary)
               .lineHeight(HgFont.lineSecondary)
