@@ -16,8 +16,16 @@
  * - 安全相关项（匿名统计 / 崩溃上报）标记 remoteTightenOnly：远程只能关、不能开；
  * - 未知 key 一律忽略/返回 undefined，不抛异常。
  *
+ * 扩展能力（SPEC §12-§16 / C7-C11）：
+ * - 变更记录：applyRemote / setLocalOverride / clearLocalOverride 导致值实际变化时，
+ *   记录 ConfigChange（含 config_id / 版本 / 旧值 / 新值 / 来源 / 生效时间），
+ *   takeChanges() 取走供 P13 配置应用回报；队列上限 50，相同值不记；
+ * - ui / settings / notices 段原样保留，分别通过 uiColor / uiSize / entryVisible /
+ *   settingsSchema / notices 读取，供 P10（通知）/ P11（设置页远程化）/ P12（UI 下发）消费。
+ *
  * 隐私边界：本文件是纯内存合并逻辑，不联网、不读设备标识、不上报任何值；
- * 用户偏好层只读本地 Prefs（键名与 UserPrefs 持久化的键一致），不把值发给服务端。
+ * 用户偏好层只读本地 Prefs（键名与 UserPrefs 持久化的键一致），不把值发给服务端；
+ * 变更记录只存在内存里，由 P13 决定上报时机与脱敏方式。
  *
  * 为什么用户偏好层直接读 Prefs 而不是 UserPrefs：
  * - P3 会让 UserPrefs 改为从本注册表读，若这里反向 import UserPrefs 会形成循环依赖；
@@ -51,6 +59,48 @@ export interface ConfigDef {
   remoteTightenOnly?: boolean;
   /** string 类型允许的枚举值（未定义表示不限制）。 */
   options?: string[];
+}
+
+/**
+ * 一次配置值变化记录（供 P13 配置应用回报使用）。
+ * 只在值**真的变化**时产生；相同值重复下发不记录。
+ */
+export interface ConfigChange {
+  /** 下发配置唯一 ID（config_id；非远程变化时为空串）。 */
+  configId: string;
+  /** 下发配置版本（非远程变化时为 0）。 */
+  configVersion: number;
+  /** 配置键。 */
+  key: string;
+  /** 字符串化的旧值（true/false/数字/字符串）。 */
+  oldValue: string;
+  /** 字符串化的新值。 */
+  newValue: string;
+  /** 变化来源：'remote' | 'local_override' | 'default'。 */
+  source: string;
+  /** 生效时间（epoch 秒）。 */
+  appliedAt: number;
+}
+
+/** UI 下发覆盖段（SPEC §14）：颜色 / 尺寸 / 入口显隐。 */
+export interface RemoteUiOverrides {
+  colors?: Record<string, string> | null;
+  sizes?: Record<string, number> | null;
+  entries?: Record<string, boolean> | null;
+}
+
+/** 远程配置包中非 key/value 的段（SPEC §12-§16）：config_id / ui / settings / notices。 */
+export interface RemoteConfigMeta {
+  /** 全局唯一配置 ID（P14 起服务端下发；旧版服务端可能为空串）。 */
+  configId: string;
+  /** 配置版本。 */
+  configVersion: number;
+  /** UI 覆盖段（原样保留，读取时逐项校验）。 */
+  ui?: RemoteUiOverrides | null;
+  /** 设置页 schema（原样保留，P11 消费）。 */
+  settings?: Object | null;
+  /** 远程通知数组（原样保留，P10 消费）。 */
+  notices?: Object[] | null;
 }
 
 /**
@@ -120,6 +170,12 @@ export class ConfigKey {
 
 /** 本地覆盖持久化键（测试变体调试菜单写入）。 */
 const KEY_LOCAL_OVERRIDES: string = 'config_local_overrides';
+
+/** 变更记录队列上限：超出丢最旧（P13 单次上报最多 20 条，留足余量）。 */
+const MAX_CHANGES: number = 50;
+/** UI 尺寸覆盖的合法范围（SPEC §14.1：尺寸 0-64）。 */
+const UI_SIZE_MIN: number = 0;
+const UI_SIZE_MAX: number = 64;
 
 /* ── 定义构造工具（让 DEFS 表保持一屏可读）────────── */
 
@@ -285,6 +341,29 @@ function defaultNumber(def: ConfigDef): number {
   return typeof value === 'number' ? value : 0;
 }
 
+/** 配置值 → 字符串（变更记录用）。 */
+function stringifyValue(value: ConfigValue): string {
+  return value.toString();
+}
+
+/** 合法 hex 颜色：#RGB / #RRGGBB / #AARRGGBB（SPEC §14.1：必须是合法 hex）。 */
+function isHexColor(value: string): boolean {
+  if (value.length !== 4 && value.length !== 7 && value.length !== 9) {
+    return false;
+  }
+  if (value.charAt(0) !== '#') {
+    return false;
+  }
+  for (let i = 1; i < value.length; i++) {
+    const code: number = value.charCodeAt(i);
+    const digit: boolean = (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102);
+    if (!digit) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * 配置注册表门面。
  * 纯逻辑、无 UI 依赖：只依赖 Prefs（持久化）与 AppStorage（reduce_motion 兼容读取）。
@@ -294,6 +373,22 @@ export class ConfigRegistry {
   private static remote: Map<string, ConfigValue> = new Map<string, ConfigValue>();
   /** 本地覆盖层（懒加载自 Prefs）。 */
   private static local: Map<string, ConfigValue> | null = null;
+  /** 当前远程配置 ID（config_id；无下发为空串）。 */
+  private static remoteConfigId: string = '';
+  /** 当前远程配置版本（无下发为 0）。 */
+  private static remoteConfigVersion: number = 0;
+  /** UI 颜色覆盖（仅合法 hex）。 */
+  private static uiColors: Record<string, string> = {};
+  /** UI 尺寸覆盖（已裁剪到 0-64）。 */
+  private static uiSizes: Record<string, number> = {};
+  /** 入口显隐覆盖。 */
+  private static uiEntries: Record<string, boolean> = {};
+  /** 设置页 schema（原样保留）。 */
+  private static settingsValue: Object | null = null;
+  /** 远程通知数组（原样保留）。 */
+  private static noticeList: Object[] = [];
+  /** 待上报的配置变化记录（FIFO，上限 MAX_CHANGES）。 */
+  private static changes: ConfigChange[] = [];
 
   /** 全部注册项（返回副本，调用方可安全遍历/排序）。 */
   static allDefs(): ConfigDef[] {
@@ -354,7 +449,8 @@ export class ConfigRegistry {
 
   /**
    * 写本地覆盖（调试菜单/测试变体用）。
-   * 值会按 ConfigDef 校验：未知 key、类型不符、超出范围/枚举都返回 false 且不写入。
+   * 值会按 ConfigDef 校验：未知 key、类型不符、超出范围/枚举都返回 false 且不写入；
+   * 实际生效值发生变化时记一条 ConfigChange（source='local_override'）。
    */
   static setLocalOverride(key: string, value: ConfigValue): boolean {
     const def: ConfigDef | undefined = DEF_MAP.get(key);
@@ -365,20 +461,51 @@ export class ConfigRegistry {
     if (coerced === null) {
       return false;
     }
+    const oldValue: ConfigValue = ConfigRegistry.effective(def);
     ConfigRegistry.localMap().set(key, coerced);
     ConfigRegistry.persistLocal();
+    const newValue: ConfigValue = ConfigRegistry.effective(def);
+    if (oldValue !== newValue) {
+      ConfigRegistry.pushChange(key, oldValue, newValue, 'local_override');
+    }
     return true;
   }
 
-  /** 清本地覆盖：传 key 只清一项，不传清全部。 */
+  /** 清本地覆盖：传 key 只清一项，不传清全部；实际生效值变化时记变更。 */
   static clearLocalOverride(key?: string): void {
     const map: Map<string, ConfigValue> = ConfigRegistry.localMap();
+    const affected: string[] = [];
+    if (key === undefined) {
+      map.forEach((_value: ConfigValue, mapKey: string) => {
+        affected.push(mapKey);
+      });
+    } else if (map.has(key)) {
+      affected.push(key);
+    }
+    const before: Map<string, ConfigValue> = new Map<string, ConfigValue>();
+    for (let i = 0; i < affected.length; i++) {
+      const def: ConfigDef | undefined = DEF_MAP.get(affected[i]);
+      if (def !== undefined) {
+        before.set(affected[i], ConfigRegistry.effective(def));
+      }
+    }
     if (key === undefined) {
       map.clear();
     } else {
       map.delete(key);
     }
     ConfigRegistry.persistLocal();
+    for (let i = 0; i < affected.length; i++) {
+      const def: ConfigDef | undefined = DEF_MAP.get(affected[i]);
+      const oldValue: ConfigValue | undefined = before.get(affected[i]);
+      if (def === undefined || oldValue === undefined) {
+        continue;
+      }
+      const newValue: ConfigValue = ConfigRegistry.effective(def);
+      if (oldValue !== newValue) {
+        ConfigRegistry.pushChange(affected[i], oldValue, newValue, 'local_override');
+      }
+    }
   }
 
   /** 该 key 是否有本地覆盖。 */
@@ -386,10 +513,36 @@ export class ConfigRegistry {
     return ConfigRegistry.localMap().has(key);
   }
 
-  /** 写远程层（整包替换：先清空再写入，避免上一版残留）。返回真正生效的项数。 */
-  static applyRemote(values: Record<string, ConfigValue>): number {
-    ConfigRegistry.remote.clear();
+  /**
+   * 写远程层（整包替换：先清空再写入，避免上一版残留）。返回真正生效的项数。
+   * meta 携带 config_id / 版本 / ui / settings / notices；缺省时清空这些扩展段。
+   * 生效值实际变化的 key 会记一条 ConfigChange（source='remote'）；
+   * recordChanges=false 用于启动回放缓存——同一份配置每次启动都会「从默认值变为缓存值」，
+   * 若记录会导致 P13 重复上报（SPEC §15.4：不是每次启动都记）。
+   */
+  static applyRemote(values: Record<string, ConfigValue>, meta?: RemoteConfigMeta | null,
+    recordChanges: boolean = true): number {
+    // 先记录受影响 key 的旧生效值（旧远程层 + 新下发 key 的并集）。
+    const affected: Set<string> = new Set<string>();
+    ConfigRegistry.remote.forEach((_value: ConfigValue, remoteKey: string) => {
+      affected.add(remoteKey);
+    });
     const keys: string[] = Object.keys(values);
+    for (let i = 0; i < keys.length; i++) {
+      if (DEF_MAP.has(keys[i])) {
+        affected.add(keys[i]);
+      }
+    }
+    const before: Map<string, ConfigValue> = new Map<string, ConfigValue>();
+    affected.forEach((affectedKey: string) => {
+      const def: ConfigDef | undefined = DEF_MAP.get(affectedKey);
+      if (def !== undefined) {
+        before.set(affectedKey, ConfigRegistry.effective(def));
+      }
+    });
+
+    // 应用远程层（整包替换）。
+    ConfigRegistry.remote.clear();
     let applied: number = 0;
     for (let i = 0; i < keys.length; i++) {
       const key: string = keys[i];
@@ -407,12 +560,81 @@ export class ConfigRegistry {
       ConfigRegistry.remote.set(key, coerced);
       applied++;
     }
+
+    // 记录本次下发的元信息与扩展段。
+    ConfigRegistry.remoteConfigId = meta !== undefined && meta !== null ? meta.configId : '';
+    ConfigRegistry.remoteConfigVersion =
+      meta !== undefined && meta !== null && typeof meta.configVersion === 'number' && !isNaN(meta.configVersion)
+        ? meta.configVersion : 0;
+    ConfigRegistry.applySections(meta);
+
+    // 对比新旧生效值，只记录真正变化的项。
+    if (recordChanges) {
+      affected.forEach((affectedKey: string) => {
+        const def: ConfigDef | undefined = DEF_MAP.get(affectedKey);
+        const oldValue: ConfigValue | undefined = before.get(affectedKey);
+        if (def === undefined || oldValue === undefined) {
+          return;
+        }
+        const newValue: ConfigValue = ConfigRegistry.effective(def);
+        if (oldValue !== newValue) {
+          ConfigRegistry.pushChange(affectedKey, oldValue, newValue, 'remote');
+        }
+      });
+    }
     return applied;
   }
 
-  /** 清空远程层（签名失败/缓存失效时回落到默认值）。 */
+  /**
+   * 清空远程层与扩展段（签名失败/缓存失效/调试清缓存时回落到默认值）。
+   * 不产生变更记录：回退默认值不算「下发生效」，避免启动兜底时产生噪音。
+   */
   static clearRemote(): void {
     ConfigRegistry.remote.clear();
+    ConfigRegistry.remoteConfigId = '';
+    ConfigRegistry.remoteConfigVersion = 0;
+    ConfigRegistry.uiColors = {};
+    ConfigRegistry.uiSizes = {};
+    ConfigRegistry.uiEntries = {};
+    ConfigRegistry.settingsValue = null;
+    ConfigRegistry.noticeList = [];
+  }
+
+  /** 取走待上报的配置变化记录（取走即清空，供 P13 上报）。 */
+  static takeChanges(): ConfigChange[] {
+    const out: ConfigChange[] = ConfigRegistry.changes.slice(0);
+    ConfigRegistry.changes = [];
+    return out;
+  }
+
+  /* ── UI / 设置页 / 通知 读取接口（P10/P11/P12 消费）── */
+
+  /** UI 颜色覆盖；未下发/非法值返回 fallback。 */
+  static uiColor(key: string, fallback: string): string {
+    const value: string | undefined = ConfigRegistry.uiColors[key];
+    return typeof value === 'string' ? value : fallback;
+  }
+
+  /** UI 尺寸覆盖（已裁剪到 0-64）；未下发返回 fallback。 */
+  static uiSize(key: string, fallback: number): number {
+    const value: number | undefined = ConfigRegistry.uiSizes[key];
+    return typeof value === 'number' ? value : fallback;
+  }
+
+  /** 入口是否可见；未下发默认 true（无下发时行为与现在完全一致）。 */
+  static entryVisible(key: string): boolean {
+    const value: boolean | undefined = ConfigRegistry.uiEntries[key];
+    return typeof value === 'boolean' ? value : true;
+  }
+
+  /** 远程设置页 schema（原样返回；未下发返回 null）。 */
+  static settingsSchema(): Object | null {
+    return ConfigRegistry.settingsValue;
+  }
+
+  /** 远程通知数组（原样返回副本；未下发返回空数组）。 */
+  static notices(): Object[] {
+    return ConfigRegistry.noticeList.slice(0);
   }
 
   /** 当前生效配置快照（key → 值），供调试菜单导出/诊断。 */
@@ -426,6 +648,99 @@ export class ConfigRegistry {
   }
 
   /* ── 内部 ─────────────────────────────────────────── */
+
+  /** 应用远程配置包的扩展段（ui / settings / notices）；缺省/非法类型清空对应段。 */
+  private static applySections(meta: RemoteConfigMeta | null | undefined): void {
+    ConfigRegistry.uiColors = {};
+    ConfigRegistry.uiSizes = {};
+    ConfigRegistry.uiEntries = {};
+    ConfigRegistry.settingsValue = null;
+    ConfigRegistry.noticeList = [];
+    if (meta === undefined || meta === null) {
+      return;
+    }
+    const ui: RemoteUiOverrides | null | undefined = meta.ui;
+    if (ui !== undefined && ui !== null) {
+      ConfigRegistry.mergeUiColors(ui.colors);
+      ConfigRegistry.mergeUiSizes(ui.sizes);
+      ConfigRegistry.mergeUiEntries(ui.entries);
+    }
+    const settings: Object | null | undefined = meta.settings;
+    if (settings !== undefined && settings !== null && typeof settings === 'object' && !Array.isArray(settings)) {
+      ConfigRegistry.settingsValue = settings;
+    }
+    const notices: Object[] | null | undefined = meta.notices;
+    if (notices !== undefined && notices !== null && Array.isArray(notices)) {
+      ConfigRegistry.noticeList = notices.slice(0);
+    }
+  }
+
+  /** 合并 UI 颜色覆盖：只接受合法 hex，非法值忽略。 */
+  private static mergeUiColors(colors: Record<string, string> | null | undefined): void {
+    if (colors === undefined || colors === null) {
+      return;
+    }
+    const keys: string[] = Object.keys(colors);
+    for (let i = 0; i < keys.length; i++) {
+      const value: string = colors[keys[i]];
+      if (typeof value === 'string' && isHexColor(value)) {
+        ConfigRegistry.uiColors[keys[i]] = value;
+      }
+    }
+  }
+
+  /** 合并 UI 尺寸覆盖：只接受有限数字，并裁剪到 0-64。 */
+  private static mergeUiSizes(sizes: Record<string, number> | null | undefined): void {
+    if (sizes === undefined || sizes === null) {
+      return;
+    }
+    const keys: string[] = Object.keys(sizes);
+    for (let i = 0; i < keys.length; i++) {
+      const value: number = sizes[keys[i]];
+      if (typeof value !== 'number' || isNaN(value)) {
+        continue;
+      }
+      let size: number = value;
+      if (size < UI_SIZE_MIN) {
+        size = UI_SIZE_MIN;
+      }
+      if (size > UI_SIZE_MAX) {
+        size = UI_SIZE_MAX;
+      }
+      ConfigRegistry.uiSizes[keys[i]] = size;
+    }
+  }
+
+  /** 合并入口显隐覆盖：只接受布尔值。 */
+  private static mergeUiEntries(entries: Record<string, boolean> | null | undefined): void {
+    if (entries === undefined || entries === null) {
+      return;
+    }
+    const keys: string[] = Object.keys(entries);
+    for (let i = 0; i < keys.length; i++) {
+      const value: boolean = entries[keys[i]];
+      if (typeof value === 'boolean') {
+        ConfigRegistry.uiEntries[keys[i]] = value;
+      }
+    }
+  }
+
+  /** 追加一条变更记录（FIFO，超过上限丢最旧）。 */
+  private static pushChange(key: string, oldValue: ConfigValue, newValue: ConfigValue, source: string): void {
+    const change: ConfigChange = {
+      configId: ConfigRegistry.remoteConfigId,
+      configVersion: ConfigRegistry.remoteConfigVersion,
+      key: key,
+      oldValue: stringifyValue(oldValue),
+      newValue: stringifyValue(newValue),
+      source: source,
+      appliedAt: Math.floor(Date.now() / 1000)
+    };
+    ConfigRegistry.changes.push(change);
+    while (ConfigRegistry.changes.length > MAX_CHANGES) {
+      ConfigRegistry.changes.shift();
+    }
+  }
 
   /** 三层合并：本地覆盖 > 用户偏好 > 远程 > 默认。 */
   private static effective(def: ConfigDef): ConfigValue {

@@ -16,6 +16,12 @@
  * 安全边界：CONFIG_SIGNING_KEY 编译进包，可被逆向提取，仅作防篡改门槛（非安全边界）；
  * 真正的兜底是「校验失败整包丢弃 + 版本单调 + 保留旧缓存」。
  *
+ * 扩展段（SPEC §12-§16 / C7-C11）：
+ * - config_id：缓存到 Prefs（remote_config_id）并通过 configId() 暴露，供 P13 配置应用回报；
+ * - ui / settings / notices：验签通过后原样透传给 ConfigRegistry（不丢弃），
+ *   分别由 uiColor / uiSize / entryVisible / settingsSchema / notices 读取；
+ * - 缓存的是原始响应 JSON，重启后重新验签并恢复上述扩展段。
+ *
  * 接入约定：EntryAbility 中需在 Prefs.init() 之后调用 init()（P3 负责接入）。
  */
 
@@ -23,7 +29,7 @@ import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Api } from './Api';
-import { ConfigRegistry, ConfigValue } from './ConfigRegistry';
+import { ConfigRegistry, ConfigValue, RemoteConfigMeta, RemoteUiOverrides } from './ConfigRegistry';
 import { Net, RawText } from './Net';
 import { Prefs } from './Prefs';
 import { bucket } from './Rollout';
@@ -46,6 +52,8 @@ const SIG_HEX_LEN: number = 32;
 const KEY_CACHE_JSON: string = 'remote_config_json';
 /** 缓存键：已生效的配置版本（单调递增）。 */
 const KEY_CACHE_VERSION: string = 'remote_config_version';
+/** 缓存键：当前配置唯一 ID（config_id，P14 起服务端下发；旧版服务端可能为空）。 */
+const KEY_CACHE_ID: string = 'remote_config_id';
 
 /**
  * 配置签名密钥（编译期常量）。
@@ -54,9 +62,10 @@ const KEY_CACHE_VERSION: string = 'remote_config_version';
  */
 const CONFIG_SIGNING_KEY: string = '9f2c7a41e8b3d6509c4f1a7e2b8d3506';
 
-
 /** 服务端下发包（只声明客户端会用到的字段，未知字段忽略）。 */
 interface RemotePayload {
+  /** 全局唯一配置 ID（P14 起下发；旧版服务端可能没有）。 */
+  config_id?: string;
   config_version?: number;
   issued_at?: number;
   min_client_ver?: string;
@@ -65,6 +74,12 @@ interface RemotePayload {
   rollout?: Record<string, number> | null;
   ab?: Object | null;
   copy?: Record<string, string> | null;
+  /** UI 覆盖段（SPEC §14，原样透传给 ConfigRegistry；内部逐项校验）。 */
+  ui?: RemoteUiOverrides | null;
+  /** 设置页 schema（SPEC §13，原样透传）。 */
+  settings?: Object | null;
+  /** 远程通知数组（SPEC §12，原样透传）。 */
+  notices?: Object[] | null;
   assets?: Object | null;
   sig?: string;
 }
@@ -149,6 +164,8 @@ export class RemoteConfig {
   private static lastFetchAtMs: number = 0;
   /** 当前配置来源：'remote' | 'cache' | 'default'。 */
   private static sourceValue: string = 'default';
+  /** 当前配置唯一 ID（config_id；无下发为空串）。 */
+  private static configIdValue: string = '';
 
   /**
    * 启动时调用一次（EntryAbility 初始化完 Prefs 后）。
@@ -185,6 +202,11 @@ export class RemoteConfig {
   /** 当前配置来源：'remote'（本次拉取）/ 'cache'（本地缓存）/ 'default'（编译期默认值）。 */
   static source(): string {
     return RemoteConfig.sourceValue;
+  }
+
+  /** 当前配置唯一 ID（config_id；P13 配置应用回报使用；无下发为空串）。 */
+  static configId(): string {
+    return RemoteConfig.configIdValue;
   }
 
   /**
@@ -249,12 +271,15 @@ export class RemoteConfig {
         hilog.info(LOG_DOMAIN, LOG_TAG, 'skip version ' + versionValue + ' <= ' + localVersion);
         return;
       }
-      RemoteConfig.applyPayload(payload, installId);
+      const configIdValue: string = RemoteConfig.readConfigId(payload);
+      RemoteConfig.applyPayload(payload, installId, configIdValue, versionValue, true);
       RemoteConfig.version = versionValue;
+      RemoteConfig.configIdValue = configIdValue;
       RemoteConfig.sourceValue = 'remote';
       RemoteConfig.lastFetchAtMs = Date.now();
       Prefs.putString(KEY_CACHE_JSON, raw.text);
       Prefs.putNumber(KEY_CACHE_VERSION, versionValue);
+      Prefs.putString(KEY_CACHE_ID, configIdValue);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'applied v' + versionValue);
     } catch (err) {
       // 断网 / 超时 / 解析异常：静默保留缓存与默认值。
@@ -269,10 +294,12 @@ export class RemoteConfig {
     try {
       Prefs.remove(KEY_CACHE_JSON);
       Prefs.remove(KEY_CACHE_VERSION);
+      Prefs.remove(KEY_CACHE_ID);
     } catch (err) {
     }
     ConfigRegistry.clearRemote();
     RemoteConfig.version = 0;
+    RemoteConfig.configIdValue = '';
     RemoteConfig.sourceValue = 'default';
   }
 
@@ -310,8 +337,18 @@ export class RemoteConfig {
         RemoteConfig.clearCache();
         return;
       }
-      RemoteConfig.applyPayload(payload, Prefs.getString('install_id', ''));
+      // config_id 与缓存记录必须一致（防止缓存被替换成另一份同版本配置）。
+      const cachedId: string = Prefs.getString(KEY_CACHE_ID, '');
+      const configIdValue: string = RemoteConfig.readConfigId(payload);
+      if (configIdValue !== cachedId) {
+        hilog.warn(LOG_DOMAIN, LOG_TAG, 'cache config_id mismatch, dropped');
+        RemoteConfig.clearCache();
+        return;
+      }
+      // 启动回放缓存不记变更（避免每次启动重复上报，SPEC §15.4）。
+      RemoteConfig.applyPayload(payload, Prefs.getString('install_id', ''), configIdValue, versionValue, false);
       RemoteConfig.version = versionValue;
+      RemoteConfig.configIdValue = configIdValue;
       RemoteConfig.sourceValue = 'cache';
       hilog.info(LOG_DOMAIN, LOG_TAG, 'cache applied v' + versionValue);
     } catch (err) {
@@ -319,13 +356,34 @@ export class RemoteConfig {
     }
   }
 
-  /** 把下发包写入 ConfigRegistry 远程层：flags + thresholds 合并，rollout 按本机 bucket 收紧。 */
-  private static applyPayload(payload: RemotePayload, installId: string): void {
+  /**
+   * 把下发包写入 ConfigRegistry 远程层：
+   * flags + thresholds 合并，rollout 按本机 bucket 收紧；
+   * config_id / ui / settings / notices 原样透传（不丢弃，供 P10/P11/P12 消费）。
+   */
+  private static applyPayload(payload: RemotePayload, installId: string, configId: string,
+    configVersion: number, recordChanges: boolean): void {
     const values: Record<string, ConfigValue> = {};
     RemoteConfig.mergeValues(values, payload.flags);
     RemoteConfig.mergeValues(values, payload.thresholds);
     RemoteConfig.applyRollout(values, payload.rollout, installId);
-    ConfigRegistry.applyRemote(values);
+    const meta: RemoteConfigMeta = {
+      configId: configId,
+      configVersion: configVersion,
+      ui: payload.ui,
+      settings: payload.settings,
+      notices: payload.notices
+    };
+    ConfigRegistry.applyRemote(values, meta, recordChanges);
+  }
+
+  /** 读取并校验 config_id：非空字符串且长度受限（≤64），否则视为未下发（空串）。 */
+  private static readConfigId(payload: RemotePayload): string {
+    const value = payload.config_id;
+    if (typeof value !== 'string' || value.length === 0 || value.length > 64) {
+      return '';
+    }
+    return value;
   }
 
   /** 合并一层 key → value（未知字段由 ConfigRegistry 忽略）。 */
