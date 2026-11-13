@@ -115,6 +115,28 @@ Write-Host ''
 Write-Host "HarmonyOS build: project=$project product=$($Product -join ',') mode=$BuildMode channel=$buildChannel bundle=$bundleName signingMaterial=$hasSigningMaterial" -ForegroundColor Cyan
 Write-Host ('-' * 78)
 
+# test 变体版本号：构建期间临时追加 .9999，构建结束无论成功失败都恢复原值。
+$appJsonPath = Join-Path $repoRoot 'harmony\AppScope\app.json5'
+$appJsonOriginal = $null
+$testVersionName = ''
+$variantFile = Join-Path $repoRoot 'harmony\entry\src\main\ets\utils\BuildVariant.ets'
+$isTestVariant = (Test-Path -LiteralPath $variantFile) -and
+  ((Get-Content -LiteralPath $variantFile -Raw) -match 'IS_TEST_VARIANT:\s*boolean\s*=\s*true')
+if ($isTestVariant -and (Test-Path -LiteralPath $appJsonPath)) {
+  $appJsonOriginal = [IO.File]::ReadAllText($appJsonPath)
+  $patched = [regex]::Replace($appJsonOriginal, '("versionName"\s*:\s*")([^"]+)(")', {
+    param($m)
+    $base = $m.Groups[2].Value
+    if ($base.EndsWith('.9999')) { return $m.Value }
+    return $m.Groups[1].Value + $base + '.9999' + $m.Groups[3].Value
+  })
+  if ($patched -ne $appJsonOriginal) {
+    [IO.File]::WriteAllText($appJsonPath, $patched, [Text.UTF8Encoding]::new($false))
+    $testVersionName = (([regex]::Match($patched, '"versionName"\s*:\s*"([^"]+)"')).Groups[1].Value)
+    Write-Host ('[test] 版本号临时设为 ' + $testVersionName + '（构建后恢复）') -ForegroundColor Yellow
+  }
+}
+
 Push-Location -LiteralPath $project
 $nativeErrorAction = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
@@ -201,6 +223,10 @@ scripts/harmony/local-sign.ps1（Plan B，仅实验）先产出 unsigned HAP 再
 } finally {
   $ErrorActionPreference = $nativeErrorAction
   Pop-Location
+  if ($null -ne $appJsonOriginal) {
+    [IO.File]::WriteAllText($appJsonPath, $appJsonOriginal, [Text.UTF8Encoding]::new($false))
+    Write-Host '[test] 已恢复 app.json5 原始版本号' -ForegroundColor DarkGray
+  }
   $stopwatch.Stop()
 }
 
