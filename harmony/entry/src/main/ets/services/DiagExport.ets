@@ -138,7 +138,6 @@ export class DiagExport {
         data[key] = Prefs.getNumber(key, 0);
       }
     }
-    data['analytics_enabled'] = UserPrefs.analytics();
     return JSON.stringify(data, null, 2);
   }
 
@@ -152,7 +151,6 @@ export class DiagExport {
       'mute_on_startup': UserPrefs.muteOnStartup(),
       'volume': UserPrefs.volume(),
       'reduce_motion': AppStorage.get<boolean>('hgReduceMotion') ?? false,
-      'analytics': UserPrefs.analytics()
     };
     return JSON.stringify(data, null, 2);
   }

@@ -5,7 +5,6 @@ import { Api } from './Api';
 import { CrashGuard } from './CrashGuard';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
-import { UserPrefs } from '../state/UserPrefs';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGAnalytics';
@@ -93,9 +92,6 @@ export class Analytics {
   /** 冷启动调用一次。 */
   static onLaunch(): void {
     try {
-      if (!UserPrefs.analytics()) {
-        return;
-      }
       const id: string = Analytics.ensureInstallId();
       if (id.length === 0) {
         return;
@@ -143,7 +139,7 @@ export class Analytics {
     }
     const elapsed: number = Math.max(0, Math.round((Date.now() - Analytics.sessionStartMs) / 1000));
     Analytics.sessionStartMs = 0;
-    if (elapsed <= 0 || !UserPrefs.analytics()) {
+    if (elapsed <= 0) {
       return;
     }
     try {
@@ -154,9 +150,6 @@ export class Analytics {
 
   /** 播放一次（VV +1）。 */
   static countVideoView(): void {
-    if (!UserPrefs.analytics()) {
-      return;
-    }
     try {
       Prefs.putNumber(KEY_VV, Prefs.getNumber(KEY_VV, 0) + 1);
     } catch (err) {
@@ -165,7 +158,7 @@ export class Analytics {
 
   /** 记录一次启动耗时（毫秒），保留最近 N 次用于算 p50/p90。 */
   static recordStartup(ms: number): void {
-    if (ms <= 0 || !UserPrefs.analytics()) {
+    if (ms <= 0) {
       return;
     }
     try {
@@ -181,9 +174,6 @@ export class Analytics {
 
   /** 播放失败一次（按错误码/文案分桶）。 */
   static countPlayFail(code: number, message: string): void {
-    if (!UserPrefs.analytics()) {
-      return;
-    }
     try {
       Analytics.bump(KEY_PLAY_FAIL);
       const bucket: string = Analytics.classifyFail(code, message);
@@ -204,9 +194,6 @@ export class Analytics {
 
   /** 记录一次「超分是否可用 / 是否开启」（每次播放页打开记录一次）。 */
   static setSuperResolution(on: boolean, supported: boolean): void {
-    if (!UserPrefs.analytics()) {
-      return;
-    }
     try {
       if (supported) {
         Analytics.bump(KEY_SR_OK);
@@ -220,9 +207,6 @@ export class Analytics {
 
   /** 记录一次画质（HD / SD）。 */
   static countQuality(hd: boolean): void {
-    if (!UserPrefs.analytics()) {
-      return;
-    }
     try {
       Analytics.bump(hd ? KEY_HD : KEY_SD);
     } catch (err) {
@@ -231,9 +215,6 @@ export class Analytics {
 
   /** 记录一次完播。 */
   static countPlayComplete(): void {
-    if (!UserPrefs.analytics()) {
-      return;
-    }
     try {
       Analytics.bump(KEY_COMPLETE);
     } catch (err) {
@@ -242,9 +223,6 @@ export class Analytics {
 
   /** 记录一次页面访问（home / search / category / profile / player）。 */
   static countPage(name: string): void {
-    if (!UserPrefs.analytics()) {
-      return;
-    }
     let key: string = '';
     if (name === 'home') {
       key = KEY_PAGE_HOME;
