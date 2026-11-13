@@ -336,6 +336,17 @@ export class Net {
     return new RawText(code, text, contentType);
   }
 
+  /** 直连 POST JSON（遥测上报等非业务接口；不走多源聚合）。 */
+  static async postJson(url: string, body: string, timeoutMs: number): Promise<RawText> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Accept': 'application/json',
+      'User-Agent': USER_AGENT
+    };
+    const raw = await Net.request(url, http.RequestMethod.POST, headers, body, timeoutMs, false);
+    return raw as RawText;
+  }
+
   /** 原始 GET 文本（发布页 / GitHub API / 线路探测）。 */
   static async getText(url: string, referer: string, timeoutMs: number): Promise<RawText> {
     const headers: Record<string, string> = {
