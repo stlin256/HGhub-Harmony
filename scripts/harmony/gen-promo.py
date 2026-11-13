@@ -16,9 +16,36 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 ACCENT = (96, 205, 255)
 WHITE = (255, 255, 255)
 W, H = 1600, 900
-FONT_CN = r"C:\Windows\Fonts\msyh.ttc"
-FONT_CN_BOLD = r"C:\Windows\Fonts\msyhbd.ttc"
-FONT_LATIN = r"C:\Windows\Fonts\seguisb.ttf"
+# 字体：优先 Windows 路径（开发者本机），缺失时回落到 Linux/跨平台常见字体。
+FONT_CANDIDATES_CN = [
+    r"C:\Windows\Fonts\msyh.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+]
+FONT_CANDIDATES_CN_BOLD = [
+    r"C:\Windows\Fonts\msyhbd.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+]
+FONT_CANDIDATES_LATIN = [
+    r"C:\Windows\Fonts\seguisb.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+]
+
+
+def _pick(candidates):
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+
+FONT_CN = _pick(FONT_CANDIDATES_CN)
+FONT_CN_BOLD = _pick(FONT_CANDIDATES_CN_BOLD)
+FONT_LATIN = _pick(FONT_CANDIDATES_LATIN)
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ── 多语言文案 ────────────────────────────────────────
