@@ -1779,3 +1779,34 @@ test('/admin/asset：资源条数超过 100 被拒 413', async () => {
   assert.equal(res.status, 413);
   assert.equal((await res.json()).error, 'too_many_assets');
 });
+
+/* ── 资源下载 body 转换（线上曾返回 0 字节）────────── */
+
+test('资源下载：BLOB 各种返回形态都能正确输出字节', async () => {
+  const e = env({ CONFIG_SIGNING_KEY: CONFIG_KEY });
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const sha = await sha256Bytes(png);
+
+  // 形态 1：Uint8Array
+  e.DB.remoteAssets.set('a', { name: 'a', version: 1, sha256: sha, size: png.length, content: png });
+  let res = await worker.fetch(new Request('https://w/v1/assets/a'), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal((await res.arrayBuffer()).byteLength, png.length);
+
+  // 形态 2：ArrayBuffer
+  e.DB.remoteAssets.set('b', { name: 'b', version: 1, sha256: sha, size: png.length, content: png.buffer });
+  res = await worker.fetch(new Request('https://w/v1/assets/b'), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal((await res.arrayBuffer()).byteLength, png.length);
+
+  // 形态 3：普通数组
+  e.DB.remoteAssets.set('c', { name: 'c', version: 1, sha256: sha, size: png.length, content: Array.from(png) });
+  res = await worker.fetch(new Request('https://w/v1/assets/c'), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal((await res.arrayBuffer()).byteLength, png.length);
+
+  // 形态 4：无法识别 → 500
+  e.DB.remoteAssets.set('d', { name: 'd', version: 1, sha256: sha, size: png.length, content: { bad: true } });
+  res = await worker.fetch(new Request('https://w/v1/assets/d'), e, ctx);
+  assert.equal(res.status, 500);
+});
