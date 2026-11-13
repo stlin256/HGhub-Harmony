@@ -66,6 +66,8 @@ Worker 校验后种一个 **180 天**的 `HttpOnly; Secure; SameSite=Strict` coo
 | 播放质量 | 失败分桶、启动耗时 p50/p90 |
 | 画质与超分 | HD/SD 占比、超分支持率与开启率 |
 | 页面访问 | 首页 / 搜索 / 分类 / 我的 / 播放页 |
+| 设备指标 | 内存 PSS 均值/峰值、VSS、磁盘 安装/缓存/数据、平均耗电、电池温度 |
+| 线路质量 | 主站/镜像请求数与失败率、镜像占比、换线次数、延迟均值/P90 |
 | 崩溃聚合 | 按堆栈指纹分组，显示次数 / 类型 / 原因 / 版本分布 / 最近时间，点击展开堆栈 |
 | 明细表 | 按天数据，表头可排序 |
 
@@ -164,6 +166,20 @@ npm run deploy
 | `playback` | `vv` / `play_fail` / `play_fail_rate` / `play_complete` / `play_complete_rate` / `fail_breakdown` |
 | `quality` | `hd` / `sd` / `hd_ratio` / `sr_on` / `sr_supported` / `sr_support_rate` / `sr_on_rate` |
 | `pages` | `home` / `search` / `category` / `profile` / `player` 访问计数 |
+
+### 设备侧与线路指标
+
+| 指标 | 采集方式 |
+|---|---|
+| 内存 PSS / VSS | `hidebug.getPss()/getVss()`，TaskPool 执行（/proc 读取耗时，不放主线程），30 分钟节流 |
+| 磁盘占用 | `storageStatistics.getCurrentBundleStats()` → appSize / cacheSize / dataSize |
+| 功耗 | 会话开始/结束各读一次 `batteryInfo.batterySOC`，充电中的会话不计入耗电 |
+| 电池温度 | `batteryInfo.batteryTemperature`，记录会话内峰值 |
+| 线路请求 | `Net.edge` 成功/失败时按「主站 / 镜像」计数（不记具体域名） |
+| 线路延迟 | `LineAuto.probeLatency` 的探测结果，保留最近 50 个样本算均值与 P90 |
+| 换线次数 | `Lines.setBase` 实际发生切换时 +1 |
+
+> 全部是设备聚合数值，不含域名、内容或用户标识。
 
 ### 崩溃聚合
 

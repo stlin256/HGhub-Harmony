@@ -5,6 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { EdgeRequestBody, Envelope } from '../models/Types';
 import { parseHttpsUrl, redactSensitive } from '../utils/Security';
 import { Ipv6Preference } from './Ipv6Preference';
+import { LineStats } from './LineStats';
 
 /** 与原项目一致的桌面 Chrome UA。 */
 export const USER_AGENT: string =
@@ -432,13 +433,18 @@ export class Net {
     let lastError = 'network error';
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
-        return await Net.edgeOnce(url, headers, method, path, body);
+        const result = await Net.edgeOnce(url, headers, method, path, body);
+        // 线路统计：只记「主站 / 镜像」成败，不记具体域名。
+        LineStats.recordRequest(base, true);
+        return result;
       } catch (err) {
         const message = Net.errorText(err);
         hilog.error(0x0000, 'HGNet', 'edge fail %{public}s %{public}s host=%{public}s: %{public}s',
           method, opPath, hostOfUrl(base), message);
         lastError = message;
-        if (!Net.retryable(message) || attempt + 1 >= attempts) {
+        const final: boolean = !Net.retryable(message) || attempt + 1 >= attempts;
+        if (final) {
+          LineStats.recordRequest(base, false);
           throw new Error(message);
         }
         await delay(350 * (attempt + 1));
