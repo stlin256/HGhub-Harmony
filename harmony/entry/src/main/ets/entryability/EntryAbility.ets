@@ -22,6 +22,7 @@ import { ContinuationState } from '../services/ContinuationState';
 import { WidgetRefresher } from '../services/WidgetRefresher';
 import { RecService } from '../recommend/RecService';
 import { Prefs } from '../services/Prefs';
+import { RemoteConfig } from '../services/RemoteConfig';
 import { Session } from '../services/Session';
 import { Lines } from '../services/Lines';
 import {
@@ -172,6 +173,8 @@ export default class EntryAbility extends UIAbility {
       Lines.load();
       Session.load();
       UserPrefs.init(systemDark);
+      // 远程配置：先同步应用本地缓存（首屏即可读到上次配置），再延迟 5s 后台拉取；失败静默。
+      RemoteConfig.init();
       // 冷启动：立即刷新一次所有已添加卡片；封面快照生成后 UserListPrefetch 再补一次。
       WidgetRefresher.requestRefresh(500);
       hilog.info(DOMAIN, TAG, 'services ready, base=%{public}s', Lines.current());

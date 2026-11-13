@@ -15,6 +15,7 @@ import { ContinuationState, ContinuePayload } from '../services/ContinuationStat
 import { UpdateChecker } from '../services/UpdateChecker';
 import { Analytics } from '../services/Analytics';
 import { ClipboardLink } from '../services/ClipboardLink';
+import { emptyNotice, NoticeData, RemoteNotice } from '../services/RemoteNotice';
 import { UpdateInfo } from '../models/Types';
 import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgColor, HgFont, HgSize } from '../design/HgTokens';
@@ -40,6 +41,7 @@ import { AboutPage } from './AboutPage';
 import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
 import { TabletNoticeDialog } from '../components/TabletNoticeDialog';
+import { RemoteNoticeDialog } from '../components/RemoteNoticeDialog';
 import {
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
   ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC, ROUTE_USER, ROUTE_FOLLOW, ROUTE_ABOUT,
@@ -122,6 +124,9 @@ struct Index {
   /** 平板适配提示每个版本只弹一次（本进程内也只检查一次）。 */
   private tabletNoticeChecked: boolean = false;
   private tabletDialog: CustomDialogController | null = null;
+  /** 远程通知：pick() 命中的一条；noticeVisible=false 时不渲染任何节点（无下发即零行为）。 */
+  @State noticeVisible: boolean = false;
+  private noticeData: NoticeData = emptyNotice();
   /** applyNavSplit 重入保护：复位全屏标记会触发 @Watch，避免一次返回重算/重播两次模式动画。 */
   private navApplying: boolean = false;
   private tabsController: HdsTabsController = new HdsTabsController();
@@ -215,6 +220,33 @@ struct Index {
     WindowChrome.syncSystemBarColors(this.dark);
     this.syncNavMode();
     this.maybeShowTabletNotice();
+    // 远程通知：延迟 6s 再挑一条展示（不阻塞首屏；无 notices 时 pick() 立即返回 undefined，零行为）。
+    setTimeout(() => {
+      this.presentRemoteNotice();
+    }, 6000);
+  }
+
+  /**
+   * 远程通知：仅在首页 Tab、无其他弹窗/二级页时展示；无命中则什么都不做。
+   * 每次冷启动最多 1 条（RemoteNotice.pick() 内部保证），展示后立即写频率记录。
+   */
+  private presentRemoteNotice(): void {
+    try {
+      if (this.currentIndex !== 0 || this.loginVisible || this.lineVisible) {
+        return;
+      }
+      if (this.navStack.size() > 0) {
+        return;
+      }
+      const notice: NoticeData | undefined = RemoteNotice.pick();
+      if (notice === undefined) {
+        return;
+      }
+      RemoteNotice.markShown(notice.id);
+      this.noticeData = notice;
+      this.noticeVisible = true;
+    } catch (err) {
+    }
   }
 
   /** 剪贴板识别到分享链接：弹「是否打开」。 */
@@ -453,6 +485,11 @@ struct Index {
       this.lineVisible = false;
       return true;
     }
+    // 远程通知浮层：返回键关闭（closable 只控制关闭按钮显隐，返回键始终可退出，避免把用户困住）。
+    if (this.noticeVisible) {
+      this.noticeVisible = false;
+      return true;
+    }
     if (this.navStack.size() > 0) {
       this.navStack.pop();
       return true;
@@ -662,6 +699,16 @@ struct Index {
           .backgroundColor(HgColor.canvas(this.lastDark))
           .opacity(this.themeOverlay)
           .hitTestBehavior(HitTestMode.None)
+      }
+
+      // 远程通知：无下发时 noticeVisible 恒为 false，不渲染任何节点（零行为）。
+      if (this.noticeVisible) {
+        RemoteNoticeDialog({
+          notice: this.noticeData,
+          onClosed: (): void => {
+            this.noticeVisible = false;
+          }
+        })
       }
     }
     .width('100%')
