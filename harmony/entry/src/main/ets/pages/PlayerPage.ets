@@ -40,6 +40,7 @@ import {
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { RemoteConfig } from '../services/RemoteConfig';
 import { IS_TEST_VARIANT } from '../utils/BuildVariant';
+import { DebugLine, PlayerDiagnostics } from '../components/player/PlayerDiagnostics';
 import { AppChannel } from '../utils/AppChannel';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
@@ -82,16 +83,7 @@ class StartPoint {
   }
 }
 
-/** 调试浮窗一行：label + value。 */
-class DebugLine {
-  label: string;
-  value: string;
 
-  constructor(label: string, value: string) {
-    this.label = label;
-    this.value = value;
-  }
-}
 
 /**
  * feed 中单个条目的最小展示信息：当前页/相邻页的标题、作者、集数、互动计数占位。
@@ -182,12 +174,6 @@ export struct PlayerPage {
   /** AI 超分提示的透明度（0 隐藏 / 1 显示）。 */
   @State srHintOpacity: number = 0;
   @State srRipple: number = 0;
-  /** 测试变体播放诊断浮窗（媒体信息/超分状态/远端配置）。 */
-  @State debugOverlay: boolean = false;
-  @State debugX: number = 12;
-  @State debugY: number = 120;
-  private debugStartX: number = 12;
-  private debugStartY: number = 120;
   /** 本次打开播放器是否已提示过超分（每次进入页面最多一次）。 */
   private srHintShown: boolean = false;
   private srHintTimer: number = -1;
@@ -405,8 +391,6 @@ export struct PlayerPage {
   }
 
   aboutToAppear(): void {
-    this.debugX = Math.max(12, Math.min(360, 16));
-    this.debugY = Math.max(120, 180);
     // 匿名统计：播放页访问计数。
     Analytics.countPage('player');
     let ids = this.params.videoIds;
@@ -4198,95 +4182,6 @@ export struct PlayerPage {
     return out;
   }
 
-  @Builder
-  DebugInfoChip() {
-    Text('INFO')
-      .fontSize(10)
-      .fontWeight(FontWeight.Medium)
-      .fontColor('#CCFFFFFF')
-      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-      .backgroundColor('#99000000')
-      .borderRadius(10)
-      .position({ x: this.debugX, y: this.debugY })
-      .hitTestBehavior(HitTestMode.Transparent)
-      .zIndex(30)
-      .onClick(() => {
-        this.debugOverlay = !this.debugOverlay;
-      })
-      .gesture(PanGesture()
-        .onActionStart(() => {
-          this.debugStartX = this.debugX;
-          this.debugStartY = this.debugY;
-        })
-        .onActionUpdate((event: GestureEvent) => {
-          this.debugX = Math.max(4, Math.min(this.screenW - 60, this.debugStartX + event.offsetX));
-          this.debugY = Math.max(60, Math.min(this.screenH - 80, this.debugStartY + event.offsetY));
-        }))
-      .accessibilityText('播放诊断信息')
-  }
-
-  @Builder
-  DebugInfoPanel() {
-    Column({ space: 6 }) {
-      Row() {
-        Text('播放诊断')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#FFFFFFFF')
-          .layoutWeight(1)
-        Text('关闭')
-          .fontSize(11)
-          .fontColor('#FF60CDFF')
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .onClick(() => {
-            this.debugOverlay = false;
-          })
-      }
-      .width('100%')
-
-      Scroll() {
-        Column({ space: 4 }) {
-          ForEach(this.debugLines(), (line: DebugLine) => {
-            Row({ space: 8 }) {
-              Text(line.label)
-                .width(76)
-                .fontSize(10)
-                .fontColor('#99FFFFFF')
-              Text(line.value)
-                .layoutWeight(1)
-                .fontSize(10)
-                .fontColor('#FFFFFFFF')
-                .maxLines(3)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-            }
-            .width('100%')
-            .alignItems(VerticalAlign.Top)
-          }, (line: DebugLine) => line.label + ':' + line.value)
-        }
-        .width('100%')
-      }
-      .layoutWeight(1)
-      .scrollBar(BarState.Off)
-    }
-    .width(Math.min(400, this.screenW - 24))
-    .height(Math.min(420, this.screenH * 0.66))
-    .padding(12)
-    .backgroundColor('#99000000')
-    .borderRadius(12)
-    .border({ width: 0.5, color: '#33FFFFFF' })
-    .position({ x: this.debugX, y: this.debugY })
-    .zIndex(40)
-    .hitTestBehavior(HitTestMode.Transparent)
-    .gesture(PanGesture()
-      .onActionStart(() => {
-        this.debugStartX = this.debugX;
-        this.debugStartY = this.debugY;
-      })
-      .onActionUpdate((event: GestureEvent) => {
-        this.debugX = Math.max(4, Math.min(this.screenW - 120, this.debugStartX + event.offsetX));
-        this.debugY = Math.max(60, Math.min(this.screenH - 120, this.debugStartY + event.offsetY));
-      }))
-  }
   build() {
     NavDestination() {
       Stack({ alignContent: Alignment.TopStart }) {
@@ -4384,10 +4279,12 @@ export struct PlayerPage {
         this.SpeedChip()
         this.PiPHintChip()
         if (IS_TEST_VARIANT) {
-          this.DebugInfoChip()
-          if (this.debugOverlay) {
-            this.DebugInfoPanel()
-          }
+          PlayerDiagnostics({
+            lines: this.debugLines(),
+            screenW: this.screenW,
+            screenH: this.screenH,
+            leftInset: this.leftInset
+          })
         }
         if (this.locked) {
           this.LockLayer()

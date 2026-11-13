@@ -40,6 +40,7 @@ import { UiBus } from '../services/UiBus';
 import { UpdateChecker } from '../services/UpdateChecker';
 import { IS_TEST_VARIANT, VARIANT_NAME } from '../utils/BuildVariant';
 import { AppChannel } from '../utils/AppChannel';
+import { DebugOverlay, DebugOverlayLine } from '../components/DebugOverlay';
 import { hostOf } from '../utils/Format';
 
 /** 调试用 Prefs 键：灰度 bucket 模拟（-1 / 不存在 = 不模拟）。 */
@@ -262,6 +263,8 @@ export struct DebugConfigPage {
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
   /** 窗口宽度（vp）：宽屏时内容限宽 760vp 居中（与设置页一致）。 */
   @StorageProp(K_CONTENT_W) windowW: number = 400;
+  @StorageProp(K_WINDOW_W) winW: number = 400;
+  @StorageProp(K_WINDOW_H) winH: number = 800;
 
   /** 刷新代次：作为 ForEach key 的一部分，保证改值后行组件重建并读到最新生效值。 */
   @State revision: number = 0;
@@ -297,13 +300,6 @@ export struct DebugConfigPage {
   @State appVersionCode: string = '';
   @State apiVersion: string = '';
   @State deviceModel: string = '';
-  @State overlayVisible: boolean = false;
-  @State overlayX: number = -1;
-  @State overlayY: number = -1;
-  @StorageProp(K_WINDOW_W) winW: number = 400;
-  @StorageProp(K_WINDOW_H) winH: number = 800;
-  private overlayStartX: number = 0;
-  private overlayStartY: number = 0;
 
   /** 当前编辑目标：kind 决定写回位置，key 为 ConfigRegistry key（数值编辑时使用）。 */
   private editKind: string = '';
@@ -325,8 +321,6 @@ export struct DebugConfigPage {
     this.refresh();
     // 页面级兜底：重新下发导航栏 canvas 色，避免新页面/主题切换后底部导航区露白。
     WindowChrome.forceSyncSystemBarColors(this.dark);
-    this.overlayX = Math.max(12, this.winW - 100);
-    this.overlayY = Math.max(96, this.winH - 220);
   }
 
   /** 宽屏内容左右额外留白：返回 (W - FORM_MAX)/2，窄屏返回 0。 */
@@ -1124,78 +1118,6 @@ export struct DebugConfigPage {
     this.InfoRow('当前线路', hostOf(Lines.current()))
   }
 
-  /* ── 悬浮诊断窗：不离开当前页查看服务端/版本/超分关键状态 ── */
-  @Builder
-  DebugOverlayHost() {
-    if (this.overlayVisible) {
-      Column({ space: 2 }) {
-        Row() {
-          Text('运行诊断')
-            .fontSize(HgFont.caption)
-            .fontWeight(HgFont.weightMedium)
-            .fontColor(HgColor.textPrimary(this.dark))
-            .layoutWeight(1)
-          Text('关闭')
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.accent(this.dark))
-            .padding({ left: HgSpace.s, right: HgSpace.s, top: 4, bottom: 4 })
-            .onClick(() => {
-              this.overlayVisible = false;
-            })
-        }
-        .width('100%')
-        this.InfoRow('服务端', this.serverHost.length > 0 ? this.serverHost : '未注入')
-        this.InfoRow('App', 'v' + this.appVersion + ' · ' + VARIANT_NAME)
-        this.InfoRow('配置', 'v' + this.infoVersion + ' · ' + this.infoSource)
-        this.InfoRow('config_id', this.infoConfigId.length > 0 ? this.infoConfigId : '—')
-        this.InfoRow('AI 超分', 'config=' + ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION) +
-          ' · 目标=' + ConfigRegistry.getNumber(ConfigKey.SR_TARGET_WIDTH) + '×' +
-          ConfigRegistry.getNumber(ConfigKey.SR_TARGET_HEIGHT))
-        this.InfoRow('优先高清', String(ConfigRegistry.getBool(ConfigKey.PREFER_HEVC)))
-        this.InfoRow('线路', hostOf(Lines.current()))
-        this.InfoRow('桶/AB', this.realBucket + '/99 · 组 ' + (this.realAb === 0 ? 'A' : 'B'))
-      }
-      .width(320)
-      .padding(12)
-      .backgroundColor('#B31A1A1A')
-      .borderRadius(HgRadius.surface)
-      .border({ width: 0.5, color: '#33FFFFFF' })
-      .shadow({ radius: 24, color: HgColor.shadowElev3, offsetX: 0, offsetY: 8 })
-      .position({ x: this.overlayX, y: this.overlayY })
-      .hitTestBehavior(HitTestMode.Transparent)
-      .gesture(PanGesture()
-        .onActionStart(() => {
-          this.overlayStartX = this.overlayX;
-          this.overlayStartY = this.overlayY;
-        })
-        .onActionUpdate((event: GestureEvent) => {
-          this.overlayX = Math.max(4, Math.min(this.winW - 324, this.overlayStartX + event.offsetX));
-          this.overlayY = Math.max(60, Math.min(this.winH - 120, this.overlayStartY + event.offsetY));
-        }))
-    } else {
-      Text('诊断')
-        .fontSize(HgFont.micro)
-        .fontColor('#E6FFFFFF')
-        .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-        .backgroundColor('#66000000')
-        .borderRadius(HgRadius.chip)
-        .position({ x: this.overlayX, y: this.overlayY })
-        .hitTestBehavior(HitTestMode.Transparent)
-        .onClick(() => {
-          this.overlayVisible = true;
-        })
-        .gesture(PanGesture()
-          .onActionStart(() => {
-            this.overlayStartX = this.overlayX;
-            this.overlayStartY = this.overlayY;
-          })
-          .onActionUpdate((event: GestureEvent) => {
-            this.overlayX = Math.max(4, Math.min(this.winW - 80, this.overlayStartX + event.offsetX));
-            this.overlayY = Math.max(60, Math.min(this.winH - 80, this.overlayStartY + event.offsetY));
-          }))
-        .accessibilityText('打开运行诊断悬浮窗，可拖动')
-    }
-  }
   @Builder
   InfoCardContent() {
     this.InfoRow('变体', VARIANT_NAME + (IS_TEST_VARIANT ? '（调试可用）' : ''))
@@ -1322,6 +1244,21 @@ export struct DebugConfigPage {
     .justifyContent(FlexAlign.Center)
   }
 
+  private overlayLines(): DebugOverlayLine[] {
+    const out: DebugOverlayLine[] = [];
+    out.push(new DebugOverlayLine('服务端', this.serverHost.length > 0 ? this.serverHost : '未注入'));
+    out.push(new DebugOverlayLine('App', 'v' + this.appVersion + ' · ' + VARIANT_NAME));
+    out.push(new DebugOverlayLine('配置', 'v' + this.infoVersion + ' · ' + this.infoSource));
+    out.push(new DebugOverlayLine('config_id', this.infoConfigId.length > 0 ? this.infoConfigId : '—'));
+    out.push(new DebugOverlayLine('AI 超分', 'config=' + ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION) +
+      ' · 目标=' + ConfigRegistry.getNumber(ConfigKey.SR_TARGET_WIDTH) + '×' +
+      ConfigRegistry.getNumber(ConfigKey.SR_TARGET_HEIGHT)));
+    out.push(new DebugOverlayLine('优先高清', String(ConfigRegistry.getBool(ConfigKey.PREFER_HEVC))));
+    out.push(new DebugOverlayLine('线路', hostOf(Lines.current())));
+    out.push(new DebugOverlayLine('桶/AB', this.realBucket + '/99 · 组 ' + (this.realAb === 0 ? 'A' : 'B')));
+    return out;
+  }
+
   build() {
     NavDestination() {
       Stack({ alignContent: Alignment.BottomEnd }) {
@@ -1395,7 +1332,13 @@ export struct DebugConfigPage {
         .backgroundColor(HgColor.canvas(this.dark))
 
         if (IS_TEST_VARIANT) {
-          this.DebugOverlayHost()
+          DebugOverlay({
+            lines: this.overlayLines(),
+            dark: this.dark,
+            screenW: this.winW,
+            screenH: this.winH,
+            bottomInset: this.bottomInset
+          })
         }
       }
       .width('100%')
