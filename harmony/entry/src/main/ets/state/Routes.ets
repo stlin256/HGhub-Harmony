@@ -17,6 +17,8 @@ export const ROUTE_TOPIC: string = 'topic';
 /** 用户主页与关注流。 */
 export const ROUTE_USER: string = 'user';
 export const ROUTE_FOLLOW: string = 'follow';
+/** 关于项目（二级页面）。 */
+export const ROUTE_ABOUT: string = 'about';
 
 export interface ChannelParam {
   cate: string;
