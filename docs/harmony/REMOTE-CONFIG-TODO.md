@@ -254,10 +254,15 @@ P8、P9 收尾
 
 ### 全部完成
 
-P0-P14 全部落地。剩余可选优化：
-- 覆盖率检查的 33 条基线告警可逐项注册或加 `@config-exempt`，之后启用 `--strict`
-- `tab_posts`（吃瓜 Tab）在当前 4-Tab IA 中不存在，key 已预留
-- 功能级 rollout map 未在面板逐项展开
+P0-P14 全部落地，三项遗留收口完成：
+
+| 项 | 提交 | 结果 |
+|---|---|---|
+| 覆盖率 33 条告警 | `590f8dd` | 注册 10 个新 key（53→63）+ 23 条 `@config-exempt`，`--strict` 已接入 CI，0 告警 |
+| `tab_posts` 接线 | `4a58177` | 分类页吃瓜入口按 `entryVisible(UiEntryKey.TAB_POSTS)` 显隐 |
+| 功能级 rollout map | `bb3ca88` | `/stats` 新增 `rollout.features`，面板新增「功能灰度」表（设定/实际命中/设备，偏差 >5 点标黄） |
+
+**无剩余未做项。**
 
 
 ### 部署前置（未执行）
