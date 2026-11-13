@@ -61,20 +61,6 @@ export class PowerGuard {
     return UserPrefs.superResolution() && !PowerGuard.powerSave && PowerGuard.batteryEnough();
   }
 
-  /** 设置页展示的状态文案。 */
-  static superResolutionStatusText(): string {
-    if (!UserPrefs.superResolution()) {
-      return '已关闭';
-    }
-    if (PowerGuard.powerSave) {
-      return '省电模式暂停中 · 退出后自动恢复';
-    }
-    if (!PowerGuard.batteryEnough()) {
-      return '电量 ' + PowerGuard.soc + '% 暂停中 · 高于 20% 自动恢复';
-    }
-    return '已开启 · 电量 ' + PowerGuard.soc + '%';
-  }
-
   /** 重新读取电源状态；notify=true 时状态变化会回调。 */
   static refresh(notify: boolean): void {
     let save: boolean = false;

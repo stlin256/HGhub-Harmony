@@ -60,8 +60,6 @@ export struct SettingsPage {
   @State preferHevc: boolean = false;
   /** AI 超分开关（默认开）。 */
   @State superResolution: boolean = true;
-  /** 超分状态说明（省电/低电量会显示暂停原因）。 */
-  @State srStatusText: string = '';
   @State multiSource: boolean = true;
   /** IPv6 优先（默认开）。 */
   @State ipv6Prefer: boolean = true;
@@ -113,7 +111,6 @@ export struct SettingsPage {
     this.muteOnStartup = UserPrefs.muteOnStartup();
     this.preferHevc = UserPrefs.preferHevc();
     this.superResolution = UserPrefs.superResolution();
-    this.srStatusText = PowerGuard.superResolutionStatusText();
     this.multiSource = UserPrefs.multiSource();
     this.ipv6Prefer = Ipv6Preference.enabled();
     this.crashCount = CrashGuard.count();
@@ -524,7 +521,7 @@ export struct SettingsPage {
           Text('AI 超分')
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.srStatusText)
+          Text('系统原生画质增强，画面更清晰')
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .maxLines(2)
@@ -538,12 +535,11 @@ export struct SettingsPage {
             UserPrefs.setSuperResolution(isOn);
             // 立即重算并让当前播放器生效（省电/低电量时仍保持关闭）。
             PowerGuard.refresh(true);
-            this.srStatusText = PowerGuard.superResolutionStatusText();
           })
       }
       .width('100%')
       .height(HgSize.listRowDouble)
-      .accessibilityText('AI 超分，' + this.srStatusText)
+      .accessibilityText('AI 超分')
 
       Divider()
         .width('100%')
