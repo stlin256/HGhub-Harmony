@@ -1,4 +1,4 @@
-# HGhub 匿名设备计数 Worker
+# HGhub 匿名设备计数服务（自建 VPS）
 
 只回答一个问题：**有多少台设备启动过 HGhub Harmony**（累积去重，不是在线数）。
 
@@ -8,10 +8,8 @@
 App 冷启动
   → 读取本地 install_id（随机 UUID，首次生成后持久化）
   → POST /v1/install  { id, ver, model, os }
-  → Worker: SHA-256(id + SALT) 落库（原始 UUID 不持久化）
-  → D1: devices 表按 id_hash 主键去重
-  → GET /badge 返回 shields.io endpoint JSON
-  → README 徽章渲染「HGhub 设备 1234」
+  → 服务端: SHA-256(id + SALT) 落库（原始 UUID 不持久化）
+  → SQLite: devices 表按 id_hash 主键去重
 ```
 
 ## 隐私边界
@@ -44,12 +42,12 @@ App 冷启动
 
 ## 可视化面板
 
-**地址**：<https://hghub-telemetry.stlin256.workers.dev/dashboard>
+**地址**：`https://<自建服务器地址>/dashboard`（服务器地址与接入密钥不写入仓库）
 
 首次访问带上统计口令：
 
 ```
-https://hghub-telemetry.stlin256.workers.dev/dashboard?key=<STATS_KEY>
+https://<自建服务器地址>/dashboard?key=<STATS_KEY>
 ```
 
 Worker 校验后种一个 **180 天**的 `HttpOnly; Secure; SameSite=Strict` cookie 并 302 到 `/dashboard`，
@@ -87,56 +85,30 @@ Worker 校验后种一个 **180 天**的 `HttpOnly; Secure; SameSite=Strict` coo
 - `src/dashboard.html` 是唯一事实源，`scripts/build-dashboard.mjs` 生成 `src/dashboard.generated.js`
 - 改了 html 必须重新生成：`npm run build:dashboard`（`pretest` / `predeploy` 会自动跑）
 
-## 部署状态
+## 部署
 
-**已部署**：<https://hghub-telemetry.stlin256.workers.dev>
+生产环境部署在自建 VPS（Node 适配器 + SQLite + nginx TLS/限流），**部署代码与服务器参数
+放在单独的私有仓库，不进入本公开仓库**。本仓库只保留 Worker 逻辑本体（`src/index.js`）
+与面板源码（`src/dashboard.html`）。
 
-| 资源 | 值 |
-|---|---|
-| Worker | `hghub-telemetry` |
-| D1 数据库 | `hghub_telemetry`（`3b1e4007-fda5-4052-9fdd-29693985f735`） |
-| 端点 | `/v1/install`、`/badge`、`/stats`、`/health` |
-| Worker Secrets | `HASH_SALT`、`STATS_KEY`（已配置，值不落仓库） |
-| GitHub Secret | `CLOUDFLARE_API_TOKEN`（用于 CI 自动部署） |
+- 运行入口：`src/index.js` 的 `fetch(request, env, ctx)`，由 VPS 适配器调用；
+- 数据：`schema.sql` 建表（SQLite）；
+- 环境变量：`HASH_SALT` / `STATS_KEY` / `CONFIG_SIGNING_KEY` / `CONFIG_ADMIN_KEY` / `CLIENT_KEY`，
+  由部署侧注入，值不落仓库；
+- 客户端接入：上报与下发都必须携带 `x-hgub-key`（128 位接入密钥），由 App 编译期注入。
 
-## 首次部署（5 步，已完成，留作参考）
-
-```bash
-cd telemetry-worker
-npm install
-
-# 1. 创建 D1 数据库
-npx wrangler d1 create hghub_telemetry
-#    把返回的 database_id 填进 wrangler.toml
-
-# 2. 生成哈希盐并写入
-openssl rand -hex 32
-npx wrangler secret put HASH_SALT
-
-# 3. 统计查询口令
-npx wrangler secret put STATS_KEY
-
-# 4. 建表
-npm run migrate
-
-# 5. 部署
-npm run deploy
-```
-
-部署后端点：
+## 端点
 
 | 端点 | 用途 |
 |---|---|
-| `POST /v1/install` | App 上报 |
-| `GET /badge` | README 徽章 |
+| `POST /v1/report`、`POST /v1/install` | App 上报（需 `x-hgub-key`） |
+| `POST /v1/crash` | 崩溃上报（需 `x-hgub-key`） |
+| `GET /v1/config` | 远程配置下发（需 `x-hgub-key`） |
+| `GET /v1/update` | 更新闸门（需 `x-hgub-key`） |
+| `GET /v1/assets/manifest`、`GET /v1/assets/<name>` | 远程资源（需 `x-hgub-key`） |
 | `GET /stats?key=<STATS_KEY>` | 聚合统计 |
+| `GET /dashboard` | 可视化面板（`STATS_KEY` 登录） |
 | `GET /health` | 健康检查 |
-
-## README 徽章
-
-```markdown
-[![Devices](https://img.shields.io/endpoint?url=https%3A%2F%2Fhghub-telemetry.stlin256.workers.dev%2Fbadge)](https://hghub-telemetry.stlin256.workers.dev/stats?key=YOUR_KEY)
-```
 
 ## 统计口径
 
@@ -219,13 +191,9 @@ npm run deploy
 ## 本地测试
 
 ```bash
-npm test          # 12 个用例：去重、限流、校验、签名、徽章格式
-npx wrangler dev  # 本地起服务
+npm test          # 单测：去重、限流、校验、签名、徽章格式
 ```
 
-## 国内可达性
+## 可达性
 
-`*.workers.dev` 域名在国内可能不可达。如果目标用户主要在国内：
-
-1. 绑定自定义域名（需要在 Cloudflare 托管 DNS）
-2. 或改用国内云函数（阿里云 FC / 腾讯云 SCF），代码逻辑可直接移植
+服务端为自建 VPS + 自定义端口 + 自签 CA（App 内置 CA 校验），不依赖第三方 CDN/Workers 域名。

@@ -8,7 +8,7 @@
 
 ## 1. 目标
 
-用现有 Cloudflare Worker（`hghub-telemetry`）作为下发通道，为 App 建立六项能力：
+用自建服务器（`telemetry-worker` 逻辑 + VPS 适配器）作为下发通道，为 App 建立六项能力：
 
 | # | 能力 | 一句话 |
 |---|---|---|
@@ -44,7 +44,7 @@
 
 ```
                     ┌──────────────────────────────┐
-                    │  Cloudflare Worker           │
+                    │  自建服务器（VPS）           │
                     │  hghub-telemetry             │
                     ├──────────────────────────────┤
                     │ GET /v1/config   → 配置包     │
@@ -285,7 +285,7 @@ soft   = current < latest && bucket < rollout_pct
 
 - 所有下发响应带 `sig` = `HMAC-SHA256(body_without_sig, CONFIG_SIGNING_KEY)` 前 32 hex
 - 客户端用内置公钥/密钥校验；校验失败**整包丢弃**
-- `CONFIG_SIGNING_KEY` 通过 `wrangler secret put` 配置
+- `CONFIG_SIGNING_KEY` 由部署侧环境变量注入（值不入库）
 - 客户端密钥编译进包（可被逆向，仅作防篡改门槛，非安全边界）
 
 ## 6. 灰度与 A/B
