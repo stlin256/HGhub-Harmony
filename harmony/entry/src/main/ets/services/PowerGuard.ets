@@ -1,11 +1,10 @@
 import { batteryInfo, BusinessError, commonEventManager, power } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { UserPrefs } from '../state/UserPrefs';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGPower';
-/** 低于该电量（含）自动暂停超分；回到该值以上再恢复。 */
-const BATTERY_MIN_SOC: number = 20;
 /** 省电模式变化事件。 */
 const EVENT_POWER_SAVE: string = 'usual.event.POWER_SAVE_MODE_CHANGED';
 /** 电量变化事件。 */
@@ -15,8 +14,8 @@ const EVENT_BATTERY: string = 'usual.event.BATTERY_CHANGED';
  * 电源守卫：跟踪省电模式与电量，决定 AI 超分此刻是否允许生效。
  *
  * 规则（与产品约定一致）：
- * - 省电模式 / 电量 ≤ 20% → 暂停超分；
- * - 退出省电模式且电量 > 20% → 自动恢复（恢复的是用户偏好，不是无条件开启）。
+ * - 省电模式 / 电量 ≤ sr_battery_min（默认 20%）→ 暂停超分；
+ * - 退出省电模式且电量 > sr_battery_min → 自动恢复（恢复的是用户偏好，不是无条件开启）。
  *
  * 实现：订阅系统公共事件（省电模式变化 / 电量变化），每次事件重新读一次真实状态，
  * 状态变化时通过 onEffectiveChange 通知播放器。
@@ -51,9 +50,9 @@ export class PowerGuard {
     return PowerGuard.soc;
   }
 
-  /** 电量是否足够（> 20%）。 */
+  /** 电量是否足够（> sr_battery_min，默认 20%）。 */
   static batteryEnough(): boolean {
-    return PowerGuard.soc > BATTERY_MIN_SOC;
+    return PowerGuard.soc > ConfigRegistry.getNumber(ConfigKey.SR_BATTERY_MIN);
   }
 
   /** 超分此刻是否允许生效：用户开关 && 非省电 && 电量充足。 */
