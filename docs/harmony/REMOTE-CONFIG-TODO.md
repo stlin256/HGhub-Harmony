@@ -22,7 +22,7 @@
 
 ## P1 Worker：配置端点（子代理 A）
 
-**写作用域**：`telemetry-worker/src/index.js`、`telemetry-worker/src/config-default.js`、`telemetry-worker/test/worker.test.js`、`telemetry-worker/migrations/`
+**写作用域**：服务端 `src/index.js`（私有库）、服务端 `test/worker.test.js`（私有库）、服务端 `migrations/`（私有库）
 
 | ID | 任务 | 验收 |
 |---|---|---|
@@ -118,7 +118,7 @@
 
 ## P10 远程通知（子代理 E，依赖 P1+P2）
 
-**写作用域**：`harmony/entry/src/main/ets/services/RemoteNotice.ets`、`components/RemoteNoticeDialog.ets`、`telemetry-worker/src/index.js`（notices 段）
+**写作用域**：`harmony/entry/src/main/ets/services/RemoteNotice.ets`、`components/RemoteNoticeDialog.ets`、服务端 `src/index.js`（私有库）（notices 段）
 
 | ID | 任务 | 验收 |
 |---|---|---|
@@ -160,7 +160,7 @@
 
 ## P13 配置应用回报（子代理 E，依赖 P2+P4）
 
-**写作用域**：`harmony/entry/src/main/ets/services/ConfigApplyLog.ets`、`services/Analytics.ets`、`telemetry-worker/src/index.js`、`telemetry-worker/migrations/`
+**写作用域**：`harmony/entry/src/main/ets/services/ConfigApplyLog.ets`、`services/Analytics.ets`、服务端 `src/index.js`（私有库）、服务端 `migrations/`（私有库）
 
 | ID | 任务 | 验收 |
 |---|---|---|
