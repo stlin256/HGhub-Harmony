@@ -655,6 +655,318 @@
     {
       "name": "ui_fe65e02e",
       "value": "Your profile is empty: favorite or play a few shows and preferences will build up."
+    },
+    {
+      "name": "fmt_items",
+      "value": "%d items"
+    },
+    {
+      "name": "fmt_items_only",
+      "value": "%d"
+    },
+    {
+      "name": "fmt_episodes_total",
+      "value": "%d episodes"
+    },
+    {
+      "name": "fmt_episode",
+      "value": "Episode %d"
+    },
+    {
+      "name": "fmt_episode_of",
+      "value": "Episode %d/%d"
+    },
+    {
+      "name": "fmt_index",
+      "value": "Item %d"
+    },
+    {
+      "name": "fmt_titles_total",
+      "value": "%d titles"
+    },
+    {
+      "name": "fmt_titles_only",
+      "value": "%d"
+    },
+    {
+      "name": "fmt_episodes_only",
+      "value": "%d ep"
+    },
+    {
+      "name": "fmt_replies",
+      "value": "%d replies"
+    },
+    {
+      "name": "fmt_score",
+      "value": "%s pts"
+    },
+    {
+      "name": "fmt_plays",
+      "value": "%s plays"
+    },
+    {
+      "name": "fmt_likes",
+      "value": "%s likes"
+    },
+    {
+      "name": "fmt_favs",
+      "value": "%s saves"
+    },
+    {
+      "name": "fmt_updated_to",
+      "value": "Up to episode %d"
+    },
+    {
+      "name": "fmt_watched_ep",
+      "value": "Watched episode %d"
+    },
+    {
+      "name": "fmt_play_ep",
+      "value": "Play episode %d"
+    },
+    {
+      "name": "fmt_ep_current",
+      "value": "Episode %d, current"
+    },
+    {
+      "name": "fmt_open_item",
+      "value": "Open item %d"
+    },
+    {
+      "name": "fmt_open_link",
+      "value": "Open link %d"
+    },
+    {
+      "name": "fmt_author_page",
+      "value": "Author %s, open profile"
+    },
+    {
+      "name": "fmt_author_github",
+      "value": "Author %s, open GitHub profile"
+    },
+    {
+      "name": "fmt_line_item",
+      "value": "Line %s, %s"
+    },
+    {
+      "name": "fmt_switched_to",
+      "value": "Switched to %s"
+    },
+    {
+      "name": "fmt_retry_progress",
+      "value": "Retrying (%d/%d)…"
+    },
+    {
+      "name": "fmt_rate_restored",
+      "value": "Back to 1.0x"
+    },
+    {
+      "name": "fmt_rate_value",
+      "value": "%sx speed"
+    },
+    {
+      "name": "fmt_rate_normal",
+      "value": "1.0x (normal)"
+    },
+    {
+      "name": "fmt_seek_delta",
+      "value": "%s s"
+    },
+    {
+      "name": "fmt_seek_delta_plus",
+      "value": "+%s s"
+    },
+    {
+      "name": "fmt_continue_ep_time",
+      "value": "Resume · episode %d %s"
+    },
+    {
+      "name": "fmt_continue_ep",
+      "value": "Resume · episode %d"
+    },
+    {
+      "name": "fmt_new_version",
+      "value": "New version v%s"
+    },
+    {
+      "name": "fmt_version_pair",
+      "value": "Current v%s, latest v%s."
+    },
+    {
+      "name": "fmt_latest_version",
+      "value": "Already on the latest version v%s"
+    },
+    {
+      "name": "fmt_update_failed",
+      "value": "Failed to fetch update info: %s"
+    },
+    {
+      "name": "fmt_update_failed_hint",
+      "value": "Unable to check for updates"
+    },
+    {
+      "name": "fmt_copy_failed_url",
+      "value": "Copy failed, open %s manually"
+    },
+    {
+      "name": "fmt_aspect_ratio",
+      "value": "Aspect ratio: %s"
+    },
+    {
+      "name": "fmt_cache_used",
+      "value": "Using %s"
+    },
+    {
+      "name": "fmt_fav_history",
+      "value": "%d favorites · %d watch records"
+    },
+    {
+      "name": "fmt_search_records",
+      "value": "%d search records"
+    },
+    {
+      "name": "fmt_profile_tags",
+      "value": "Profile: %d tags · import / export / clear"
+    },
+    {
+      "name": "fmt_checking_version",
+      "value": "Checking…"
+    },
+    {
+      "name": "fmt_current_version_vs",
+      "value": "Current v%s · compared with GitHub Release"
+    },
+    {
+      "name": "fmt_crash_count_prefix",
+      "value": "%d crashes · "
+    },
+    {
+      "name": "fmt_last_startup",
+      "value": "Last startup %d ms (local)"
+    },
+    {
+      "name": "fmt_version_license",
+      "value": "v%s · PolyForm Noncommercial License"
+    },
+    {
+      "name": "fmt_app_footer",
+      "value": "HGhub %s · HarmonyOS NEXT client"
+    },
+    {
+      "name": "fmt_app_footer_license",
+      "value": "HGhub %s · HarmonyOS NEXT client · Noncommercial use only"
+    },
+    {
+      "name": "fmt_exported",
+      "value": "Exported to clipboard (%d tags, %d chars)"
+    },
+    {
+      "name": "fmt_import_ok",
+      "value": "Imported: %d tags (profile replaced)"
+    },
+    {
+      "name": "fmt_import_fail",
+      "value": "Import failed: invalid data format"
+    },
+    {
+      "name": "fmt_profile_events",
+      "value": "Profile %d tags · %d events"
+    },
+    {
+      "name": "fmt_model_scored",
+      "value": "Model %s · %d scored"
+    },
+    {
+      "name": "fmt_events_pack",
+      "value": "%d events · catalog %s"
+    },
+    {
+      "name": "fmt_search_title",
+      "value": "Search · %s"
+    },
+    {
+      "name": "fmt_hot_rank",
+      "value": "Trending #%d: %s"
+    },
+    {
+      "name": "fmt_search_results",
+      "value": "\"%s\": %d results"
+    },
+    {
+      "name": "fmt_search_empty",
+      "value": "No results for \"%s\""
+    },
+    {
+      "name": "fmt_rank_update",
+      "value": "%s · updated every 10 min"
+    },
+    {
+      "name": "fmt_topic_count",
+      "value": "%s, %d titles"
+    },
+    {
+      "name": "fmt_comments_total",
+      "value": "%d comments"
+    },
+    {
+      "name": "fmt_comments_total_ep",
+      "value": "%d comments · episode %d"
+    },
+    {
+      "name": "fmt_comments_empty",
+      "value": "None"
+    },
+    {
+      "name": "fmt_comments_empty_ep",
+      "value": "None · episode %d"
+    },
+    {
+      "name": "fmt_current_page",
+      "value": "%s, current"
+    },
+    {
+      "name": "fmt_selected",
+      "value": "%s, selected"
+    },
+    {
+      "name": "fmt_current_version",
+      "value": "Current version v%s"
+    },
+    {
+      "name": "fmt_ep_plays",
+      "value": "%d episodes · %s plays"
+    },
+    {
+      "name": "fmt_ep_meta",
+      "value": "Episode %d of %d"
+    },
+    {
+      "name": "fmt_ep_of_total_short",
+      "value": "Ep %d/%d"
+    },
+    {
+      "name": "fmt_switch_auto",
+      "value": "Auto"
+    },
+    {
+      "name": "fmt_update_failed_title",
+      "value": "Unable to check for updates"
+    },
+    {
+      "name": "fmt_update_failed_body",
+      "value": "%s\n\nYou can copy the release page URL and open it in a browser later."
+    },
+    {
+      "name": "fmt_line_state",
+      "value": "Line %s, %s, %s"
+    },
+    {
+      "name": "fmt_line_in_use",
+      "value": "in use"
+    },
+    {
+      "name": "fmt_line_tap_switch",
+      "value": "tap to switch"
     }
   ]
 }

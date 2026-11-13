@@ -13,6 +13,7 @@ import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
+import { I18n } from '../utils/I18n';
 
 /** idle 热榜展示条数（前 10 条）。 */
 const HOT_RANK_SIZE: number = 10;
@@ -352,7 +353,7 @@ export struct SearchPage {
     const param: PlayerParam = {
       videoIds: ids,
       index: index,
-      title: '搜索 · ' + this.submitted,
+      title: I18n.fmt1($r('app.string.fmt_search_title'), this.submitted),
       source: 'search',
       feedKind: 'video',
       startEp: 1,
@@ -526,7 +527,7 @@ export struct SearchPage {
       }
       .width('100%')
       .height(44)
-      .accessibilityText('热榜第' + (index + 1) + '：' + item.title)
+      .accessibilityText($r('app.string.fmt_hot_rank', index + 1, item.title))
       .transition(HgMotion.appendTransition())
     }
   }
@@ -647,7 +648,7 @@ export struct SearchPage {
   @Builder
   ResultHeader() {
     Row() {
-      Text('「' + this.submitted + '」共 ' + this.total + ' 条结果')
+      Text($r('app.string.fmt_search_results', this.submitted, this.total))
         .fontSize(HgFont.caption)
         .fontColor(HgColor.textSecondary(this.dark))
         .layoutWeight(1)
@@ -731,7 +732,7 @@ export struct SearchPage {
         Column() {
           HgEmptyState({
             dark: this.dark,
-            title: '没有找到「' + this.submitted + '」',
+            title: I18n.fmt1($r('app.string.fmt_search_empty'), this.submitted),
             description: '换个关键词试试，比如「都市」「逆袭」',
             actionText: '看看热榜',
             glyph: $r('sys.symbol.magnifyingglass'),

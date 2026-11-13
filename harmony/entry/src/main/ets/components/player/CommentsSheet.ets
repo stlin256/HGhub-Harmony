@@ -6,6 +6,7 @@ import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../../de
 import { HgMotion } from '../../design/HgMotion';
 import { HgPressable } from '../HgPressable';
 import { HgSkeletonBlock } from '../HgSkeletonBlock';
+import { I18n } from '../../utils/I18n';
 
 const PAGE_SIZE: number = 20;
 
@@ -166,11 +167,12 @@ export struct CommentsSheet {
   }
 
   private headerSubText(): string {
-    const suffix = this.kind === 'post' ? '' : ' · 第 ' + this.ep + ' 集';
+    const suffix = this.kind === 'post' ? '' :
+      ' · ' + I18n.fmt1($r('app.string.fmt_episode'), this.ep);
     if (this.total > 0) {
-      return '共 ' + this.total + ' 条' + suffix;
+      return I18n.fmt1($r('app.string.fmt_comments_total'), this.total) + suffix;
     }
-    return '暂无' + suffix;
+    return I18n.fmt0($r('app.string.fmt_comments_empty')) + suffix;
   }
 
   @Builder
@@ -219,7 +221,7 @@ export struct CommentsSheet {
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
           if (comment.reply_count > 0) {
-            Text(comment.reply_count + ' 条回复')
+            Text($r('app.string.fmt_replies', comment.reply_count))
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))
               .margin({ left: HgSpace.s })

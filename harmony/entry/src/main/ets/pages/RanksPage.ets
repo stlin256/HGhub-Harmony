@@ -774,7 +774,7 @@ export struct RanksPage {
           }
         })
         Row({ space: HgSpace.s }) {
-          Text(this.tabDesc() + ' · 每 10 分钟更新')
+          Text($r('app.string.fmt_rank_update', this.tabDesc()))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .layoutWeight(1)

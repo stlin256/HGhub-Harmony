@@ -1,6 +1,7 @@
 import { HgColor, HgFont, HgRadius, HgSize, HgSpace } from '../../design/HgTokens';
 import { HgPressable } from '../HgPressable';
 import { fmt } from '../../utils/Format';
+import { I18n } from '../../utils/I18n';
 
 /** 播放页"详情"面板：简介 / 作者 / 评分 / 互动计数 / 标签。 */
 @Component
@@ -30,7 +31,7 @@ export struct DetailSheet {
     if (this.score <= 0) {
       return '暂无评分';
     }
-    return this.score.toFixed(1) + ' 分';
+    return I18n.fmt1($r('app.string.fmt_score'), this.score.toFixed(1));
   }
 
   @Builder
@@ -53,7 +54,7 @@ export struct DetailSheet {
           .fontSize(HgFont.section)
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
-        Text('第 ' + this.currentEp + ' 集')
+        Text($r('app.string.fmt_episode', this.currentEp))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))
       }
@@ -75,7 +76,7 @@ export struct DetailSheet {
               .fontSize(HgFont.secondary)
               .fontWeight(HgFont.weightMedium)
               .fontColor(HgColor.star(this.dark))
-            Text('共 ' + this.episodeCount + ' 集')
+            Text($r('app.string.fmt_episodes_total', this.episodeCount))
               .fontSize(HgFont.caption)
               .fontColor(HgColor.textSecondary(this.dark))
             if (this.authorName.length > 0) {

@@ -86,7 +86,8 @@ export struct EpisodeSheet {
     .onClick(() => {
       this.onPick(ep);
     })
-    .accessibilityText('第' + ep + '集' + (ep === this.current ? '，当前集' : ''))
+    .accessibilityText(ep === this.current ?
+              $r('app.string.fmt_ep_current', ep) : $r('app.string.fmt_episode', ep))
   }
 
   private template(): string {
@@ -105,11 +106,11 @@ export struct EpisodeSheet {
           .fontSize(HgFont.section)
           .fontWeight(HgFont.weightBold)
           .fontColor(HgColor.textPrimary(this.dark))
-        Text('共 ' + this.total + ' 集')
+        Text($r('app.string.fmt_episodes_total', this.total))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))
         Blank()
-        Text('第 ' + this.current + ' 集')
+        Text($r('app.string.fmt_episode', this.current))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.accent(this.dark))
       }

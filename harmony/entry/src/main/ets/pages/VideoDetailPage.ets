@@ -13,6 +13,7 @@ import { HgEmptyState } from '../components/HgCommon';
 import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
 import { EpisodeSheet } from '../components/player/EpisodeSheet';
 import { fmt, fmtTime } from '../utils/Format';
+import { I18n } from '../utils/I18n';
 
 const PREVIEW_COUNT: number = 10;
 
@@ -241,9 +242,9 @@ export struct VideoDetailPage {
   private playLabel(): string {
     if (this.progressEp > 1 || this.progressSec > 3) {
       if (this.progressSec > 3) {
-        return '继续观看 · 第 ' + this.progressEp + ' 集 ' + fmtTime(this.progressSec);
+        return I18n.fmt2($r('app.string.fmt_continue_ep_time'), this.progressEp, fmtTime(this.progressSec));
       }
-      return '继续观看 · 第 ' + this.progressEp + ' 集';
+      return I18n.fmt1($r('app.string.fmt_continue_ep'), this.progressEp);
     }
     return '播放第 1 集';
   }
@@ -251,15 +252,15 @@ export struct VideoDetailPage {
   private metaLine(): string {
     const parts: string[] = [];
     if (this.score > 0) {
-      parts.push(this.score.toFixed(1) + ' 分');
+      parts.push(I18n.fmt1($r('app.string.fmt_score'), this.score.toFixed(1)));
     }
     // 连载中「更新至 N 集」已经包含总集数信息，不再重复拼「共 N 集」（旧逻辑会显示成
     // 「更新至 12 集 · 共 12 集」）。
     if (this.isFinished) {
       parts.push('已完结');
-      parts.push('共 ' + this.episodeCount + ' 集');
+      parts.push(I18n.fmt1($r('app.string.fmt_episodes_total'), this.episodeCount));
     } else {
-      parts.push('更新至 ' + this.episodeCount + ' 集');
+      parts.push(I18n.fmt1($r('app.string.fmt_updated_to'), this.episodeCount));
     }
     let text = '';
     for (let i = 0; i < parts.length; i++) {
@@ -269,12 +270,12 @@ export struct VideoDetailPage {
   }
 
   private statLine(): string {
-    let text = fmt(this.hotCount) + ' 播放';
+    let text = I18n.fmt1($r('app.string.fmt_plays'), fmt(this.hotCount));
     if (this.likeCount > 0) {
-      text = text + ' · ' + fmt(this.likeCount) + ' 点赞';
+      text = text + ' · ' + I18n.fmt1($r('app.string.fmt_likes'), fmt(this.likeCount));
     }
     if (this.collectCount > 0) {
-      text = text + ' · ' + fmt(this.collectCount) + ' 收藏';
+      text = text + ' · ' + I18n.fmt1($r('app.string.fmt_favs'), fmt(this.collectCount));
     }
     return text;
   }
@@ -496,7 +497,7 @@ export struct VideoDetailPage {
     .onClick(() => {
       this.playEpisode(ep);
     })
-    .accessibilityText('播放第' + ep + '集')
+    .accessibilityText($r('app.string.fmt_play_ep', ep))
   }
 
   @Builder
@@ -507,7 +508,7 @@ export struct VideoDetailPage {
           .fontSize(HgFont.section)
           .fontWeight(HgFont.weightMedium)
           .fontColor(HgColor.textPrimary(this.dark))
-        Text('共 ' + this.episodeCount + ' 集')
+        Text($r('app.string.fmt_episodes_total', this.episodeCount))
           .fontSize(HgFont.caption)
           .fontColor(HgColor.textTertiary(this.dark))
         Blank()
@@ -588,7 +589,8 @@ export struct VideoDetailPage {
         this.navStack.pushPathByName(ROUTE_USER, param);
       }
     })
-    .accessibilityText('作者 ' + (this.authorName.length > 0 ? this.authorName : '匿名') + '，查看主页')
+    .accessibilityText($r('app.string.fmt_author_page',
+        this.authorName.length > 0 ? this.authorName : I18n.fmt0($r('app.string.ui_408579c3'))))
   }
 
   @Builder

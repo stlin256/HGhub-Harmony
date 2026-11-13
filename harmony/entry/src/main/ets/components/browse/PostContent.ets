@@ -586,7 +586,7 @@ export struct PostContent {
           SymbolGlyph($r('sys.symbol.arrowshape_turn_up_right'))
             .fontSize(HgIconSize.inline)
             .fontColor([HgColor.accent(this.dark)])
-          Text('打开链接 ' + (index + 1).toString())
+          Text($r('app.string.fmt_open_link', index + 1))
             .fontSize(HgFont.caption)
             .fontColor(HgColor.accent(this.dark))
             .maxLines(1)

@@ -41,6 +41,7 @@ import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
 import { TabletNoticeDialog } from '../components/TabletNoticeDialog';
 import {
+import { I18n } from '../utils/I18n';
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
   ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC, ROUTE_USER, ROUTE_FOLLOW, ROUTE_ABOUT,
   PlayerParam, ChannelParam, PostParam, VideoParam, TopicParam, UserParam
@@ -272,8 +273,8 @@ struct Index {
     }
     this.updateShown = true;
     this.updateUrl = info.url;
-    const title: string = '有新版本 v' + info.latest;
-    let message: string = '当前 v' + info.current + '，最新 v' + info.latest + '。';
+    const title: string = I18n.fmt1($r('app.string.fmt_new_version'), info.latest);
+    let message: string = I18n.fmt2($r('app.string.fmt_version_pair'), info.current, info.latest);
     if (info.notes !== undefined && info.notes !== null && info.notes.length > 0) {
       const brief: string = info.notes.length > 120 ? info.notes.substring(0, 120) + '…' : info.notes;
       message = message + '\n\n' + brief;
@@ -506,7 +507,7 @@ struct Index {
     .width('100%')
     .height(46)
     .justifyContent(FlexAlign.Center)
-    .accessibilityText(title + (this.activeIndex === index ? '，当前页' : ''))
+    .accessibilityText(this.activeIndex === index ? I18n.fmt1($r('app.string.fmt_current_page'), title) : title)
     .onClick(() => {
       if (this.activeIndex === index) {
         return;

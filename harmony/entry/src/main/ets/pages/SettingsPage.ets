@@ -19,6 +19,7 @@ import { RecService } from '../recommend/RecService';
 import { K_BOTTOM_INSET, K_DARK, K_VIDEO_SCALE, K_CONTENT_W, UserPrefs } from '../state/UserPrefs';
 import { ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_ABOUT } from '../state/Routes';
 import { hostOf } from '../utils/Format';
+import { I18n } from '../utils/I18n';
 
 interface ThemeOption {
   key: string;
@@ -206,12 +207,12 @@ export struct SettingsPage {
       return;
     }
     UserPrefs.setVideoScale(key);
-    UiBus.toastInfo('画面比例：' + label);
+    UiBus.toastInfo(I18n.fmt1($r('app.string.fmt_aspect_ratio'), label));
   }
 
   /** 「封面缓存」行右侧文案：只展示内存 + 磁盘的合计占用空间（不再显示张数）。 */
   private cacheUsageText(): string {
-    return '已占用 ' + this.cacheText;
+    return I18n.fmt1($r('app.string.fmt_cache_used'), this.cacheText);
   }
 
   /**
@@ -331,13 +332,14 @@ export struct SettingsPage {
         const message: string = 'v' + info.current + ' → v' + info.latest +
           (info.notes !== undefined && info.notes.length > 0 ? '\n\n' + info.notes : '');
         this.openConfirm(
-          new ConfirmCopy('有新版本 v' + info.latest, message, '打开下载链接', '稍后', false),
+          new ConfirmCopy(I18n.fmt1($r('app.string.fmt_new_version'), info.latest), message,
+          I18n.fmt0($r('app.string.ui_7b09aa5e')), I18n.fmt0($r('app.string.ui_4d0b4688')), false),
           () => {
             this.openReleasePage(info.url);
           }
         );
       } else {
-        UiBus.toastOk('已是最新版本 v' + info.current);
+        UiBus.toastOk(I18n.fmt1($r('app.string.fmt_latest_version'), info.current));
       }
     } catch (err) {
       // 连不上 GitHub / 获取失败：弹窗给出可执行的兜底动作（复制下载页地址）。
@@ -345,10 +347,11 @@ export struct SettingsPage {
         (err as Error).message : '未知错误';
       const reason: string = this.isNetworkError(err)
         ? '连不上 GitHub，暂时无法获取最新版本。'
-        : '获取更新信息失败：' + detail;
+        : I18n.fmt1($r('app.string.fmt_update_failed'), detail);
       this.openConfirm(
-        new ConfirmCopy('无法检查更新', reason + '\n\n可以复制下载页地址，稍后在浏览器中打开。',
-          '复制下载地址', '取消', false),
+        new ConfirmCopy(I18n.fmt0($r('app.string.fmt_update_failed_title')),
+          I18n.fmt1($r('app.string.fmt_update_failed_body'), reason),
+          I18n.fmt0($r('app.string.ui_7b09aa5e')), I18n.fmt0($r('app.string.ui_4d0b4688')), false),
         () => {
           this.copyReleaseUrl();
         }
@@ -380,10 +383,10 @@ export struct SettingsPage {
       pasteboard.getSystemPasteboard().setData(data).then(() => {
         UiBus.toastOk('下载地址已复制');
       }).catch(() => {
-        UiBus.toast('复制失败，请手动打开 ' + url);
+        UiBus.toast(I18n.fmt1($r('app.string.fmt_copy_failed_url'), url));
       });
     } catch (err) {
-      UiBus.toast('复制失败，请手动打开 ' + url);
+      UiBus.toast(I18n.fmt1($r('app.string.fmt_copy_failed_url'), url));
     }
   }
 
@@ -769,7 +772,7 @@ export struct SettingsPage {
           Text($r('app.string.ui_5fc8f9d0'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.favCount + ' 部收藏 · ' + this.historyCount + ' 条观看记录')
+          Text($r('app.string.fmt_fav_history', this.favCount, this.historyCount))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .opacity(this.valueOpacity)
@@ -802,7 +805,7 @@ export struct SettingsPage {
           Text($r('app.string.ui_adf6d73a'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.searchHistCount + ' 条搜索记录')
+          Text($r('app.string.fmt_search_records', this.searchHistCount))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
             .opacity(this.valueOpacity)
@@ -866,7 +869,7 @@ export struct SettingsPage {
           Text($r('app.string.ui_1c5c171f'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text('画像 ' + this.recTagCount + ' 个标签 · 可导入 / 导出 / 清空')
+          Text($r('app.string.fmt_profile_tags', this.recTagCount))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
         }
@@ -935,7 +938,8 @@ export struct SettingsPage {
             Text($r('app.string.ui_a6df3858'))
               .fontSize(HgFont.rowTitle)
               .fontColor(HgColor.textPrimary(this.dark))
-            Text(this.checking ? '正在检查…' : '当前 v' + Api.appVersion() + ' · 对比 GitHub Release')
+            Text(this.checking ? $r('app.string.fmt_checking_version') :
+              $r('app.string.fmt_current_version_vs', Api.appVersion()))
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))
           }
@@ -972,7 +976,7 @@ export struct SettingsPage {
               .fontSize(HgFont.rowTitle)
               .fontColor(HgColor.textPrimary(this.dark))
             Text(this.exporting ? '正在打包…' :
-              (this.crashCount > 0 ? this.crashCount + ' 条崩溃 · ' : '') +
+              (this.crashCount > 0 ? I18n.fmt1($r('app.string.fmt_crash_count_prefix'), this.crashCount) : '') +
               '打包播放/统计/设置/线路/性能为 zip')
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))
@@ -1030,7 +1034,8 @@ export struct SettingsPage {
           Text($r('app.string.ui_60192f6f'))
             .fontSize(HgFont.rowTitle)
             .fontColor(HgColor.textPrimary(this.dark))
-          Text(this.startupMs > 0 ? '最近一次 ' + this.startupMs + ' ms（本地打点）' : '暂无记录')
+          Text(this.startupMs > 0 ? $r('app.string.fmt_last_startup', this.startupMs) :
+              $r('app.string.ui_300ee3de'))
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))
         }
@@ -1052,7 +1057,7 @@ export struct SettingsPage {
             Text($r('app.string.ui_efb28fde'))
               .fontSize(HgFont.rowTitle)
               .fontColor(HgColor.textPrimary(this.dark))
-            Text('v' + Api.appVersion() + ' · PolyForm 非商业许可证')
+            Text($r('app.string.fmt_version_license', Api.appVersion()))
               .fontSize(HgFont.micro)
               .fontColor(HgColor.textTertiary(this.dark))
           }
@@ -1149,7 +1154,7 @@ export struct SettingsPage {
               .width('100%')
 
               ListItem() {
-                Text('HGhub ' + Api.appVersion() + ' · HarmonyOS NEXT 客户端 · 仅限非商业使用')
+                Text($r('app.string.fmt_app_footer_license', Api.appVersion()))
                   .width('100%')
                   .fontSize(HgFont.micro)
                   .fontColor(HgColor.textTertiary(this.dark))

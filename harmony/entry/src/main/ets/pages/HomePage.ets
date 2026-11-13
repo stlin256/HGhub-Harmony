@@ -254,7 +254,7 @@ struct HomeHeroSwiper {
               .maxLines(2)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-            Text('共 ' + item.episode_count + ' 集 · ' + fmt(item.hot) + ' 播放')
+            Text($r('app.string.fmt_ep_plays', item.episode_count, fmt(item.hot)))
               .fontSize(HgFont.caption)
               .fontColor(HgColor.videoInk2)
           }
