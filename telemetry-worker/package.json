@@ -6,7 +6,10 @@
     "test": "node --test test/*.test.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "migrate": "wrangler d1 execute hghub_telemetry --remote --file=./schema.sql"
+    "migrate": "wrangler d1 execute hghub_telemetry --remote --file=./schema.sql",
+    "build:dashboard": "node scripts/build-dashboard.mjs",
+    "pretest": "node scripts/build-dashboard.mjs",
+    "predeploy": "node scripts/build-dashboard.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.161.0"

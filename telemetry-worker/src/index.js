@@ -24,6 +24,8 @@
  *   GET  /health       健康检查
  */
 
+import DASHBOARD_HTML from './dashboard.generated.js';
+
 const MAX_BODY_BYTES = 2048;
 const IP_HOURLY_LIMIT = 30;
 const IP_WINDOW_SEC = 3600;
@@ -31,6 +33,9 @@ const SIG_WINDOW_SEC = 300;
 const BADGE_CACHE_SEC = 21600;
 const RATE_CLEANUP_EVERY = 200;
 const MAX_STATS_DAYS = 90;
+/** 面板登录 cookie 名与有效期（180 天）。 */
+const DASH_COOKIE = 'hg_dash';
+const DASH_COOKIE_MAX_AGE = 180 * 86400;
 /** 单日聚合字段上限，防止异常客户端把数字撑爆。 */
 const MAX_COUNTER = 1000000;
 
@@ -59,6 +64,12 @@ export default {
     }
     if (url.pathname === '/stats' && request.method === 'GET') {
       return withCors(await handleStats(url, env));
+    }
+    if (url.pathname === '/dashboard' && request.method === 'GET') {
+      return await handleDashboard(url, request, env);
+    }
+    if (url.pathname === '/api/stats' && request.method === 'GET') {
+      return await handleApiStats(url, request, env);
     }
     return withCors(json({ error: 'not_found' }, 404));
   },
@@ -261,13 +272,145 @@ async function handleBadge(env) {
   );
 }
 
+/* ── 可视化面板（Cookie 鉴权）───────────────────────── */
+
+/** 面板 cookie 值：HMAC(STATS_KEY, 固定串)，无需服务端会话存储。 */
+async function dashCookieValue(env) {
+  const key = env.STATS_KEY || '';
+  if (key.length === 0) {
+    return '';
+  }
+  const enc = new TextEncoder();
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const mac = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode('hghub-dashboard-v1'));
+  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function readCookie(request, name) {
+  const raw = request.headers.get('cookie') || '';
+  const parts = raw.split(';');
+  for (let i = 0; i < parts.length; i++) {
+    const item = parts[i].trim();
+    const eq = item.indexOf('=');
+    if (eq > 0 && item.slice(0, eq) === name) {
+      return item.slice(eq + 1);
+    }
+  }
+  return '';
+}
+
+/** 校验请求是否已通过面板鉴权（cookie 或 ?key=）。 */
+async function dashAuthorized(url, request, env) {
+  const expected = await dashCookieValue(env);
+  if (expected.length === 0) {
+    return false;
+  }
+  const cookie = readCookie(request, DASH_COOKIE);
+  if (cookie.length > 0 && timingSafeEqual(cookie, expected)) {
+    return true;
+  }
+  const key = url.searchParams.get('key') || '';
+  const statsKey = env.STATS_KEY || '';
+  return key.length > 0 && statsKey.length > 0 && timingSafeEqual(key, statsKey);
+}
+
+/** GET /dashboard：带 key 首次访问 → 种 cookie 并 302；已登录 → 返回面板 HTML。 */
+async function handleDashboard(url, request, env) {
+  const expected = await dashCookieValue(env);
+  if (expected.length === 0) {
+    return html(loginPage('服务端未配置 STATS_KEY，面板不可用'), 503);
+  }
+
+  const key = url.searchParams.get('key') || '';
+  if (key.length > 0) {
+    if (!timingSafeEqual(key, env.STATS_KEY || '')) {
+      return html(loginPage('口令不正确'), 401);
+    }
+    // 口令正确：种 cookie 后把 URL 里的 key 去掉。
+    return new Response(null, {
+      status: 302,
+      headers: {
+        'location': '/dashboard',
+        'set-cookie': `${DASH_COOKIE}=${expected}; Path=/; Max-Age=${DASH_COOKIE_MAX_AGE}; ` +
+          'HttpOnly; Secure; SameSite=Strict',
+        'cache-control': 'no-store',
+      },
+    });
+  }
+
+  const cookie = readCookie(request, DASH_COOKIE);
+  if (cookie.length === 0 || !timingSafeEqual(cookie, expected)) {
+    return html(loginPage('请输入访问口令'), 401);
+  }
+  return html(DASHBOARD_HTML, 200, {
+    'cache-control': 'no-store',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+  });
+}
+
+/** GET /api/stats：面板数据接口，cookie 或 ?key= 鉴权。 */
+async function handleApiStats(url, request, env) {
+  const ok = await dashAuthorized(url, request, env);
+  if (!ok) {
+    return json({ error: 'forbidden' }, 401);
+  }
+  return await handleStats(url, env, true);
+}
+
+/** 极简登录页（瑞士风格，无依赖）。 */
+function loginPage(message) {
+  return `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>HGhub · Telemetry</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,"PingFang SC",sans-serif;
+ background:#fff;color:#0a0a0a;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.gate{max-width:420px;margin:18vh auto 0;padding:0 24px}
+h1{font-size:24px;font-weight:700;letter-spacing:-.02em}
+.sub{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#6b6b6b;margin-top:6px}
+p{font-size:12px;color:#6b6b6b;margin-top:20px}
+form{display:flex;gap:8px;margin-top:20px}
+input{flex:1;font:inherit;font-size:13px;padding:9px 12px;border:1px solid #0a0a0a;outline:none}
+input:focus{border-color:#4d6bfe}
+button{font:inherit;font-size:13px;padding:9px 18px;cursor:pointer;background:#0a0a0a;color:#fff;border:1px solid #0a0a0a}
+.err{color:#e63946;font-size:12px;margin-top:12px}
+</style></head>
+<body><div class="gate">
+<h1>HGhub</h1><div class="sub">Telemetry · 匿名聚合</div>
+<p>${message}</p>
+<form method="get" action="/dashboard">
+<input type="password" name="key" placeholder="访问口令" autocomplete="current-password" autofocus>
+<button type="submit">进入</button>
+</form>
+${message === '请输入访问口令' ? '' : '<div class="err">' + message + '</div>'}
+</div></body></html>`;
+}
+
+function html(body, status = 200, extraHeaders = {}) {
+  return new Response(body, {
+    status,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'x-content-type-options': 'nosniff',
+      ...extraHeaders,
+    },
+  });
+}
+
 /* ── 统计 ───────────────────────────────────────────── */
 
-async function handleStats(url, env) {
-  const key = url.searchParams.get('key') || '';
-  const expected = env.STATS_KEY || '';
-  if (expected.length === 0 || !timingSafeEqual(key, expected)) {
-    return json({ error: 'forbidden' }, 403);
+async function handleStats(url, env, preAuthorized) {
+  if (preAuthorized !== true) {
+    const key = url.searchParams.get('key') || '';
+    const expected = env.STATS_KEY || '';
+    if (expected.length === 0 || !timingSafeEqual(key, expected)) {
+      return json({ error: 'forbidden' }, 403);
+    }
   }
 
   const now = Math.floor(Date.now() / 1000);

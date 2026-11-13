@@ -45,6 +45,9 @@ def scan_file(path):
         return
     if ext in SKIP_EXT:
         return
+    # 构建产物（如 dashboard.generated.js）由源文件生成，危险 API 检查在源文件侧做。
+    if name.endswith('.generated.js'):
+        return
     try:
         text = open(path, encoding="utf-8", errors="ignore").read()
     except Exception:  # noqa: BLE001

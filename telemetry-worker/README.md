@@ -42,6 +42,47 @@ App 冷启动
 > 因此 `SHARED_SECRET` 必须保持未配置（默认状态），否则所有上报会被 401 拒绝。
 > 若要启用，需先在客户端补上 HMAC-SHA256 计算并重新发版。
 
+## 可视化面板
+
+**地址**：<https://hghub-telemetry.stlin256.workers.dev/dashboard>
+
+首次访问带上统计口令：
+
+```
+https://hghub-telemetry.stlin256.workers.dev/dashboard?key=<STATS_KEY>
+```
+
+Worker 校验后种一个 **180 天**的 `HttpOnly; Secure; SameSite=Strict` cookie 并 302 到 `/dashboard`，
+之后直接访问 `/dashboard` 即可，URL 里不再出现口令。
+
+### 面板内容
+
+| 区块 | 内容 |
+|---|---|
+| KPI | 安装数 / DAU / 7 日回访率 / 平均时长 |
+| 活跃与新增 | DAU 与新增设备双线 |
+| 播放与时长 | VV 与分钟数双线 |
+| 矩阵 | 版本 / 机型 / 系统版本分布 |
+| 播放质量 | 失败分桶、启动耗时 p50/p90 |
+| 画质与超分 | HD/SD 占比、超分支持率与开启率 |
+| 页面访问 | 首页 / 搜索 / 分类 / 我的 / 播放页 |
+| 明细表 | 按天数据，表头可排序 |
+
+### 交互与适配
+
+- 7D / 30D / 90D 范围切换，图表平滑过渡
+- 折线悬停十字准星 + 数值 tooltip
+- 图例点击切换系列显隐
+- 数字 count-up、折线描边、条形生长动画
+- 尊重 `prefers-reduced-motion`
+- 响应式：≥1200px 12 列 / 768–1199px 8 列 / <768px 单列
+
+### 实现
+
+- 纯原生 HTML + CSS + 内联 SVG，**零依赖、零构建**
+- `src/dashboard.html` 是唯一事实源，`scripts/build-dashboard.mjs` 生成 `src/dashboard.generated.js`
+- 改了 html 必须重新生成：`npm run build:dashboard`（`pretest` / `predeploy` 会自动跑）
+
 ## 部署状态
 
 **已部署**：<https://hghub-telemetry.stlin256.workers.dev>

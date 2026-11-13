@@ -407,3 +407,89 @@ test('扩展指标超上限被裁剪', async () => {
   assert.equal(row.play_fail, 1000000);
   assert.equal(row.page_home, 0);
 });
+
+/* ── 可视化面板：Cookie 鉴权 ───────────────────────── */
+
+async function dashCookie(env) {
+  const enc = new TextEncoder();
+  const k = await crypto.subtle.importKey('raw', enc.encode(env.STATS_KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = await crypto.subtle.sign('HMAC', k, enc.encode('hghub-dashboard-v1'));
+  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+test('面板：无凭证返回登录页 401', async () => {
+  const e = env();
+  const res = await worker.fetch(new Request('https://w/dashboard'), e, ctx);
+  assert.equal(res.status, 401);
+  const body = await res.text();
+  assert.ok(body.includes('访问口令'));
+  assert.ok(body.includes('<form'));
+});
+
+test('面板：错误口令返回 401', async () => {
+  const e = env();
+  const res = await worker.fetch(new Request('https://w/dashboard?key=wrong'), e, ctx);
+  assert.equal(res.status, 401);
+  assert.ok((await res.text()).includes('口令不正确'));
+});
+
+test('面板：正确口令种 cookie 并 302 到 /dashboard', async () => {
+  const e = env();
+  const res = await worker.fetch(new Request('https://w/dashboard?key=k'), e, ctx);
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/dashboard');
+  const cookie = res.headers.get('set-cookie') || '';
+  assert.ok(cookie.startsWith('hg_dash='));
+  assert.ok(cookie.includes('HttpOnly'));
+  assert.ok(cookie.includes('Secure'));
+  assert.ok(cookie.includes('SameSite=Strict'));
+  // 180 天 = 15552000 秒
+  assert.ok(cookie.includes('Max-Age=15552000'), cookie);
+});
+
+test('面板：带有效 cookie 返回 HTML', async () => {
+  const e = env();
+  const value = await dashCookie(e);
+  const res = await worker.fetch(
+    new Request('https://w/dashboard', { headers: { cookie: `hg_dash=${value}` } }), e, ctx);
+  assert.equal(res.status, 200);
+  assert.ok((res.headers.get('content-type') || '').includes('text/html'));
+  assert.equal(res.headers.get('x-frame-options'), 'DENY');
+  const body = await res.text();
+  assert.ok(body.includes('Telemetry'));
+  assert.ok(body.includes('/api/stats'));
+});
+
+test('面板：伪造 cookie 被拒', async () => {
+  const e = env();
+  const res = await worker.fetch(
+    new Request('https://w/dashboard', { headers: { cookie: 'hg_dash=deadbeef' } }), e, ctx);
+  assert.equal(res.status, 401);
+});
+
+test('面板：未配置 STATS_KEY 时返回 503', async () => {
+  const e = env({ STATS_KEY: '' });
+  const res = await worker.fetch(new Request('https://w/dashboard'), e, ctx);
+  assert.equal(res.status, 503);
+});
+
+test('/api/stats：无凭证 401，带 cookie 200', async () => {
+  const e = env();
+  const no = await worker.fetch(new Request('https://w/api/stats?days=7'), e, ctx);
+  assert.equal(no.status, 401);
+
+  const value = await dashCookie(e);
+  const ok = await worker.fetch(
+    new Request('https://w/api/stats?days=7', { headers: { cookie: `hg_dash=${value}` } }), e, ctx);
+  assert.equal(ok.status, 200);
+  const body = await ok.json();
+  assert.equal(body.window_days, 7);
+  assert.ok(Array.isArray(body.daily));
+});
+
+test('/api/stats：也接受 ?key=', async () => {
+  const e = env();
+  const res = await worker.fetch(new Request('https://w/api/stats?key=k&days=30'), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).window_days, 30);
+});
