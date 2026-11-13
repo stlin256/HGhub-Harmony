@@ -13,6 +13,20 @@
             "useNormalizedOHMUrl": true
           }
         }
+      },
+      // test：测试变体构建用，配合 `node scripts/harmony/set-variant.mjs test`；
+      // 发布前必须切回 release（CI 的 variant_check.py 会拦截 test 变体）。
+      {
+        "name": "test",
+        "compatibleSdkVersion": "6.1.0(23)",
+        "targetSdkVersion": "26.0.0",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
       }
     ],
     "buildModeSet": [
@@ -25,7 +39,7 @@
       "name": "entry",
       "srcPath": "./entry",
       "targets": [
-        { "name": "default", "applyToProducts": ["default"] }
+        { "name": "default", "applyToProducts": ["default", "test"] }
       ]
     }
   ]

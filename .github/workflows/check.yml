@@ -63,3 +63,6 @@ jobs:
             exit 1
           fi
           echo "no build artifacts"
+
+      - name: 变体检查（禁止测试变体入库）
+        run: python3 scripts/check/variant_check.py
