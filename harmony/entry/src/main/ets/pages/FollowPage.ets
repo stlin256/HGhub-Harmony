@@ -12,6 +12,7 @@ import { ROUTE_PLAYER, PlayerParam } from '../state/Routes';
 import { Session } from '../services/Session';
 import { fmt } from '../utils/Format';
 
+// @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 20;
 
 /** 关注流：登录后展示关注作者的作品；游客态提示登录。 */

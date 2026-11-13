@@ -11,6 +11,7 @@ import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
 import { ROUTE_TOPIC, TopicParam } from '../state/Routes';
 
+// @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 20;
 
 /** 专题列表：响应式两列卡片（封面 + 标题 + 视频数），触底分页。 */

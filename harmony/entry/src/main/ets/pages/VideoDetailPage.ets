@@ -14,7 +14,10 @@ import { HgSkeletonBlock } from '../components/HgSkeletonBlock';
 import { EpisodeSheet } from '../components/player/EpisodeSheet';
 import { fmt, fmtTime } from '../utils/Format';
 import { I18n } from '../utils/I18n';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 
+/** 详情页选集预览条数。 */
+// @config-exempt: 未注册（ConfigRegistry 无 episode_preview_count）
 const PREVIEW_COUNT: number = 10;
 
 /**
@@ -584,7 +587,8 @@ export struct VideoDetailPage {
     .borderRadius(HgRadius.group)
     .accessibilityText('创作者')
     .onClick(() => {
-      if (this.authorId > 0) {
+      // 用户主页总开关（远程 kill switch）：关闭时作者卡片不可点。
+      if (this.authorId > 0 && ConfigRegistry.getBool(ConfigKey.USER_PAGE_ENABLED)) {
         const param: UserParam = { uid: this.authorId };
         this.navStack.pushPathByName(ROUTE_USER, param);
       }

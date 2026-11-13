@@ -22,6 +22,7 @@ const SORTS: SortOption[] = [
   { key: 'score', label: '高分' }
 ];
 
+// @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 20;
 
 /** 频道详情：排序 chips（纯客户端对已加载数据排序）+ 两列瀑布流 + 触底分页。 */

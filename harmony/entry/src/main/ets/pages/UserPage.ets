@@ -13,6 +13,7 @@ import { UiBus } from '../services/UiBus';
 import { fmt } from '../utils/Format';
 import { ActionStats, ACT_FOLLOW, ACT_USER } from '../services/ActionStats';
 
+// @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 20;
 
 /** 用户主页：头像 / 昵称 / 简介 / 统计 + 作品瀑布流 + 关注按钮。 */

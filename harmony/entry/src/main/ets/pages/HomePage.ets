@@ -20,21 +20,30 @@ import { ImageCache } from '../services/ImageCache';
 import { K_APP_ACTIVE, K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs';
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 
+/** 首屏 / 每次滚动加载的条数（分页大小）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 home_page_size）
 const PAGE_SIZE: number = 14;
+// @config-exempt: 未注册（ConfigRegistry 无 home_hero_count）
 const HERO_COUNT: number = 5;
 /** Hero 自动轮播间隔（ms，业务节奏非动效时长）；切换动画时长统一走 HgMotion.surface。 */
+// @config-exempt: 未注册（ConfigRegistry 无 home_hero_autoplay_ms）
 const HERO_AUTO_PLAY_MS: number = 4200;
 /** Hero 封面解码包围盒（px）：竖版海报 Contain 后显示高度≈700px（宽≈525px），900×1200 足够清晰。 */
 const HERO_DECODE_W: number = 900;
 const HERO_DECODE_H: number = 1200;
 /** 提前加载：滚动到距末尾约 4~5 行（2 列 ≈ 9~10 格）时就请求下一页，触底瞬间数据已就绪。 */
+// @config-exempt: 未注册（ConfigRegistry 无 home_load_ahead）
 const LOAD_MORE_AHEAD: number = 9;
 /** 每页数据落地后预取的封面张数（已缓存/加载中的会自动跳过）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 home_prefetch_per_page）
 const PREFETCH_PER_PAGE: number = 10;
 /** 随机池上限：约 8~9 页，控制内存与请求量；达到上限后停止后台补池。 */
+// @config-exempt: 未注册（ConfigRegistry 无 home_pool_max；recommend_pool_size 默认 200 与本项 120 不同）
 const POOL_MAX: number = 120;
 /** 启动时先拉 3 页写池（42 条），够拼出 2 页随机展示而不重复。 */
+// @config-exempt: 未注册（ConfigRegistry 无 home_pool_init_pages）
 const POOL_INIT_PAGES: number = 3;
 /** 随机展示条数 = 2 页数量（28 条）：启动「换一批」/下拉刷新都按这个量随机取。 */
 const DISPLAY_SIZE: number = PAGE_SIZE * 2;
@@ -42,8 +51,6 @@ const DISPLAY_SIZE: number = PAGE_SIZE * 2;
 const BATCH_FADE_LIFT: number = 6;
 /** 动画兜底释放闸门的额外余量（ms）：仅供定时器保险，不参与动画时长。 */
 const BATCH_GUARD_MS: number = 120;
-/** 预取「即将进入视口」的封面行数（按列数 × 该值向后预热），防止底部卡片先白后亮。 */
-const PREFETCH_AHEAD_ROWS: number = 6;
 /** 滚动合并调度延迟（ms）：滚动回调里只登记，到点统一做预取/预挑，避免每帧分配。 */
 const SCROLL_WORK_DELAY: number = 60;
 /** 停止滚动多久后才允许重建 Hero（ms）：避免后台补池的 Hero 更新把 Grid 中途重排。 */
@@ -549,9 +556,14 @@ export struct HomePage {
     this.reload();
   }
 
-  /** 是否「全部/为你推荐」随机 feed 模式（分类 Chip 仍走顺序分页）。 */
+  /** 个性化推荐总开关（远程 kill switch）：关闭时「全部」回退普通顺序列表。 */
+  private recommendEnabled(): boolean {
+    return ConfigRegistry.getBool(ConfigKey.RECOMMEND_ENABLED);
+  }
+
+  /** 是否「全部/为你推荐」随机 feed 模式（分类 Chip 仍走顺序分页；推荐关闭时回退普通列表）。 */
   private feedMode(): boolean {
-    return this.activeCate.length === 0;
+    return this.activeCate.length === 0 && this.recommendEnabled();
   }
 
   /** 首屏 / 切分类 / 线路变化 / 空态重试的统一入口。 */
@@ -563,7 +575,14 @@ export struct HomePage {
     }
   }
 
-  /* ── 分类 Chip 模式：原有顺序分页逻辑（语义未改） ─────────────────── */
+  /* ── 分类 Chip / 普通列表模式：顺序分页逻辑（推荐关闭时「全部」走这里） ── */
+
+  /** 顺序分页数据源：分类 Chip 走分类接口；「全部」在推荐关闭时回退普通 feed 列表。 */
+  private async fetchPage(page: number): Promise<Paged<VideoCard>> {
+    return this.activeCate.length > 0
+      ? Api.category(this.activeCate, page, PAGE_SIZE) : Api.feed(page, PAGE_SIZE);
+  }
+
   private async cateReload(): Promise<void> {
     const seq = ++this.loadSeq;
     const heroEmpty: boolean = this.hero.length === 0;
@@ -574,7 +593,7 @@ export struct HomePage {
     // 首屏重载会让在途 loadMore 的结果作废，这里一并清掉 loadingMore，避免翻页被永久卡住。
     this.loadingMore = false;
     try {
-      const res: Paged<VideoCard> = await Api.category(this.activeCate, 1, PAGE_SIZE);
+      const res: Paged<VideoCard> = await this.fetchPage(1);
       if (seq !== this.loadSeq) {
         return;
       }
@@ -1295,7 +1314,7 @@ export struct HomePage {
     }
   }
 
-  /* ── 分类 Chip 模式：原有顺序分页逻辑（语义未改） ─────────────────── */
+  /* ── 分类 Chip / 普通列表模式：顺序分页逻辑（推荐关闭时「全部」走这里） ── */
   private async cateLoadMore(): Promise<void> {
     if (this.loading || this.loadingMore || this.switching || this.finished || this.items.length === 0) {
       return;
@@ -1305,7 +1324,7 @@ export struct HomePage {
     const seq = this.loadSeq;
     try {
       const next = this.page + 1;
-      const res: Paged<VideoCard> = await Api.category(this.activeCate, next, PAGE_SIZE);
+      const res: Paged<VideoCard> = await this.fetchPage(next);
       if (seq !== this.loadSeq) {
         return;
       }
@@ -1340,6 +1359,11 @@ export struct HomePage {
     }
   }
 
+  /** 预取「即将进入视口」的封面行数：ConfigRegistry 下发（home_prefetch_rows，默认 6）。 */
+  private prefetchAheadRows(): number {
+    return ConfigRegistry.getNumber(ConfigKey.HOME_PREFETCH_ROWS);
+  }
+
   /** 预取「即将进入视口」的封面：以可见末项为基准向后多取约两屏（列数 × 行数）。 */
   private prefetchAhead(lastIndex: number): void {
     if (lastIndex < 0 || this.items.length === 0) {
@@ -1349,7 +1373,7 @@ export struct HomePage {
     if (start >= this.items.length) {
       return;
     }
-    this.prefetchCovers(this.items, this.columns() * PREFETCH_AHEAD_ROWS, start);
+    this.prefetchCovers(this.items, this.columns() * this.prefetchAheadRows(), start);
   }
 
   /**
@@ -1418,14 +1442,15 @@ export struct HomePage {
       this.listOffset = 0;
       this.loading = false;
       this.refreshing = false;
-      if (this.pool.length > 0) {
+      if (this.recommendEnabled() && this.pool.length > 0) {
         // 与「换一批」同一套淡出→替换→淡入，避免从分类切回时整屏瞬间跳变。
         this.applyRandomDisplayAnimated(DISPLAY_SIZE);
         this.updateFeedFinished();
         this.poolFillBackground();
       } else {
+        // 池为空，或推荐关闭（回退普通顺序列表）：重新拉首屏。
         this.loading = true;
-        this.feedStart();
+        this.reload();
       }
       return;
     }

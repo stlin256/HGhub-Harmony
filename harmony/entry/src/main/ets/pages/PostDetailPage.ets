@@ -9,6 +9,7 @@ import { HgResponsive } from '../design/HgResponsive';
 import { K_BOTTOM_INSET, K_DARK, K_CONTENT_W } from '../state/UserPrefs';
 import { UserPrefs } from '../state/UserPrefs';
 import { UiBus } from '../services/UiBus';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { PlayerParam, PostParam, ROUTE_PLAYER } from '../state/Routes';
 import { fmt, relativeTime } from '../utils/Format';
 
@@ -97,11 +98,16 @@ export struct PostDetailPage {
     }
   }
 
+  /** 评论分页大小：ConfigRegistry 下发（comment_page_size，默认 20）。 */
+  private commentPageSize(): number {
+    return ConfigRegistry.getNumber(ConfigKey.COMMENT_PAGE_SIZE);
+  }
+
   private async loadComments(): Promise<void> {
     this.commentsLoading = true;
     this.commentsError = '';
     try {
-      const res: CommentPage = await Api.postComments(this.postId, 1, 20);
+      const res: CommentPage = await Api.postComments(this.postId, 1, this.commentPageSize());
       this.comments = res.items !== undefined && res.items !== null ? res.items : [];
       this.commentPage = 1;
       this.commentPages = res.pagination !== undefined && res.pagination.pages > 0 ? res.pagination.pages : 1;
@@ -120,7 +126,7 @@ export struct PostDetailPage {
     this.commentsLoading = true;
     try {
       const next = this.commentPage + 1;
-      const res: CommentPage = await Api.postComments(this.postId, next, 20);
+      const res: CommentPage = await Api.postComments(this.postId, next, this.commentPageSize());
       const list: Comment[] = res.items !== undefined && res.items !== null ? res.items : [];
       this.comments = this.comments.concat(list);
       this.commentPage = next;

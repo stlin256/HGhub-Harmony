@@ -156,8 +156,6 @@ export struct PlayerPage {
   @State qualityBadge: string = '';
   /** 播放失败自动重试提示（空=未在重试）。 */
   @State retryText: string = '';
-  /** 系统媒体会话就绪后展示投播入口。 */
-  /** 投播入口默认可用（与其它 chrome 一起出现），会话未就绪时系统 picker 自行处理空态。 */
   /** 平行视窗下用户主动全屏：Index 监听该标记后把 Navigation 切回 Stack（满窗），离开播放页复位。 */
   @StorageProp(K_FORCE_FULLSCREEN) forceFullscreen: boolean = false;
   @State castAvailable: boolean = ConfigRegistry.getBool(ConfigKey.CAST_ENABLED);
@@ -1468,8 +1466,12 @@ export struct PlayerPage {
       return;
     }
     ActionStats.record(ACT_SHARE);
-    const title: string = this.titleText();
-    const shown: boolean = await ShareLink.share(id, title);
+    // 系统分享总开关（远程 kill switch）：关闭时直接回退「复制链接」，不调起系统分享面板。
+    const shareEnabled: boolean = ConfigRegistry.getBool(ConfigKey.SYSTEM_SHARE_ENABLED);
+    const shown: boolean = shareEnabled ? await ShareLink.share(id, this.titleText()) : false;
+    if (!shareEnabled) {
+      await ShareLink.copy(ShareLink.canonicalUrl(id));
+    }
     if (shown) {
       this.haptic(10);
       return;
@@ -2283,11 +2285,12 @@ export struct PlayerPage {
     this.sheetVisible = true;
   }
 
-  /**
-   * 打开评论区：宽屏非帖子 → 屏幕右侧评论侧栏（视频区让出面板宽度）；
-   * 手机/帖子 → 沿用底部评论 Sheet（现有行为不变）。
-   */
+  /** 打开评论区：宽屏非帖子走右侧评论侧栏（视频区让出面板宽度），手机/帖子沿用底部评论 Sheet。 */
   private openComments(): void {
+    // 评论功能总开关（远程 kill switch）：入口不渲染时，命中区也不能打开评论。
+    if (!ConfigRegistry.getBool(ConfigKey.COMMENTS_ENABLED)) {
+      return;
+    }
     if (this.commentPanelVisible) {
       return;
     }
@@ -2991,7 +2994,6 @@ export struct PlayerPage {
           .padding({ left: 10, right: 10 })
           .backgroundColor(HgColor.videoChip)
           .borderRadius(16)
-          .accessibilityText('线路')
           .onClick(() => {
             this.openLines();
           })
@@ -3006,7 +3008,6 @@ export struct PlayerPage {
           }
           .width(HgSize.hitTarget)
           .height(HgSize.hitTarget)
-          .accessibilityText('切换线路')
           .onClick(() => {
             this.toggleMenu();
           })
@@ -3084,37 +3085,38 @@ export struct PlayerPage {
         .onTouch((event: TouchEvent) => {
           this.chromeTouch('fav', event);
         })
-        .accessibilityText('收藏')
         .onClick(() => {
           this.toggleFav();
         })
         .accessibilityText(this.faved ? '取消收藏' : '收藏')
 
-        Column({ space: HgSpace.xs }) {
-          Stack() {
-            SymbolGlyph($r('sys.symbol.message'))
-              .fontSize(HgIconSize.player)
-              .fontColor([HgColor.videoInk])
+        if (ConfigRegistry.getBool(ConfigKey.COMMENTS_ENABLED)) {
+          Column({ space: HgSpace.xs }) {
+            Stack() {
+              SymbolGlyph($r('sys.symbol.message'))
+                .fontSize(HgIconSize.player)
+                .fontColor([HgColor.videoInk])
+            }
+            .width(HgSize.hitTarget)
+            .height(HgSize.hitTarget)
+            .borderRadius(HgSize.hitTarget / 2)
+            .backgroundColor(HgColor.videoChip)
+            Text(fmt(this.commentCount))
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.videoInk2)
           }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .borderRadius(HgSize.hitTarget / 2)
-          .backgroundColor(HgColor.videoChip)
-          Text(fmt(this.commentCount))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.videoInk2)
+          .width(48)
+          .scale({ x: this.chromeScale('comment'), y: this.chromeScale('comment') })
+          .animation({ duration: this.chromePressMs('comment'), curve: HgMotion.curve })
+          .onTouch((event: TouchEvent) => {
+            this.chromeTouch('comment', event);
+          })
+          .onClick(() => {
+            this.openComments();
+            this.showChrome();
+          })
+          .accessibilityText($r('app.string.ui_cf510562'))
         }
-        .width(48)
-        .scale({ x: this.chromeScale('comment'), y: this.chromeScale('comment') })
-        .animation({ duration: this.chromePressMs('comment'), curve: HgMotion.curve })
-        .onTouch((event: TouchEvent) => {
-          this.chromeTouch('comment', event);
-        })
-        .onClick(() => {
-          this.openComments();
-          this.showChrome();
-        })
-        .accessibilityText($r('app.string.ui_cf510562'))
 
         Column({ space: HgSpace.xs }) {
           Stack() {
@@ -3136,7 +3138,6 @@ export struct PlayerPage {
         .onTouch((event: TouchEvent) => {
           this.chromeTouch('share', event);
         })
-        .accessibilityText('分享')
         .onClick(() => {
           this.share();
         })
@@ -3318,7 +3319,6 @@ export struct PlayerPage {
             .onTouch((event: TouchEvent) => {
               this.chromeTouch('episode', event);
             })
-            .accessibilityText('选集')
             .onClick(() => {
               PlaybackLog.info('ui.episode', 'tap');
               this.openSheet('episode');
@@ -3340,7 +3340,6 @@ export struct PlayerPage {
           .onTouch((event: TouchEvent) => {
             this.chromeTouch('lock', event);
           })
-          .accessibilityText('选集')
           .onClick(() => {
             this.toggleLock();
           })
@@ -3643,9 +3642,8 @@ export struct PlayerPage {
   }
 
   /**
-   * 宽屏评论侧栏：屏幕右侧固定约 380vp 全高面板（surface1 背景，左缘 0.5vp 分隔线）。
-   * 头部「评论 + 总数 + 关闭」由 CommentsSheet(sidebar=true) 复用其既有头部渲染；
-   * 列表/分页/加载更多/发表全部复用组件内部逻辑。侧栏不在 Swiper 内，滚动评论不会误切视频。
+   * 宽屏评论侧栏：右侧固定约 380vp 全高面板，头部/列表/分页/发表复用 CommentsSheet(sidebar=true)；
+   * 侧栏不在 Swiper 内，滚动评论不会误切视频。
    */
   @Builder
   CommentSidebar() {
@@ -3802,7 +3800,9 @@ export struct PlayerPage {
 
       this.MenuActionRow('detail', '详情与简介')
       this.MenuActionRow('episodes', '选集')
-      this.MenuActionRow('comments', '评论')
+      if (ConfigRegistry.getBool(ConfigKey.COMMENTS_ENABLED)) {
+        this.MenuActionRow('comments', '评论')
+      }
       this.MenuActionRow('share', '分享链接')
       if (ConfigRegistry.getBool(ConfigKey.PIP_ENABLED)) {
         this.MenuActionRow('pip', '画中画')

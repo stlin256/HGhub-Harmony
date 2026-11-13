@@ -15,11 +15,11 @@ import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
 import { I18n } from '../utils/I18n';
 import { ActionStats, ACT_SEARCH } from '../services/ActionStats';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 
 /** idle 热榜展示条数（前 10 条）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 hot_rank_size）
 const HOT_RANK_SIZE: number = 10;
-
-const PAGE_SIZE: number = 18;
 
 /** 搜索：历史/热榜发现态 + 结果瀑布流；防抖提交、触底分页、空/错误态齐全。 */
 @Component
@@ -56,6 +56,11 @@ export struct SearchPage {
   private loadSeq: number = 0;
   /** 页面已销毁：异步回调不再 setState。 */
   private pageGone: boolean = false;
+
+  /** 搜索结果分页大小：ConfigRegistry 下发（search_page_size，默认 18）。 */
+  private pageSize(): number {
+    return ConfigRegistry.getNumber(ConfigKey.SEARCH_PAGE_SIZE);
+  }
 
   /** 结果瀑布流列数：手机 2 列，平板/横屏 3–4 列（最多 5）。 */
   private flowColumns(): number {
@@ -98,6 +103,10 @@ export struct SearchPage {
    * 失败/为空只显示一行轻提示 + 重试，不阻塞搜索历史与搜索入口。
    */
   private async loadHotRank(): Promise<void> {
+    // 热搜总开关（远程 kill switch）：关闭时不渲染热搜块，也不请求热榜。
+    if (!ConfigRegistry.getBool(ConfigKey.HOT_SEARCH_ENABLED)) {
+      return;
+    }
     if (this.rankLoading) {
       return;
     }
@@ -199,7 +208,7 @@ export struct SearchPage {
     const seq = ++this.loadSeq;
     const kw = this.submitted;
     try {
-      const res: SearchResult = await Api.search(kw, 1, PAGE_SIZE);
+      const res: SearchResult = await Api.search(kw, 1, this.pageSize());
       if (seq !== this.loadSeq || this.pageGone) {
         return;
       }
@@ -242,7 +251,7 @@ export struct SearchPage {
     const seq = this.loadSeq;
     try {
       const next = this.page + 1;
-      const res: SearchResult = await Api.search(this.submitted, next, PAGE_SIZE);
+      const res: SearchResult = await Api.search(this.submitted, next, this.pageSize());
       if (seq !== this.loadSeq || this.pageGone) {
         return;
       }
@@ -557,74 +566,76 @@ export struct SearchPage {
           .alignItems(HorizontalAlign.Start)
         }
 
-        Column({ space: HgSpace.xs }) {
-          Row({ space: HgSpace.xs }) {
-            SymbolGlyph($r('sys.symbol.bolt_fill'))
-              .fontSize(HgIconSize.compact)
-              .fontColor([HgColor.accent(this.dark)])
-            Text($r('app.string.ui_f188133a'))
-              .fontSize(HgFont.rowTitle)
-              .fontWeight(HgFont.weightMedium)
-              .fontColor(HgColor.textPrimary(this.dark))
-              .layoutWeight(1)
-            Text($r('app.string.ui_9a306145'))
-              .fontSize(HgFont.caption)
-              .fontColor(HgColor.accent(this.dark))
-              .hoverEffect(HoverEffect.Scale)
-              .accessibilityText($r('app.string.ui_2a33a141'))
-              .onClick(() => {
-                this.navStack.pushPathByName(ROUTE_RANKS, null);
-              })
-          }
-          .width('100%')
-          .height(HgSize.hitTarget)
-
-          if (this.rankLoading) {
-            Row({ space: HgSpace.s }) {
-              LoadingProgress()
-                .width(14)
-                .height(14)
-                .color(HgColor.accent(this.dark))
-              Text($r('app.string.ui_95ba7e56'))
-                .fontSize(HgFont.caption)
-                .fontColor(HgColor.textTertiary(this.dark))
-            }
-            .width('100%')
-            .height(HgSize.hitTarget)
-            .transition(HgMotion.fadeIn(HgMotion.fast))
-          } else if (this.rankItems.length === 0) {
-            Row() {
-              Text(this.rankError.length > 0 ? '热榜加载失败' : '暂无热榜数据')
-                .fontSize(HgFont.caption)
-                .fontColor(HgColor.textTertiary(this.dark))
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (ConfigRegistry.getBool(ConfigKey.HOT_SEARCH_ENABLED)) {
+          Column({ space: HgSpace.xs }) {
+            Row({ space: HgSpace.xs }) {
+              SymbolGlyph($r('sys.symbol.bolt_fill'))
+                .fontSize(HgIconSize.compact)
+                .fontColor([HgColor.accent(this.dark)])
+              Text($r('app.string.ui_f188133a'))
+                .fontSize(HgFont.rowTitle)
+                .fontWeight(HgFont.weightMedium)
+                .fontColor(HgColor.textPrimary(this.dark))
                 .layoutWeight(1)
-              Text($r('app.string.ui_e2d53a6d'))
+              Text($r('app.string.ui_9a306145'))
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.accent(this.dark))
-                .height(HgSize.hitTarget)
-                .padding({ left: HgSpace.s })
                 .hoverEffect(HoverEffect.Scale)
-                .accessibilityText($r('app.string.ui_fa7626ef'))
+                .accessibilityText($r('app.string.ui_2a33a141'))
                 .onClick(() => {
-                  this.loadHotRank();
+                  this.navStack.pushPathByName(ROUTE_RANKS, null);
                 })
             }
             .width('100%')
             .height(HgSize.hitTarget)
-            .transition(HgMotion.fadeIn(HgMotion.fast))
-          } else {
-            ForEach(this.rankItems, (item: RankItem, index: number) => {
-              this.RankRow(item, index)
-            }, (item: RankItem) => 'rank-' + item.video_id)
+
+            if (this.rankLoading) {
+              Row({ space: HgSpace.s }) {
+                LoadingProgress()
+                  .width(14)
+                  .height(14)
+                  .color(HgColor.accent(this.dark))
+                Text($r('app.string.ui_95ba7e56'))
+                  .fontSize(HgFont.caption)
+                  .fontColor(HgColor.textTertiary(this.dark))
+              }
+              .width('100%')
+              .height(HgSize.hitTarget)
+              .transition(HgMotion.fadeIn(HgMotion.fast))
+            } else if (this.rankItems.length === 0) {
+              Row() {
+                Text(this.rankError.length > 0 ? '热榜加载失败' : '暂无热榜数据')
+                  .fontSize(HgFont.caption)
+                  .fontColor(HgColor.textTertiary(this.dark))
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+                Text($r('app.string.ui_e2d53a6d'))
+                  .fontSize(HgFont.caption)
+                  .fontColor(HgColor.accent(this.dark))
+                  .height(HgSize.hitTarget)
+                  .padding({ left: HgSpace.s })
+                  .hoverEffect(HoverEffect.Scale)
+                  .accessibilityText($r('app.string.ui_fa7626ef'))
+                  .onClick(() => {
+                    this.loadHotRank();
+                  })
+              }
+              .width('100%')
+              .height(HgSize.hitTarget)
+              .transition(HgMotion.fadeIn(HgMotion.fast))
+            } else {
+              ForEach(this.rankItems, (item: RankItem, index: number) => {
+                this.RankRow(item, index)
+              }, (item: RankItem) => 'rank-' + item.video_id)
+            }
           }
+          .width('100%')
+          .padding(HgSpace.l)
+          .backgroundColor(HgColor.surface1(this.dark))
+          .borderRadius(HgRadius.group)
+          .alignItems(HorizontalAlign.Start)
         }
-        .width('100%')
-        .padding(HgSpace.l)
-        .backgroundColor(HgColor.surface1(this.dark))
-        .borderRadius(HgRadius.group)
-        .alignItems(HorizontalAlign.Start)
 
         Text($r('app.string.ui_05a28290'))
           .width('100%')

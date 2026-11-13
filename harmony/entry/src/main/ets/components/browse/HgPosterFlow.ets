@@ -7,14 +7,19 @@ import { HgMotion } from '../../design/HgMotion';
 import { ImageCache } from '../../services/ImageCache';
 
 /** 预取窗口：数据落地/分页追加后对 source 末尾若干张封面做后台预热。 */
+// @config-exempt: 未注册（ConfigRegistry 无 flow_prefetch_tail）
 const PREFETCH_TAIL: number = 18;
 /** 滚动中向后看多少条做预取（约 8 行，覆盖 cachedCount 之外、即将进入缓存窗口的卡片）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 flow_prefetch_ahead）
 const PREFETCH_AHEAD: number = 24;
 /** 滚动中向前（回看/反向上滑）预取的条数，保证回刷时不闪骨架。 */
+// @config-exempt: 未注册（ConfigRegistry 无 flow_prefetch_back）
 const PREFETCH_BACK: number = 8;
 /** 可视末尾每前进多少条才再触发一次滚动预取，避免滚动回调里高频发请求。 */
+// @config-exempt: 未注册（ConfigRegistry 无 flow_prefetch_step）
 const PREFETCH_STEP: number = 4;
 /** 单次最多发起的预取数量（ImageCache 内部还有并发闸门，这里只做上限保护）。 */
+// @config-exempt: 未注册（ConfigRegistry 无 flow_prefetch_max）
 const PREFETCH_MAX: number = 12;
 
 /**

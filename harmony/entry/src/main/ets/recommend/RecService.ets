@@ -1,6 +1,7 @@
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from '../services/AppContext';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { Prefs } from '../services/Prefs';
 import { VideoCard } from '../models/Types';
 import { RecCatalog } from './RecCatalog';
@@ -130,6 +131,8 @@ export class RecService {
       }
     }
     const span: number = affMax - affMin;
+    // 探索比例（recommend_explore_pct / 100，默认 10%）：分数里保留的随机扰动权重。
+    const explore: number = ConfigRegistry.getNumber(ConfigKey.RECOMMEND_EXPLORE_PCT) / 100;
     const weights: number[] = [];
     const missing: VideoCard[] = [];
     for (let i = 0; i < pool.length; i++) {
@@ -141,13 +144,13 @@ export class RecService {
       let score: number;
       if (modelScore !== undefined && modelScore !== null) {
         // 模型输出作为主排序分（0..1 点击率），只加极小抖动做探索。
-        score = modelScore * 0.9 + Math.random() * 0.1;
+        score = modelScore * (1 - explore) + Math.random() * explore;
       } else {
         // 模型分数尚未就绪（首次启动/新条目）：用统计分兜底，同时后台补分。
         const affNorm: number = span > 1e-6 ? (raw[i] - affMin) / span : 0.5;
         const pop: number = RecCatalog.popOf(card.id);
         const fresh: number = RecService.freshOf(card);
-        score = 0.55 * affNorm + 0.25 * pop + 0.10 * fresh + 0.10 * Math.random();
+        score = 0.55 * affNorm + 0.25 * pop + 0.10 * fresh + explore * Math.random();
       }
       const w: number = Math.exp(score / 0.35);
       weights.push(w);

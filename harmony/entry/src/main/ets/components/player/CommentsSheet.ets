@@ -2,14 +2,13 @@ import { Api } from '../../services/Api';
 import { Comment, CommentPage } from '../../models/Types';
 import { UserPrefs } from '../../state/UserPrefs';
 import { UiBus } from '../../services/UiBus';
+import { ConfigKey, ConfigRegistry } from '../../services/ConfigRegistry';
 import { HgColor, HgFont, HgIconSize, HgRadius, HgSize, HgSpace } from '../../design/HgTokens';
 import { HgMotion } from '../../design/HgMotion';
 import { HgPressable } from '../HgPressable';
 import { HgSkeletonBlock } from '../HgSkeletonBlock';
 import { I18n } from '../../utils/I18n';
 import { ActionStats, ACT_COMMENT } from '../../services/ActionStats';
-
-const PAGE_SIZE: number = 20;
 
 function avatarText(nickname: string): string {
   if (nickname.length === 0) {
@@ -79,6 +78,11 @@ export struct CommentsSheet {
     }
   }
 
+  /** 评论分页大小：ConfigRegistry 下发（comment_page_size，默认 20）。 */
+  private pageSize(): number {
+    return ConfigRegistry.getNumber(ConfigKey.COMMENT_PAGE_SIZE);
+  }
+
   private async reload(): Promise<void> {
     const seq: number = ++this.reloadSeq;
     this.loading = true;
@@ -87,8 +91,8 @@ export struct CommentsSheet {
     this.page = 1;
     try {
       const result: CommentPage = this.kind === 'post'
-        ? await Api.postComments(this.videoId, 1, PAGE_SIZE)
-        : await Api.comments(this.videoId, this.ep, 1, PAGE_SIZE);
+        ? await Api.postComments(this.videoId, 1, this.pageSize())
+        : await Api.comments(this.videoId, this.ep, 1, this.pageSize());
       if (seq !== this.reloadSeq) {
         return;
       }
@@ -116,8 +120,8 @@ export struct CommentsSheet {
     try {
       const next = this.page + 1;
       const result: CommentPage = this.kind === 'post'
-        ? await Api.postComments(this.videoId, next, PAGE_SIZE)
-        : await Api.comments(this.videoId, this.ep, next, PAGE_SIZE);
+        ? await Api.postComments(this.videoId, next, this.pageSize())
+        : await Api.comments(this.videoId, this.ep, next, this.pageSize());
       if (seq !== this.reloadSeq) {
         // 期间切了视频/切集（已重新拉第 1 页）：丢弃这一页旧响应。
         this.loadingMore = false;
