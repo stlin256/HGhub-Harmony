@@ -1,12 +1,11 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { UpdateInfo } from '../models/Types';
 import { Api } from './Api';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { UiBus } from './UiBus';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGUpdate';
-/** 冷启动后延迟多久做后台检查（避开首屏与启动动画）。 */
-const LAUNCH_DELAY_MS: number = 3000;
 
 /**
  * 启动后台检查更新。
@@ -28,10 +27,12 @@ export class UpdateChecker {
       return;
     }
     UpdateChecker.scheduled = true;
+    // 冷启动后延迟多久做后台检查（避开首屏与启动动画）：默认 3000ms，可由 update_delay_ms 下发覆盖。
+    const delayMs: number = ConfigRegistry.getNumber(ConfigKey.UPDATE_DELAY_MS);
     setTimeout(() => {
       UpdateChecker.checkOnce().catch(() => {
       });
-    }, LAUNCH_DELAY_MS);
+    }, delayMs);
   }
 
   /** 立即检查（设置页手动检查也走这里，共用同一份逻辑）。 */

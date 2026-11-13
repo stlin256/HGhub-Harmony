@@ -1,4 +1,5 @@
 import { JSON } from '@kit.ArkTS';
+import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { Prefs } from '../services/Prefs';
 import { WatchCoverCache } from '../services/WatchCoverCache';
 import { WidgetRefresher } from '../services/WidgetRefresher';
@@ -7,6 +8,15 @@ import { User, WatchProgress } from '../models/Types';
 /**
  * 全局用户偏好与本地数据：AppStorage 提供响应式，Prefs 负责持久化。
  * 对应 Web 版 src/store.tsx 的 Persist + hghub_theme。
+ *
+ * 读取约定（SPEC §4）：用户偏好的 getter 一律走 ConfigRegistry 三层合并
+ * （用户显式设置 > 远程下发 > 编译期默认值），不再直接读 AppStorage；
+ * AppStorage 仍由 init()/setXxx() 写入，供 @StorageLink 等 UI 响应式绑定使用。
+ * setXxx() 仍写 Prefs：用户显式设置会作为最高优先级的「用户偏好层」生效。
+ *
+ * 9 项用户偏好的读取入口：本类 7 项（主题/启动静音/优先高清/多源/超分/音量/画面比例）；
+ * ipv6_prefer 由 Ipv6Preference.enabled() 读取；reduce_motion 由 SettingsPage/HgMotion
+ * 读 AppStorage（ConfigRegistry 已对该键做 AppStorage 兼容读取）。
  */
 export const K_THEME_MODE = 'hgThemeMode';
 export const K_DARK = 'hgDark';
@@ -56,7 +66,9 @@ interface FavMetaEntry {
   cover: string;
 }
 
+// @config-exempt: ConfigRegistry 未注册 history_max（SPEC §4.4 建议 key 尚未落地），保留硬编码。
 const HISTORY_MAX: number = 80;
+// @config-exempt: ConfigRegistry 未注册 search_hist_max（SPEC §4.4 建议 key 尚未落地），保留硬编码。
 const SEARCH_HIST_MAX: number = 12;
 
 function parseNumberArray(raw: string): number[] {
@@ -160,9 +172,9 @@ export class UserPrefs {
     return value === undefined ? true : value;
   }
 
+  /** 主题模式：用户显式设置 > 远程下发 > 默认 system。 */
   static themeMode(): string {
-    const value = AppStorage.get<string>(K_THEME_MODE);
-    return value === undefined ? 'system' : value;
+    return ConfigRegistry.getString(ConfigKey.THEME_MODE);
   }
 
   static setThemeMode(mode: string, systemDark: boolean): void {
@@ -189,9 +201,9 @@ export class UserPrefs {
     AppStorage.setOrCreate<boolean>(K_MUTED, on);
   }
 
+  /** 启动时静音：用户显式设置 > 远程下发 > 默认开启。 */
   static muteOnStartup(): boolean {
-    const value = AppStorage.get<boolean>(K_MUTE_ON_STARTUP);
-    return value === undefined ? true : value;
+    return ConfigRegistry.getBool(ConfigKey.MUTE_ON_STARTUP);
   }
 
   static setMuteOnStartup(on: boolean): void {
@@ -202,15 +214,14 @@ export class UserPrefs {
     }
   }
 
-  /** 优先高清（HEVC）：默认关闭，避免老设备/弱网首播变慢。 */
+  /** 优先高清（HEVC）：用户显式设置 > 远程下发 > 默认开启。 */
   static preferHevc(): boolean {
-    const value = AppStorage.get<boolean>(K_PREFER_HEVC);
-    return value === undefined ? false : value;
+    return ConfigRegistry.getBool(ConfigKey.PREFER_HEVC);
   }
 
+  /** 多源聚合：用户显式设置 > 远程下发 > 默认开启。 */
   static multiSource(): boolean {
-    const value = AppStorage.get<boolean>(K_MULTI_SOURCE);
-    return value === undefined ? true : value;
+    return ConfigRegistry.getBool(ConfigKey.MULTI_SOURCE);
   }
 
   static setMultiSource(on: boolean): void {
@@ -218,10 +229,9 @@ export class UserPrefs {
     AppStorage.setOrCreate<boolean>(K_MULTI_SOURCE, on);
   }
 
-  /** AI 超分用户偏好：默认开启。 */
+  /** AI 超分用户偏好：用户显式设置 > 远程下发 > 默认开启。 */
   static superResolution(): boolean {
-    const value = AppStorage.get<boolean>(K_SUPER_RESOLUTION);
-    return value === undefined ? true : value;
+    return ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION);
   }
 
   static setSuperResolution(on: boolean): void {
@@ -234,9 +244,9 @@ export class UserPrefs {
     AppStorage.setOrCreate<boolean>(K_PREFER_HEVC, on);
   }
 
+  /** 播放音量：用户显式设置 > 远程下发 > 默认 0.7。 */
   static volume(): number {
-    const value = AppStorage.get<number>(K_VOLUME);
-    return value === undefined ? 0.7 : value;
+    return ConfigRegistry.getNumber(ConfigKey.VOLUME);
   }
 
   static setVolume(volume: number): void {
@@ -265,9 +275,9 @@ export class UserPrefs {
     return 'contain';
   }
 
+  /** 画面比例：用户显式设置 > 远程下发 > 默认 contain。 */
   static videoScale(): string {
-    const value = AppStorage.get<string>(K_VIDEO_SCALE);
-    return UserPrefs.normalizeVideoScale(value === undefined ? 'contain' : value);
+    return UserPrefs.normalizeVideoScale(ConfigRegistry.getString(ConfigKey.VIDEO_SCALE));
   }
 
   static setVideoScale(mode: string): void {

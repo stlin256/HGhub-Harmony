@@ -6,7 +6,7 @@ import { CrashGuard } from './CrashGuard';
 import { DeviceMetrics, DeviceMetricsSnapshot } from './DeviceMetrics';
 import { LineStats, LineStatsSnapshot } from './LineStats';
 import { ActionSnapshot, ActionStats } from './ActionStats';
-import { ConfigChange, ConfigRegistry } from './ConfigRegistry';
+import { ConfigChange, ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
 
@@ -15,9 +15,13 @@ const LOG_TAG: string = 'HGAnalytics';
 
 /** 上报端点（telemetry-worker）。 */
 const ENDPOINT: string = 'https://hghub-telemetry.stlin256.workers.dev/v1/report';
-/** 同一设备两次上报的最小间隔：1 小时（服务端按天去重，这里只防频繁请求）。 */
+/**
+ * 同一设备两次上报的最小间隔：1 小时（服务端按天去重，这里只防频繁请求）。
+ * @config-exempt: ConfigRegistry 未注册 analytics_interval_ms（SPEC §4.4 建议 key 尚未落地），保留硬编码。
+ */
 const REPORT_INTERVAL_MS: number = 3600 * 1000;
 /** 单次上报最多携带的配置变化条数（SPEC §15.4：超出丢弃最旧的）。 */
+// @config-exempt: SPEC §15.4 固定值（协议常量），不可远程配置。
 const MAX_CONFIG_APPLY: number = 20;
 
 const KEY_INSTALL_ID: string = 'install_id';
@@ -46,8 +50,6 @@ const KEY_PAGE_SEARCH: string = 'an_page_search';
 const KEY_PAGE_CATEGORY: string = 'an_page_category';
 const KEY_PAGE_PROFILE: string = 'an_page_profile';
 const KEY_PAGE_PLAYER: string = 'an_page_player';
-/** 启动耗时只保留最近 N 次，用于算设备内 p50/p90。 */
-const STARTUP_SAMPLES: number = 20;
 
 /** 某一天的本地聚合。 */
 interface DayStats {
@@ -136,6 +138,10 @@ export class Analytics {
 
   /** 冷启动调用一次。 */
   static onLaunch(): void {
+    // 匿名统计总开关（远程只能收紧）：关闭时不做任何采集与上报。
+    if (!ConfigRegistry.getBool(ConfigKey.ANALYTICS_ENABLED)) {
+      return;
+    }
     try {
       const id: string = Analytics.ensureInstallId();
       if (id.length === 0) {
@@ -207,7 +213,7 @@ export class Analytics {
     }
   }
 
-  /** 记录一次启动耗时（毫秒），保留最近 N 次用于算 p50/p90。 */
+  /** 记录一次启动耗时（毫秒），保留最近 N 次（startup_sample_max）用于算 p50/p90。 */
   static recordStartup(ms: number): void {
     if (ms <= 0) {
       return;
@@ -215,7 +221,8 @@ export class Analytics {
     try {
       const list: number[] = Analytics.readStartupList();
       list.push(ms);
-      while (list.length > STARTUP_SAMPLES) {
+      const maxSamples: number = ConfigRegistry.getNumber(ConfigKey.STARTUP_SAMPLE_MAX);
+      while (list.length > maxSamples) {
         list.shift();
       }
       Prefs.putString(KEY_STARTUP_LIST, JSON.stringify(list));

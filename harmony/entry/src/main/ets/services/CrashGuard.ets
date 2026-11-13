@@ -1,11 +1,10 @@
 import { hiAppEvent, hilog } from '@kit.PerformanceAnalysisKit';
 import { JSON } from '@kit.ArkTS';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Prefs } from './Prefs';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGCrash';
-/** 本地最多保留的崩溃记录条数（滚动覆盖）。 */
-const MAX_RECORDS: number = 10;
 const KEY_RECORDS: string = 'crash_records';
 
 /** 一条崩溃/卡死记录。 */
@@ -18,13 +17,19 @@ export interface CrashRecord {
   stack: string;
   /** 出错线程名。 */
   thread: string;
-  /** 是否已上报（上报成功后置 true，最多保留 MAX_RECORDS 条）。 */
+  /** 是否已上报（上报成功后置 true，最多保留 crash_max_records 条）。 */
   uploaded: boolean;
 }
 
-/** 堆栈保留的最大帧数。 */
+/**
+ * 堆栈保留的最大帧数。
+ * @config-exempt: ConfigRegistry 未注册 crash_max_frames（SPEC §4.4 建议 key 尚未落地），保留硬编码。
+ */
 const MAX_FRAMES: number = 8;
-/** 规范化后堆栈的最大长度。 */
+/**
+ * 规范化后堆栈的最大长度。
+ * @config-exempt: ConfigRegistry 未注册 crash_max_stack_len（SPEC §4.4 建议 key 尚未落地），保留硬编码。
+ */
 const MAX_STACK_LEN: number = 2000;
 
 /**
@@ -32,7 +37,7 @@ const MAX_STACK_LEN: number = 2000;
  *
  * 设计约束：
  * - 只落本地，不上报、不联网；
- * - 最多保留 MAX_RECORDS 条，超出滚动覆盖；
+ * - 最多保留 crash_max_records 条（ConfigRegistry），超出滚动覆盖；
  * - 任何异常都静默（监控本身不能影响主流程）。
  */
 export class CrashGuard {
@@ -165,7 +170,8 @@ export class CrashGuard {
     try {
       const list: CrashRecord[] = CrashGuard.records();
       list.push(record);
-      while (list.length > MAX_RECORDS) {
+      const maxRecords: number = ConfigRegistry.getNumber(ConfigKey.CRASH_MAX_RECORDS);
+      while (list.length > maxRecords) {
         list.shift();
       }
       Prefs.putString(KEY_RECORDS, JSON.stringify(list));

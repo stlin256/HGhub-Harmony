@@ -1,6 +1,7 @@
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Api } from './Api';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { CrashGuard, CrashRecord } from './CrashGuard';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
@@ -9,9 +10,10 @@ const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGCrashRep';
 /** 上报端点（telemetry-worker）。 */
 const ENDPOINT: string = 'https://hghub-telemetry.stlin256.workers.dev/v1/crash';
-/** 单次最多上报条数（本地最多存 10 条）。 */
-const BATCH: number = 5;
-/** 两次上报尝试的最小间隔。 */
+/**
+ * 两次上报尝试的最小间隔。
+ * @config-exempt: ConfigRegistry 未注册 crash_retry_interval_ms（SPEC §4.4 建议 key 尚未落地），保留硬编码。
+ */
 const RETRY_INTERVAL_MS: number = 30 * 60 * 1000;
 const KEY_LAST_TRY: string = 'crash_report_at';
 
@@ -30,8 +32,12 @@ const KEY_LAST_TRY: string = 'crash_report_at';
 export class CrashReporter {
   /** 冷启动调用一次。 */
   static reportPending(): void {
+    // 崩溃上报总开关（远程只能收紧）：关闭时不读取、不上报任何崩溃记录。
+    if (!ConfigRegistry.getBool(ConfigKey.CRASH_REPORT_ENABLED)) {
+      return;
+    }
     try {
-      const list: CrashRecord[] = CrashGuard.pending(BATCH);
+      const list: CrashRecord[] = CrashGuard.pending(ConfigRegistry.getNumber(ConfigKey.CRASH_BATCH));
       if (list.length === 0) {
         return;
       }

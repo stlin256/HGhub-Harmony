@@ -1,10 +1,15 @@
 import { connection } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Prefs } from './Prefs';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGIpv6';
-/** 探测结果缓存时长：5 分钟（DNS 可能因网络切换而变化，不宜过长）。 */
+/**
+ * 探测结果缓存时长：5 分钟（DNS 可能因网络切换而变化，不宜过长）。
+ * @config-exempt: ConfigRegistry 未注册 ipv6_cache_ttl_ms；line_probe_ttl_ms 的默认值 60s
+ * 与本项 5min 不同，直接接入会改变无下发时的行为，故保留硬编码。
+ */
 const CACHE_TTL_MS: number = 5 * 60 * 1000;
 /** Prefs 键：IPv6 优先开关。 */
 const PREF_KEY: string = 'ipv6_prefer';
@@ -26,13 +31,13 @@ export class Ipv6Preference {
   /** 正在探测的 host，避免并发重复探测。 */
   private static inflight: Set<string> = new Set<string>();
 
-  /** 是否开启 IPv6 优先（默认开）。 */
+  /**
+   * 是否开启 IPv6 优先。
+   * 功能总开关（远程 kill switch，ipv6_enabled）与用户偏好（设置页 ipv6_prefer）都开启才生效；
+   * 无下发时 ipv6_enabled 默认 true，行为与迁移前「只读用户偏好」完全一致。
+   */
   static enabled(): boolean {
-    try {
-      return Prefs.getBool(PREF_KEY, true);
-    } catch (err) {
-      return true;
-    }
+    return ConfigRegistry.getBool(ConfigKey.IPV6_ENABLED) && ConfigRegistry.getBool(ConfigKey.IPV6_PREFER);
   }
 
   static setEnabled(on: boolean): void {

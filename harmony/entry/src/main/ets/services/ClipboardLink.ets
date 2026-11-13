@@ -1,11 +1,15 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Lines } from './Lines';
 import { Prefs } from './Prefs';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGClip';
-/** 两次剪贴板检查的最小间隔（避免每次回前台都触发系统读剪贴板提示）。 */
+/**
+ * 两次剪贴板检查的最小间隔（避免每次回前台都触发系统读剪贴板提示）。
+ * @config-exempt: ConfigRegistry 未注册 clipboard_check_interval_ms（SPEC §4.4 建议 key 尚未落地），保留硬编码。
+ */
 const CHECK_INTERVAL_MS: number = 120 * 1000;
 const KEY_LAST_CHECK: string = 'clip_last_check_at';
 const KEY_LAST_LINK: string = 'clip_last_link';
@@ -21,6 +25,7 @@ const KEY_LAST_LINK: string = 'clip_last_link';
  */
 export class ClipboardLink {
   /** 内置固定域名（白名单未就绪时的兜底）。 */
+  // @config-exempt: 安全白名单，远程不可下发（防钓鱼链接借 App 拉起）。
   private static readonly BUILTIN_HOSTS: string[] = ['example.invalid', 'example.invalid'];
 
   /**
@@ -121,6 +126,10 @@ export class ClipboardLink {
    * @returns 视频 ID；0 表示没有可识别的链接或本次跳过
    */
   static async detect(): Promise<number> {
+    // 剪贴板拉起功能总开关（远程 kill switch）：关闭时不读剪贴板、不提示。
+    if (!ConfigRegistry.getBool(ConfigKey.CLIPBOARD_LAUNCH_ENABLED)) {
+      return 0;
+    }
     const now: number = Date.now();
     const last: number = Prefs.getNumber(KEY_LAST_CHECK, 0);
     if (last > 0 && now - last < CHECK_INTERVAL_MS) {

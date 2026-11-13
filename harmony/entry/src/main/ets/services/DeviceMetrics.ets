@@ -3,13 +3,11 @@ import { storageStatistics } from '@kit.CoreFileKit';
 import { hidebug } from '@kit.PerformanceAnalysisKit';
 import { taskpool } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Prefs } from './Prefs';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGDevMetrics';
-
-/** 内存/磁盘采样最小间隔：30 分钟（变化慢，避免频繁读 /proc）。 */
-const SAMPLE_INTERVAL_MS: number = 30 * 60 * 1000;
 
 const KEY_PSS_KB: string = 'dm_pss_kb';
 const KEY_PSS_PEAK_KB: string = 'dm_pss_peak_kb';
@@ -79,8 +77,8 @@ function readProcessStats(): number[] {
  * 隐私：全部是设备聚合数值，不含任何标识或内容。
  *
  * 采样策略：
- * - 内存：TaskPool 读 /proc（避免主线程卡顿），30 分钟节流，记录峰值；
- * - 磁盘：`storageStatistics.getCurrentBundleStats()`，同 30 分钟节流；
+ * - 内存：TaskPool 读 /proc（避免主线程卡顿），默认 30 分钟节流（device_sample_interval_ms），记录峰值；
+ * - 磁盘：`storageStatistics.getCurrentBundleStats()`，同一节流间隔；
  * - 功耗：会话开始/结束各读一次电量与温度，充电中不计算耗电。
  */
 export class DeviceMetrics {
@@ -152,7 +150,9 @@ export class DeviceMetrics {
   static sampleAsync(): void {
     const now: number = Date.now();
     const last: number = Prefs.getNumber(KEY_LAST_SAMPLE, 0);
-    if (last > 0 && now - last < SAMPLE_INTERVAL_MS) {
+    // 采样最小间隔：默认 30 分钟（变化慢，避免频繁读 /proc），可由 device_sample_interval_ms 下发覆盖。
+    const intervalMs: number = ConfigRegistry.getNumber(ConfigKey.DEVICE_SAMPLE_INTERVAL_MS);
+    if (last > 0 && now - last < intervalMs) {
       return;
     }
     Prefs.putNumber(KEY_LAST_SAMPLE, now);
