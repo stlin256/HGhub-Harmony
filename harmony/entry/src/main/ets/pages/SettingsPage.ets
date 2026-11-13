@@ -402,6 +402,20 @@ export struct SettingsPage {
     }
   }
 
+  /** 打开下载页并把链接复制到剪贴板（手动检查与后台弹窗行为一致）。 */
+  private openReleasePage(url: string): void {
+    const target: string = url.length > 0 ? url : 'https://github.com/stlin256/HGhub-Harmony/releases';
+    Api.openUrl(target);
+    try {
+      const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, target);
+      pasteboard.getSystemPasteboard().setData(data).then(() => {
+        UiBus.toastOk('下载链接已复制');
+      }).catch(() => {
+      });
+    } catch (err) {
+    }
+  }
+
   private async checkUpdate(): Promise<void> {
     if (this.checking) {
       return;
@@ -413,9 +427,9 @@ export struct SettingsPage {
         const message: string = 'v' + info.current + ' → v' + info.latest +
           (info.notes !== undefined && info.notes.length > 0 ? '\n\n' + info.notes : '');
         this.openConfirm(
-          new ConfirmCopy('发现新版本', message, '前往下载', '稍后', false),
+          new ConfirmCopy('有新版本 v' + info.latest, message, '打开下载链接', '稍后', false),
           () => {
-            Api.openUrl(info.url);
+            this.openReleasePage(info.url);
           }
         );
       } else {
