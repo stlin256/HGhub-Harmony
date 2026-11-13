@@ -34,6 +34,9 @@ import { LineSheet } from '../components/LineSheet';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { fmt, fmtTime } from '../utils/Format';
 import { I18n } from '../utils/I18n';
+import {
+  ActionStats, ACT_CAST, ACT_EP_SWITCH, ACT_FAV, ACT_LIKE, ACT_PIP, ACT_RATE, ACT_SHARE, ACT_UNFAV, ACT_UNLIKE
+} from '../services/ActionStats';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
 const CHROME_HIDE_MS: number = 3000;
@@ -1289,6 +1292,7 @@ export struct PlayerPage {
   }
 
   private switchEpisode(ep: number): void {
+    ActionStats.record(ACT_EP_SWITCH);
     this.sheetVisible = false;
     if (ep < 1 || ep === this.ep) {
       return;
@@ -1342,6 +1346,7 @@ export struct PlayerPage {
 
   /* ── 互动 ─────────────────────────────────────────── */
   private toggleLike(): void {
+    ActionStats.record(this.liked ? ACT_UNLIKE : ACT_LIKE);
     const id = this.currentId();
     if (id <= 0) {
       return;
@@ -1380,6 +1385,7 @@ export struct PlayerPage {
   }
 
   private toggleFav(): void {
+    ActionStats.record(this.faved ? ACT_UNFAV : ACT_FAV);
     const id = this.currentId();
     if (id <= 0) {
       return;
@@ -1460,6 +1466,7 @@ export struct PlayerPage {
     if (id <= 0) {
       return;
     }
+    ActionStats.record(ACT_SHARE);
     const title: string = this.titleText();
     const shown: boolean = await ShareLink.share(id, title);
     if (shown) {
@@ -1579,6 +1586,8 @@ export struct PlayerPage {
     const open: boolean = state === AVCastPickerState.STATE_APPEARING;
     this.castPanelOpen = open;
     if (open) {
+      // 匿名行为统计：投播面板出现即记一次投播动作（不记投到哪台设备）。
+      ActionStats.record(ACT_CAST);
       if (this.hideTimer >= 0) {
         clearTimeout(this.hideTimer);
         this.hideTimer = -1;
@@ -1628,6 +1637,7 @@ export struct PlayerPage {
   }
 
   private changeRate(rate: number): void {
+    ActionStats.record(ACT_RATE);
     this.rate = rate;
     this.speedLocked = false;
     this.speedBoost = false;
@@ -2437,6 +2447,7 @@ export struct PlayerPage {
 
   /** 进入画中画：把当前播放的 XComponent 交给系统 PiP 窗口。 */
   private async enterPiP(): Promise<void> {
+    ActionStats.record(ACT_PIP);
     if (!PiPController.isEnabled()) {
       UiBus.toast('系统未开启画中画');
       return;

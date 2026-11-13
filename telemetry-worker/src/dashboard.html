@@ -578,6 +578,9 @@
     ];
     grid.appendChild(section('页面访问', '按进入次数', barList(pageItems), 'col-6'));
 
+    /* 用户行为 */
+    grid.appendChild(section('用户行为', '区间累计次数 · 只记动作不记内容', actionPanel(d), 'col-12'));
+
     /* 设备指标 */
     grid.appendChild(section('设备指标', '内存 / 磁盘 / 功耗 · 区间均值', devicePanel(d), 'col-6'));
 
@@ -678,6 +681,30 @@
       box.appendChild(legend);
     }
     return box;
+  }
+
+  var ACTION_LABELS = [
+    ['share', '分享'], ['like', '点赞'], ['unlike', '取消赞'],
+    ['fav', '收藏'], ['unfav', '取消收藏'], ['search', '搜索'],
+    ['ep_switch', '切集'], ['rate', '倍速'], ['cast', '投播'],
+    ['pip', '画中画'], ['comment', '评论'], ['follow', '关注'],
+    ['topic', '专题'], ['user', '用户主页'],
+  ];
+
+  function actionPanel(d){
+    var a = d.actions || {};
+    var items = ACTION_LABELS.map(function(p){
+      return { name: p[1], value: a[p[0]] || 0 };
+    }).filter(function(it){ return it.value > 0; });
+    items.sort(function(x, y){ return y.value - x.value; });
+    if (!items.length){
+      var empty = document.createElement('div');
+      empty.className = 'state';
+      empty.style.padding = '24px 0';
+      empty.textContent = '暂无行为数据';
+      return empty;
+    }
+    return barList(items, { limit: 14 });
   }
 
   function crashPanel(d){

@@ -48,6 +48,20 @@ function makeDB() {
               avg_disk_app: 0, avg_disk_cache: 0, avg_disk_data: 0,
               avg_temp: 0, max_temp: 0, avg_latency: 0, avg_latency_p90: 0,
               avg_cpu: 0, max_cpu_peak: 0, max_thermal: 0, avg_power_mw: 0,
+              act_share: 0,
+              act_like: 0,
+              act_unlike: 0,
+              act_fav: 0,
+              act_unfav: 0,
+              act_search: 0,
+              act_ep_switch: 0,
+              act_rate: 0,
+              act_cast: 0,
+              act_pip: 0,
+              act_comment: 0,
+              act_follow: 0,
+              act_topic: 0,
+              act_user: 0,
             };
             let p50Sum = 0, p50N = 0, p90Sum = 0, p90N = 0;
             for (const v of dailyStats.values()) {
@@ -153,6 +167,20 @@ function makeDB() {
               'line_primary_ok', 'line_primary_fail', 'line_mirror_ok', 'line_mirror_fail',
               'line_switches', 'line_latency_avg_ms', 'line_latency_p90_ms',
               'cpu_pct', 'cpu_peak_pct', 'thermal_level', 'power_mw',
+              'act_share',
+              'act_like',
+              'act_unlike',
+              'act_fav',
+              'act_unfav',
+              'act_search',
+              'act_ep_switch',
+              'act_rate',
+              'act_cast',
+              'act_pip',
+              'act_comment',
+              'act_follow',
+              'act_topic',
+              'act_user',
             ];
             const next = { ...cur };
             fields.forEach((f, i) => {
@@ -812,4 +840,56 @@ test('CPU / 热等级 / 功率缺省为 0', async () => {
   assert.equal(body.device.cpu_avg_pct, 0);
   assert.equal(body.device.thermal_max, 0);
   assert.equal(body.device.power_mw_avg, 0);
+});
+
+/* ── 用户行为计数 ──────────────────────────────────── */
+
+test('行为计数写入并聚合', async () => {
+  const e = env();
+  const day = todayStamp();
+  const stats = {
+    day, sessions: 1,
+    act_share: 3, act_like: 12, act_unlike: 2, act_fav: 5, act_unfav: 1,
+    act_search: 8, act_ep_switch: 20, act_rate: 4, act_cast: 1, act_pip: 2,
+    act_comment: 1, act_follow: 2, act_topic: 3, act_user: 4,
+  };
+  const res = await worker.fetch(post({ id: UUID, ver: '2.3.0', day, stats }), e, ctx);
+  assert.equal(res.status, 200);
+
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.act_share, 3);
+  assert.equal(row.act_search, 8);
+  assert.equal(row.act_ep_switch, 20);
+
+  const sres = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await sres.json();
+  assert.equal(body.actions.share, 3);
+  assert.equal(body.actions.like, 12);
+  assert.equal(body.actions.search, 8);
+  assert.equal(body.actions.ep_switch, 20);
+  assert.equal(body.actions.topic, 3);
+  assert.equal(body.actions.user, 4);
+});
+
+test('行为计数缺省为 0', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({ id: UUID, ver: '2.3.0', day, stats: { day, sessions: 1 } }), e, ctx);
+  const sres = await worker.fetch(new Request('https://w/stats?key=k'), e, ctx);
+  const body = await sres.json();
+  assert.equal(body.actions.share, 0);
+  assert.equal(body.actions.search, 0);
+  assert.equal(body.actions.ep_switch, 0);
+});
+
+test('行为计数超上限被裁剪', async () => {
+  const e = env();
+  const day = todayStamp();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, act_share: 9e12, act_search: -5 },
+  }), e, ctx);
+  const row = [...e.DB.dailyStats.values()][0];
+  assert.equal(row.act_share, 1000000);
+  assert.equal(row.act_search, 0);
 });
