@@ -16,6 +16,8 @@ export const K_MUTE_ON_STARTUP = 'hgMuteOnStartup';
 export const K_PREFER_HEVC = 'hgPreferHevc';
 /** 多源聚合：GET 请求按 hedge 策略并发多条线路，取最快稳定响应（默认开启）。 */
 export const K_MULTI_SOURCE = 'hgMultiSource';
+/** AI 超分开关（用户偏好，默认开）。 */
+export const K_SUPER_RESOLUTION = 'hgSuperResolution';
 export const K_VOLUME = 'hgVolume';
 export const K_LIKES = 'hgLikesJson';
 export const K_FAVS = 'hgFavsJson';
@@ -122,6 +124,8 @@ export class UserPrefs {
     AppStorage.setOrCreate<boolean>(K_PREFER_HEVC, Prefs.getBool('prefer_hevc', true));
     // 多源聚合默认开启；关闭后只走当前线路（省流量/排查问题时用）。
     AppStorage.setOrCreate<boolean>(K_MULTI_SOURCE, Prefs.getBool('multi_source', true));
+    // AI 超分默认开启；省电模式/低电量时由 PowerGuard 自动暂停，恢复后按此偏好复原。
+    AppStorage.setOrCreate<boolean>(K_SUPER_RESOLUTION, Prefs.getBool('super_resolution', true));
     AppStorage.setOrCreate<number>(K_VOLUME, Prefs.getNumber('volume', 0.7));
     AppStorage.setOrCreate<string>(K_VIDEO_SCALE, UserPrefs.normalizeVideoScale(Prefs.getString('video_scale', 'contain')));
     AppStorage.setOrCreate<string>(K_LIKES, Prefs.getString('likes', '[]'));
@@ -212,6 +216,17 @@ export class UserPrefs {
   static setMultiSource(on: boolean): void {
     Prefs.putBool('multi_source', on);
     AppStorage.setOrCreate<boolean>(K_MULTI_SOURCE, on);
+  }
+
+  /** AI 超分用户偏好：默认开启。 */
+  static superResolution(): boolean {
+    const value = AppStorage.get<boolean>(K_SUPER_RESOLUTION);
+    return value === undefined ? true : value;
+  }
+
+  static setSuperResolution(on: boolean): void {
+    Prefs.putBool('super_resolution', on);
+    AppStorage.setOrCreate<boolean>(K_SUPER_RESOLUTION, on);
   }
 
   static setPreferHevc(on: boolean): void {

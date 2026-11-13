@@ -12,6 +12,7 @@ import { LocalProxy } from './LocalProxy';
 import { MediaPrefetch } from './MediaPrefetch';
 import { PlayerQuality } from './PlayerQuality';
 import { MediaSession } from './MediaSession';
+import { PowerGuard } from '../services/PowerGuard';
 import { redactSensitive } from '../utils/Security';
 
 const HISTORY_INTERVAL_MS: number = 5000;
@@ -108,6 +109,12 @@ export class PlayerService {
   private lastUiAt: number = 0;
   /** 上次同步系统媒体会话状态的时间（1s 节流）。 */
   private lastSessionAt: number = 0;
+  /** 当前播放器是否声明了超分能力（PlaybackStrategy.enableSuperResolution）。 */
+  private srCapable: boolean = false;
+  /** 当前超分是否处于开启状态（以系统回调为准）。 */
+  private srActive: boolean = false;
+  /** 超分状态变化回调（页面用于展示提示）。 */
+  onSuperResolutionChanged: (enabled: boolean, supported: boolean) => void = () => {};
   private lastHistoryAt: number = 0;
   private seekLockAt: number = 0;
   /** 当前播放是否优先 HEVC 高清源（跟随 UserPrefs，可被 switchQuality 改写）。 */
@@ -118,6 +125,11 @@ export class PlayerService {
   private cache: Map<string, PlayCacheEntry> = new Map<string, PlayCacheEntry>();
 
   constructor() {
+    // 电源状态变化（省电/低电量）时重新应用超分；最后一个创建的实例生效。
+    PowerGuard.onEffectiveChange = (_enabled: boolean) => {
+      this.applySuperResolution().catch(() => {
+      });
+    };
     MediaSession.bind({
       onPlay: () => {
         this.play();
@@ -608,6 +620,76 @@ export class PlayerService {
     this.onError(message, code);
   }
 
+  /* ── AI 超分 ──────────────────────────────────────── */
+
+  /**
+   * 在 prepare 之前声明超分能力。
+   * 失败（设备不支持 / 状态不符）只记日志，不影响播放。
+   */
+  private static async declareSuperResolution(player: media.AVPlayer): Promise<void> {
+    try {
+      const strategy: media.PlaybackStrategy = {
+        enableSuperResolution: true
+      };
+      await player.setPlaybackStrategy(strategy);
+    } catch (err) {
+      PlaybackLog.warn('sr.strategy.fail', PlayerService.errText(err));
+    }
+  }
+
+  /**
+   * 按「用户开关 + 电源状态」应用超分。
+   * 开：setSuperResolution(true) + setVideoWindowSize(1920,1080)；
+   * 关：setSuperResolution(false)。
+   * 设备不支持（5410003）时标记 srCapable=false 并静默。
+   */
+  async applySuperResolution(): Promise<void> {
+    const player = this.player;
+    if (player === undefined || this.released) {
+      return;
+    }
+    const want: boolean = PowerGuard.superResolutionAllowed();
+    if (!want && !this.srActive) {
+      return;
+    }
+    try {
+      if (want) {
+        await player.setSuperResolution(true);
+        // 目标输出分辨率：1080p 上限（系统允许范围 320×320 ~ 1920×1080）。
+        await player.setVideoWindowSize(1920, 1080);
+        this.srCapable = true;
+      } else {
+        await player.setSuperResolution(false);
+      }
+    } catch (err) {
+      const code: number = PlayerService.errorCode(err);
+      if (code === 5410003) {
+        // 设备不支持超分：标记后不再尝试。
+        this.srCapable = false;
+        PlaybackLog.info('sr.unsupported', '');
+      } else {
+        PlaybackLog.warn('sr.apply.fail', 'code=' + code + ' ' + PlayerService.errText(err));
+      }
+    }
+  }
+
+  /** 超分当前是否可用（设备支持且已开启）。 */
+  isSuperResolutionActive(): boolean {
+    return this.srActive && this.srCapable;
+  }
+
+  /** 设备是否支持超分（以最近一次尝试为准）。 */
+  isSuperResolutionCapable(): boolean {
+    return this.srCapable;
+  }
+
+  /** 从错误对象取业务码（取不到返回 0）。 */
+  private static errorCode(err: Object): number {
+    const be = err as BusinessError;
+    const code: number | undefined = be.code;
+    return code === undefined || code === null ? 0 : code;
+  }
+
   /* ── AVPlayer 实例与事件 ──────────────────────────── */
   private async ensurePlayer(): Promise<media.AVPlayer> {
     const existing = this.player;
@@ -644,6 +726,12 @@ export class PlayerService {
       } else if (state === 'error') {
         this.onState('error');
       }
+    });
+
+    player.on('superResolutionChanged', (enabled: boolean) => {
+      this.srActive = enabled;
+      PlaybackLog.info('sr.changed', enabled ? 'on' : 'off');
+      this.onSuperResolutionChanged(enabled, this.srCapable);
     });
 
     player.on('timeUpdate', (ms: number) => {
@@ -820,6 +908,8 @@ export class PlayerService {
     } else {
       PlaybackLog.warn('surface.bind.skip', 'state=' + player.state + ' waited=' + initWaited);
     }
+    // 超分能力必须在 prepare 之前通过 PlaybackStrategy 声明（否则 setSuperResolution 报 5410004）。
+    await PlayerService.declareSuperResolution(player);
     try {
       await player.prepare();
     } catch (err) {
@@ -852,6 +942,9 @@ export class PlayerService {
     if (prepWaited > 0) {
       PlaybackLog.info('prepare.wait', 'ms=' + prepWaited + ' state=' + player.state);
     }
+    // 按当前电源状态应用超分（省电/低电量时保持关闭）。
+    this.applySuperResolution().catch(() => {
+    });
     if (player.state !== 'prepared' && player.state !== 'playing' &&
       player.state !== 'paused' && player.state !== 'completed') {
       // 慢网下 prepare 的 Promise 可能早于状态事件：此时不做倍速/缩放/seek，等 videoSizeChange 后再补。
