@@ -24,6 +24,7 @@ import { RecService } from '../recommend/RecService';
 import { Prefs } from '../services/Prefs';
 import { runtime } from '../services/runtime';
 import { RemoteAssets } from '../services/RemoteAssets';
+import { Endpoints } from '../services/Endpoints';
 import { Session } from '../services/Session';
 import { Lines } from '../services/Lines';
 import {
@@ -171,6 +172,8 @@ export default class EntryAbility extends UIAbility {
   private async initServices(systemDark: boolean): Promise<void> {
     try {
       await Prefs.init(this.context);
+      // runtime/runtime：把内置自签 CA 复制到沙箱（供 Net 的 caPath 校验），必须先于任何runtime请求。
+      await Endpoints.init();
       Lines.load();
       Session.load();
       UserPrefs.init(systemDark);

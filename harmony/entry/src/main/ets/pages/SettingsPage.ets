@@ -1,6 +1,7 @@
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
+import { UpdateChecker } from '../services/UpdateChecker';
 import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
 import { K_LINE_BASE, Lines } from '../services/Lines';
@@ -320,7 +321,7 @@ export struct SettingsPage {
     }
     this.checking = true;
     try {
-      const info: UpdateInfo = await Api.checkUpdate();
+      const info: UpdateInfo = await UpdateChecker.checkNow();
       if (info.has_update) {
         const message: string = 'v' + info.current + ' → v' + info.latest +
           (info.notes !== undefined && info.notes.length > 0 ? '\n\n' + info.notes : '');
@@ -335,11 +336,11 @@ export struct SettingsPage {
         UiBus.toastOk(I18n.fmt1($r('app.string.fmt_latest_version'), info.current));
       }
     } catch (err) {
-      // 连不上 GitHub / 获取失败：弹窗给出可执行的兜底动作（复制下载页地址）。
+      // 连不上更新服务器 / 获取失败：弹窗给出可执行的兜底动作（复制下载页地址）。
       const detail: string = (err as Error).message !== undefined && (err as Error).message !== null ?
         (err as Error).message : '未知错误';
       const reason: string = this.isNetworkError(err)
-        ? '连不上 GitHub，暂时无法获取最新版本。'
+        ? '连不上更新服务器，暂时无法获取最新版本。'
         : I18n.fmt1($r('app.string.fmt_update_failed'), detail);
       this.openConfirm(
         new ConfirmCopy(I18n.fmt0($r('app.string.fmt_update_failed_title')),

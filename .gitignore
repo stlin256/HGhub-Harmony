@@ -24,6 +24,8 @@ harmony/**/.preview/
 harmony/**/.cxx/
 harmony/**/node_modules/
 scripts/harmony/.local/
+# 编译期注入的服务器端点（IP/端口/接入密钥，不入库；由 set-server.mjs 生成）
+harmony/entry/src/main/ets/services/ServerEndpoint.local.ets
 *.p7b
 *.cer
 *.csr
