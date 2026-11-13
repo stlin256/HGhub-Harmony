@@ -147,5 +147,7 @@ CREATE TABLE IF NOT EXISTS remote_config (
   id TEXT PRIMARY KEY,
   version INTEGER NOT NULL,
   payload TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  -- 配置唯一 ID（C11 / SPEC §16）：每次发布生成，全局唯一、永不复用
+  config_id TEXT NOT NULL DEFAULT ''
 );

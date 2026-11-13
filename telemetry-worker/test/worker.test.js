@@ -121,7 +121,7 @@ function makeDB() {
             const r = rates.get(args[0]);
             return r ? { count: r.count, expires_at: r.expires_at } : null;
           }
-          if (sql.includes('SELECT version, payload, updated_at FROM remote_config')) {
+          if (sql.includes('SELECT version, payload, updated_at, config_id FROM remote_config')) {
             let latest = null;
             for (const row of remoteConfig.values()) {
               if (latest === null || row.version > latest.version) latest = row;
@@ -248,13 +248,15 @@ function makeDB() {
             return { success: true };
           }
           if (sql.includes('INSERT INTO remote_config')) {
-            const [id, version, payload, updatedAt] = args;
+            const [id, version, payload, updatedAt, configId] = args;
             const cur = remoteConfig.get(id);
             // 模拟 D1 的 ON CONFLICT ... WHERE excluded.version > version：旧版本不覆盖。
             if (cur && version <= cur.version) {
               return { success: true, meta: { changes: 0 } };
             }
-            remoteConfig.set(id, { id, version, payload, updated_at: updatedAt });
+            remoteConfig.set(id, {
+              id, version, payload, updated_at: updatedAt, config_id: configId || '',
+            });
             return { success: true, meta: { changes: 1 } };
           }
           return { success: true };
@@ -930,12 +932,14 @@ function configEnv(extra = {}) {
 }
 
 /** 直接向 mock D1 写入一条配置（等价于一次成功的 POST /admin/config）。 */
-function seedConfig(db, version, payload, updatedAt = 1731600000) {
+function seedConfig(db, version, payload, updatedAt = 1731600000,
+  configId = '0f8fad5b-d9cb-469f-a165-70867728950e') {
   db.remoteConfig.set('global', {
     id: 'global',
     version,
     payload: JSON.stringify({ config_version: version, issued_at: updatedAt, ...payload }),
     updated_at: updatedAt,
+    config_id: configId,
   });
 }
 
@@ -1114,4 +1118,69 @@ test('/admin/config：payload 里的 config_version / issued_at / sig 被服务�
   assert.notEqual(cfg.issued_at, 1);
   assert.match(cfg.sig, /^[0-9a-f]{32}$/);
   assert.notEqual(cfg.sig, 'deadbeef');
+});
+
+/* ── 配置唯一 ID（config_id / SPEC §16）────────────── */
+
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+test('/v1/config：下发 config_id（与 D1 中最新一条一致）', async () => {
+  const e = configEnv();
+  seedConfig(e.DB, 12, CONFIG_PAYLOAD, 1731600000, '5f0c2a11-7d4e-4a3b-9c8d-1e2f3a4b5c6d');
+  const body = await (await worker.fetch(configGet('cfg=11'), e, ctx)).json();
+  assert.equal(body.config_id, '5f0c2a11-7d4e-4a3b-9c8d-1e2f3a4b5c6d');
+});
+
+test('/v1/config：旧库无 config_id 时下发空串（客户端按未下发处理）', async () => {
+  const e = configEnv();
+  seedConfig(e.DB, 12, CONFIG_PAYLOAD, 1731600000, '');
+  const body = await (await worker.fetch(configGet(), e, ctx)).json();
+  assert.equal(body.config_id, '');
+});
+
+test('/admin/config：每次发布生成合法且不重复的 config_id', async () => {
+  const e = configEnv();
+  const h = { 'x-admin-key': 'k' };
+  const first = await (await worker.fetch(
+    adminPost({ version: 12, payload: { flags: { pip: true } } }, h), e, ctx)).json();
+  assert.equal(first.ok, true);
+  assert.match(first.config_id, UUID_V4_RE);
+
+  const second = await (await worker.fetch(
+    adminPost({ version: 13, payload: { flags: { pip: false } } }, h), e, ctx)).json();
+  assert.match(second.config_id, UUID_V4_RE);
+  assert.notEqual(second.config_id, first.config_id);
+  assert.equal(e.DB.remoteConfig.get('global').config_id, second.config_id);
+
+  // 下发的是最新一次的 config_id。
+  const cfg = await (await worker.fetch(configGet('cfg=12'), e, ctx)).json();
+  assert.equal(cfg.config_id, second.config_id);
+});
+
+test('/admin/config：同 version 重发 409 且 config_id 不变', async () => {
+  const e = configEnv();
+  const h = { 'x-admin-key': 'k' };
+  const first = await (await worker.fetch(
+    adminPost({ version: 12, payload: { flags: { pip: true } } }, h), e, ctx)).json();
+  const conflict = await worker.fetch(
+    adminPost({ version: 12, payload: { flags: { pip: false } } }, h), e, ctx);
+  assert.equal(conflict.status, 409);
+  assert.equal(e.DB.remoteConfig.get('global').config_id, first.config_id);
+  const cfg = await (await worker.fetch(configGet('cfg=0'), e, ctx)).json();
+  assert.equal(cfg.config_id, first.config_id);
+  assert.equal(cfg.flags.pip, true);
+});
+
+test('/v1/config：config_id 参与签名，篡改后签名不再匹配', async () => {
+  const e = configEnv();
+  seedConfig(e.DB, 12, CONFIG_PAYLOAD);
+  const body = await (await worker.fetch(configGet(), e, ctx)).json();
+  const unsigned = { ...body };
+  delete unsigned.sig;
+  const expected = (await hmacSha256Hex(CONFIG_KEY, JSON.stringify(unsigned))).slice(0, 32);
+  assert.equal(body.sig, expected);
+
+  const tampered = { ...unsigned, config_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' };
+  const tamperedSig = (await hmacSha256Hex(CONFIG_KEY, JSON.stringify(tampered))).slice(0, 32);
+  assert.notEqual(tamperedSig, body.sig);
 });

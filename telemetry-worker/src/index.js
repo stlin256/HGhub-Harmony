@@ -19,15 +19,16 @@
  * 端点：
  *   POST /v1/report    上报一次启动 + 上一次的当日聚合（幂等）
  *   POST /v1/install   兼容旧路径，等价 /v1/report
- *   GET  /v1/config    远程配置下发（HMAC 签名 + 304 短路）
- *   POST /admin/config 发布远程配置（需要 STATS_KEY）
+ *   GET  /v1/config    远程配置下发（HMAC 签名 + 304 短路 + config_id）
+ *   POST /admin/config 发布远程配置（需要 CONFIG_ADMIN_KEY，未配置时回落 STATS_KEY）
  *   GET  /badge        shields.io endpoint 格式，只显示安装数
  *   GET  /stats?key=   聚合统计（需要 STATS_KEY）
  *   GET  /health       健康检查
  *
- * 远程配置（P1）：
+ * 远程配置（P1/P14）：
  *   GET /v1/config 从 D1 remote_config 读最新 payload，附加 HMAC-SHA256 签名后下发；
- *   未配置 CONFIG_SIGNING_KEY 时返回 503（不发未签名内容）；cfg 与服务端版本相同返回 304。
+ *   未配置 CONFIG_SIGNING_KEY 时返回 503（不发未签名内容）；cfg 与服务端版本相同返回 304；
+ *   响应体带 config_id（每次发布生成的唯一 ID，SPEC §16）。
  */
 
 import DASHBOARD_HTML from './dashboard.generated.js';
@@ -455,6 +456,7 @@ function clipText(value, max) {
  * 从 D1 读最新一条配置包，附加 HMAC 签名后下发。
  * - 未配置 CONFIG_SIGNING_KEY → 503（宁可不发，也不发未签名内容）
  * - cfg 与服务端版本相同 → 304 空 body
+ * - 响应体带 config_id（配置唯一 ID，SPEC §16）
  * - 响应体超过 16 KB → 500
  *
  * ver / bucket / platform 预留给后续灰度定向；P1 阶段配置包对所有客户端一致，
@@ -473,7 +475,7 @@ async function handleConfig(url, env) {
   let row;
   try {
     row = await env.DB.prepare(
-      'SELECT version, payload, updated_at FROM remote_config WHERE id = ? ORDER BY version DESC LIMIT 1'
+      'SELECT version, payload, updated_at, config_id FROM remote_config WHERE id = ? ORDER BY version DESC LIMIT 1'
     ).bind(CONFIG_ROW_ID).first();
   } catch {
     return json({ error: 'storage_failed' }, 500);
@@ -506,11 +508,14 @@ async function handleConfig(url, env) {
     return json({ error: 'storage_failed' }, 500);
   }
 
-  // 只透传 payload 字段；版本与下发时间以 DB 为准，避免 payload 自相矛盾。
+  // 只透传 payload 字段；版本、下发时间与 config_id 以 DB 为准，避免 payload 自相矛盾。
   const config = { ...parsed };
   delete config.sig;
   config.config_version = version;
   config.issued_at = toSafeInt(row.updated_at, 0, 0, Number.MAX_SAFE_INTEGER);
+  // 配置唯一 ID（SPEC §16）：每次发布生成，全局唯一、永不复用。
+  // 旧库（0009 迁移前）没有该列时为空串，客户端按「未下发」处理。
+  config.config_id = typeof row.config_id === 'string' ? row.config_id : '';
 
   // 签名覆盖「去掉 sig 的完整响应体」，客户端删掉 sig 后重新序列化即可校验。
   const unsigned = JSON.stringify(config);
@@ -531,11 +536,13 @@ async function handleConfig(url, env) {
 
 /**
  * POST /admin/config
- * header: x-admin-key = STATS_KEY
+ * header: x-admin-key = CONFIG_ADMIN_KEY（未配置时回落 STATS_KEY）
  * body: { version: 12, payload: { ... } }
  *
  * version 必须严格大于当前版本（防回滚）；payload 只要求是 JSON 对象，
  * 字段不做深度校验（客户端负责合并与类型/范围校验）。
+ * 每次成功发布生成新的 config_id（crypto.randomUUID()），全局唯一、永不复用；
+ * 同一 version 重发返回 409，因此同一版本的 config_id 不可变（SPEC §16）。
  */
 async function handleAdminConfig(request, env) {
   // 写权限用独立的 CONFIG_ADMIN_KEY；未配置时回落到 STATS_KEY 以兼容旧部署。
@@ -584,6 +591,9 @@ async function handleAdminConfig(request, env) {
   }
 
   const now = Math.floor(Date.now() / 1000);
+  // 配置唯一 ID（SPEC §16）：每次发布生成，全局唯一、永不复用。
+  // 用 UUID 而不是自增序号：多实例/重试时也不会撞号，且不泄露发布次数。
+  const configId = crypto.randomUUID();
   // config_version / issued_at 由服务端注入，payload 里的同名字段与 sig 一律忽略。
   const stored = { config_version: version, issued_at: now };
   for (const key of Object.keys(payload)) {
@@ -594,9 +604,9 @@ async function handleAdminConfig(request, env) {
   }
   const payloadText = JSON.stringify(stored);
 
-  // 写入前按最终响应体（含 sig）校验 16 KB，避免存进去却永远发不出去。
+  // 写入前按最终响应体（含 sig 与 config_id）校验 16 KB，避免存进去却永远发不出去。
   const finalBytes = new TextEncoder().encode(
-    JSON.stringify({ ...stored, sig: '0'.repeat(32) })
+    JSON.stringify({ ...stored, config_id: configId, sig: '0'.repeat(32) })
   ).length;
   if (finalBytes > CONFIG_MAX_BYTES) {
     return json({ error: 'payload_too_large' }, 413);
@@ -619,14 +629,15 @@ async function handleAdminConfig(request, env) {
   let changes = 1;
   try {
     const res = await env.DB.prepare(
-      `INSERT INTO remote_config (id, version, payload, updated_at)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO remote_config (id, version, payload, updated_at, config_id)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          version = excluded.version,
          payload = excluded.payload,
-         updated_at = excluded.updated_at
+         updated_at = excluded.updated_at,
+         config_id = excluded.config_id
        WHERE excluded.version > remote_config.version`
-    ).bind(CONFIG_ROW_ID, version, payloadText, now).run();
+    ).bind(CONFIG_ROW_ID, version, payloadText, now, configId).run();
     changes = res && res.meta && typeof res.meta.changes === 'number' ? res.meta.changes : 1;
   } catch {
     return json({ error: 'storage_failed' }, 500);
@@ -635,7 +646,8 @@ async function handleAdminConfig(request, env) {
     return json({ error: 'version_conflict' }, 409);
   }
 
-  return json({ ok: true, version, updated_at: now }, 200, { 'cache-control': 'no-store' });
+  return json({ ok: true, version, config_id: configId, updated_at: now }, 200,
+    { 'cache-control': 'no-store' });
 }
 
 /* ── 徽章（只显示安装数）───────────────────────────── */
