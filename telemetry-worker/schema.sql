@@ -37,10 +37,35 @@ CREATE INDEX IF NOT EXISTS idx_daily_active_day ON daily_active(day);
 CREATE TABLE IF NOT EXISTS daily_stats (
   day          INTEGER NOT NULL,
   id_hash      TEXT NOT NULL,
+  -- 基础
   sessions     INTEGER NOT NULL DEFAULT 0,
   duration_sec INTEGER NOT NULL DEFAULT 0,
   vv           INTEGER NOT NULL DEFAULT 0,
   crash        INTEGER NOT NULL DEFAULT 0,
+  -- 启动耗时（设备内 p50/p90 + 均值用 sum/count）
+  startup_p50_ms   INTEGER NOT NULL DEFAULT 0,
+  startup_p90_ms   INTEGER NOT NULL DEFAULT 0,
+  startup_ms_sum   INTEGER NOT NULL DEFAULT 0,
+  startup_ms_count INTEGER NOT NULL DEFAULT 0,
+  -- 播放失败（总数 + 分桶）
+  play_fail     INTEGER NOT NULL DEFAULT 0,
+  fail_network  INTEGER NOT NULL DEFAULT 0,
+  fail_auth     INTEGER NOT NULL DEFAULT 0,
+  fail_notfound INTEGER NOT NULL DEFAULT 0,
+  fail_server   INTEGER NOT NULL DEFAULT 0,
+  fail_other    INTEGER NOT NULL DEFAULT 0,
+  -- 超分 / 画质 / 完播
+  sr_on          INTEGER NOT NULL DEFAULT 0,
+  sr_supported   INTEGER NOT NULL DEFAULT 0,
+  quality_hd     INTEGER NOT NULL DEFAULT 0,
+  quality_sd     INTEGER NOT NULL DEFAULT 0,
+  play_complete  INTEGER NOT NULL DEFAULT 0,
+  -- 页面访问分布
+  page_home      INTEGER NOT NULL DEFAULT 0,
+  page_search    INTEGER NOT NULL DEFAULT 0,
+  page_category  INTEGER NOT NULL DEFAULT 0,
+  page_profile   INTEGER NOT NULL DEFAULT 0,
+  page_player    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, id_hash)
 );
 

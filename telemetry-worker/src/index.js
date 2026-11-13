@@ -26,12 +26,10 @@
 
 const MAX_BODY_BYTES = 2048;
 const IP_HOURLY_LIMIT = 30;
-const DEVICE_DAILY_LIMIT = 1;
 const IP_WINDOW_SEC = 3600;
-const DEVICE_WINDOW_SEC = 86400;
 const SIG_WINDOW_SEC = 300;
-const BADGE_CACHE_SEC = 3600;
-const RATE_CLEANUP_EVERY = 50;
+const BADGE_CACHE_SEC = 21600;
+const RATE_CLEANUP_EVERY = 200;
 const MAX_STATS_DAYS = 90;
 /** 单日聚合字段上限，防止异常客户端把数字撑爆。 */
 const MAX_COUNTER = 1000000;
@@ -134,14 +132,25 @@ async function handleReport(request, env, ctx) {
   const salt = env.HASH_SALT || 'hghub-default-salt';
   const idHash = await sha256Hex(`${id}:${salt}`);
 
-  // 限流：单设备每天 1 次（幂等上报，超出直接 200 不再写库）。
-  const dayKey = Math.floor(now / DEVICE_WINDOW_SEC);
-  const deviceAllowed = await bumpRate(env, `dev:${idHash}:${dayKey}`, DEVICE_DAILY_LIMIT, DEVICE_WINDOW_SEC);
-  if (!deviceAllowed) {
-    return json({ ok: true, counted: false, reason: 'device_quota' }, 200);
+  const today = day !== 0 ? day : dayStamp(now);
+
+  // 去重闸门：daily_active 主键 (day, id_hash)。
+  // 同一天重复上报时 changes=0，直接短路返回——不写 devices、不写 daily_stats、不计限流桶，
+  // 把每次重复上报的 D1 写操作从 5 次压到 1 次（且被忽略的那次不产生新行）。
+  let fresh = false;
+  try {
+    const res = await env.DB.prepare(
+      'INSERT OR IGNORE INTO daily_active (day, id_hash) VALUES (?, ?)'
+    ).bind(today, idHash).run();
+    fresh = !!(res && res.meta && res.meta.changes > 0);
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  if (!fresh) {
+    return json({ ok: true, counted: false, reason: 'already_today' }, 200);
   }
 
-  // 限流：单 IP 每小时 30 次。
+  // 限流：单 IP 每小时 30 次（防随机 UUID 刷量；正常设备一天只上报一次，几乎不会命中）。
   const ip = request.headers.get('cf-connecting-ip') || '';
   if (ip.length > 0) {
     const ipHash = await sha256Hex(`${ip}:${salt}`);
@@ -151,8 +160,6 @@ async function handleReport(request, env, ctx) {
       return json({ error: 'rate_limited' }, 429);
     }
   }
-
-  const today = day !== 0 ? day : dayStamp(now);
 
   try {
     // 1) 设备表：安装数口径，主键去重。
@@ -169,12 +176,7 @@ async function handleReport(request, env, ctx) {
          report_count = devices.report_count + 1`
     ).bind(idHash, version, version, model, os, installAt > 0 ? installAt : now, now, now).run();
 
-    // 2) 日活表：每台设备每天一行。
-    await env.DB.prepare(
-      'INSERT OR IGNORE INTO daily_active (day, id_hash) VALUES (?, ?)'
-    ).bind(today, idHash).run();
-
-    // 3) 日聚合表：累加客户端上报的当日指标。
+    // 2) 日聚合表：累加客户端上报的当日指标。
     //    若该日有启动次数，说明当天确实活跃过，补一条日活（让 DAU 能回溯补全）。
     if (stats !== null && stats.sessions > 0) {
       await env.DB.prepare(
@@ -183,14 +185,45 @@ async function handleReport(request, env, ctx) {
     }
     if (stats !== null) {
       await env.DB.prepare(
-        `INSERT INTO daily_stats (day, id_hash, sessions, duration_sec, vv, crash)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO daily_stats (
+           day, id_hash, sessions, duration_sec, vv, crash,
+           startup_p50_ms, startup_p90_ms, startup_ms_sum, startup_ms_count,
+           play_fail, fail_network, fail_auth, fail_notfound, fail_server, fail_other,
+           sr_on, sr_supported, quality_hd, quality_sd, play_complete,
+           page_home, page_search, page_category, page_profile, page_player)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(day, id_hash) DO UPDATE SET
            sessions = daily_stats.sessions + excluded.sessions,
            duration_sec = daily_stats.duration_sec + excluded.duration_sec,
            vv = daily_stats.vv + excluded.vv,
-           crash = daily_stats.crash + excluded.crash`
-      ).bind(stats.day, idHash, stats.sessions, stats.durationSec, stats.vv, stats.crash).run();
+           crash = daily_stats.crash + excluded.crash,
+           startup_p50_ms = excluded.startup_p50_ms,
+           startup_p90_ms = excluded.startup_p90_ms,
+           startup_ms_sum = daily_stats.startup_ms_sum + excluded.startup_ms_sum,
+           startup_ms_count = daily_stats.startup_ms_count + excluded.startup_ms_count,
+           play_fail = daily_stats.play_fail + excluded.play_fail,
+           fail_network = daily_stats.fail_network + excluded.fail_network,
+           fail_auth = daily_stats.fail_auth + excluded.fail_auth,
+           fail_notfound = daily_stats.fail_notfound + excluded.fail_notfound,
+           fail_server = daily_stats.fail_server + excluded.fail_server,
+           fail_other = daily_stats.fail_other + excluded.fail_other,
+           sr_on = daily_stats.sr_on + excluded.sr_on,
+           sr_supported = daily_stats.sr_supported + excluded.sr_supported,
+           quality_hd = daily_stats.quality_hd + excluded.quality_hd,
+           quality_sd = daily_stats.quality_sd + excluded.quality_sd,
+           play_complete = daily_stats.play_complete + excluded.play_complete,
+           page_home = daily_stats.page_home + excluded.page_home,
+           page_search = daily_stats.page_search + excluded.page_search,
+           page_category = daily_stats.page_category + excluded.page_category,
+           page_profile = daily_stats.page_profile + excluded.page_profile,
+           page_player = daily_stats.page_player + excluded.page_player`
+      ).bind(
+        stats.day, idHash, stats.sessions, stats.durationSec, stats.vv, stats.crash,
+        stats.startupP50, stats.startupP90, stats.startupSum, stats.startupCount,
+        stats.playFail, stats.failNetwork, stats.failAuth, stats.failNotFound, stats.failServer, stats.failOther,
+        stats.srOn, stats.srSupported, stats.qualityHd, stats.qualitySd, stats.playComplete,
+        stats.pageHome, stats.pageSearch, stats.pageCategory, stats.pageProfile, stats.pagePlayer
+      ).run();
     }
   } catch {
     return json({ error: 'storage_failed' }, 500);
@@ -273,7 +306,15 @@ async function handleStats(url, env) {
               COALESCE(s.sessions, 0) AS sessions,
               COALESCE(s.duration_sec, 0) AS duration_sec,
               COALESCE(s.vv, 0) AS vv,
-              COALESCE(s.crash, 0) AS crash
+              COALESCE(s.crash, 0) AS crash,
+              COALESCE(s.play_fail, 0) AS play_fail,
+              COALESCE(s.play_complete, 0) AS play_complete,
+              COALESCE(s.quality_hd, 0) AS quality_hd,
+              COALESCE(s.quality_sd, 0) AS quality_sd,
+              COALESCE(s.sr_on, 0) AS sr_on,
+              COALESCE(s.sr_supported, 0) AS sr_supported,
+              CASE WHEN COALESCE(s.startup_ms_count, 0) > 0
+                   THEN CAST(s.startup_ms_sum / s.startup_ms_count AS INTEGER) ELSE 0 END AS avg_startup_ms
          FROM (
            SELECT DISTINCT day FROM daily_active WHERE day >= ?
            UNION
@@ -283,8 +324,13 @@ async function handleStats(url, env) {
            SELECT day, COUNT(*) AS devices FROM daily_active GROUP BY day
          ) a ON a.day = d.day
          LEFT JOIN (
-           SELECT day, SUM(sessions) AS sessions, SUM(duration_sec) AS duration_sec,
-                  SUM(vv) AS vv, SUM(crash) AS crash
+           SELECT day,
+                  SUM(sessions) AS sessions, SUM(duration_sec) AS duration_sec,
+                  SUM(vv) AS vv, SUM(crash) AS crash,
+                  SUM(play_fail) AS play_fail, SUM(play_complete) AS play_complete,
+                  SUM(quality_hd) AS quality_hd, SUM(quality_sd) AS quality_sd,
+                  SUM(sr_on) AS sr_on, SUM(sr_supported) AS sr_supported,
+                  SUM(startup_ms_sum) AS startup_ms_sum, SUM(startup_ms_count) AS startup_ms_count
              FROM daily_stats GROUP BY day
          ) s ON s.day = d.day
         ORDER BY d.day ASC`
@@ -294,14 +340,64 @@ async function handleStats(url, env) {
       `SELECT COALESCE(SUM(sessions), 0) AS sessions,
               COALESCE(SUM(duration_sec), 0) AS duration_sec,
               COALESCE(SUM(vv), 0) AS vv,
-              COALESCE(SUM(crash), 0) AS crash
+              COALESCE(SUM(crash), 0) AS crash,
+              COALESCE(SUM(play_fail), 0) AS play_fail,
+              COALESCE(SUM(fail_network), 0) AS fail_network,
+              COALESCE(SUM(fail_auth), 0) AS fail_auth,
+              COALESCE(SUM(fail_notfound), 0) AS fail_notfound,
+              COALESCE(SUM(fail_server), 0) AS fail_server,
+              COALESCE(SUM(fail_other), 0) AS fail_other,
+              COALESCE(SUM(sr_on), 0) AS sr_on,
+              COALESCE(SUM(sr_supported), 0) AS sr_supported,
+              COALESCE(SUM(quality_hd), 0) AS quality_hd,
+              COALESCE(SUM(quality_sd), 0) AS quality_sd,
+              COALESCE(SUM(play_complete), 0) AS play_complete,
+              COALESCE(SUM(startup_ms_sum), 0) AS startup_ms_sum,
+              COALESCE(SUM(startup_ms_count), 0) AS startup_ms_count,
+              COALESCE(AVG(NULLIF(startup_p50_ms, 0)), 0) AS avg_p50,
+              COALESCE(AVG(NULLIF(startup_p90_ms, 0)), 0) AS avg_p90,
+              COALESCE(SUM(page_home), 0) AS page_home,
+              COALESCE(SUM(page_search), 0) AS page_search,
+              COALESCE(SUM(page_category), 0) AS page_category,
+              COALESCE(SUM(page_profile), 0) AS page_profile,
+              COALESCE(SUM(page_player), 0) AS page_player
          FROM daily_stats WHERE day >= ?`
     ).bind(fromDay).first();
+
+    // 新增设备按天（首见日）——增长曲线，不需要新采集。
+    const newDaily = await env.DB.prepare(
+      `SELECT CAST(strftime('%Y%m%d', first_seen_epoch, 'unixepoch') AS INTEGER) AS day,
+              COUNT(*) AS devices
+         FROM devices
+        WHERE first_seen_epoch >= ?
+        GROUP BY day ORDER BY day ASC`
+    ).bind(now - days * day).all();
+
+    // 最近一天的回访率：当天活跃设备中，过去 7 天也活跃过的比例。
+    const latest = dailyRows && dailyRows.results && dailyRows.results.length > 0 ?
+      dailyRows.results[dailyRows.results.length - 1].day : 0;
+    let returning7 = 0;
+    if (latest > 0) {
+      const row = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM daily_active a
+          WHERE a.day = ?
+            AND EXISTS (SELECT 1 FROM daily_active b
+                         WHERE b.id_hash = a.id_hash AND b.day < a.day AND b.day >= ?)`
+      ).bind(latest, latest - 7).first();
+      returning7 = row ? row.n : 0;
+    }
 
     const totalDevices = total ? total.n : 0;
     const sumSessions = totals ? totals.sessions : 0;
     const sumDuration = totals ? totals.duration_sec : 0;
     const sumVv = totals ? totals.vv : 0;
+    const sumFail = totals ? totals.play_fail : 0;
+    const sumHd = totals ? totals.quality_hd : 0;
+    const sumSd = totals ? totals.quality_sd : 0;
+    const sumComplete = totals ? totals.play_complete : 0;
+    const startupCount = totals ? totals.startup_ms_count : 0;
+    const startupSum = totals ? totals.startup_ms_sum : 0;
+    const pct = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
 
     return json({
       // 徽章口径
@@ -315,6 +411,11 @@ async function handleStats(url, env) {
       by_os: byOs && byOs.results ? byOs.results : [],
       // 按天
       daily: dailyRows && dailyRows.results ? dailyRows.results : [],
+      new_devices_daily: newDaily && newDaily.results ? newDaily.results : [],
+      returning_7d: returning7,
+      returning_7d_ratio: latest > 0 && dailyRows.results.length > 0 &&
+        dailyRows.results[dailyRows.results.length - 1].devices > 0 ?
+        Math.round((returning7 / dailyRows.results[dailyRows.results.length - 1].devices) * 1000) / 10 : 0,
       // 区间累计
       totals: {
         sessions: sumSessions,
@@ -322,11 +423,51 @@ async function handleStats(url, env) {
         vv: sumVv,
         crash: totals ? totals.crash : 0,
       },
+      // 启动耗时
+      startup: {
+        avg_ms: startupCount > 0 ? Math.round(startupSum / startupCount) : 0,
+        avg_p50_ms: totals ? Math.round(totals.avg_p50) : 0,
+        avg_p90_ms: totals ? Math.round(totals.avg_p90) : 0,
+        samples: startupCount,
+      },
+      // 播放质量
+      playback: {
+        vv: sumVv,
+        play_fail: sumFail,
+        play_fail_rate: pct(sumFail, sumVv + sumFail),
+        play_complete: sumComplete,
+        play_complete_rate: pct(sumComplete, sumVv),
+        fail_breakdown: {
+          network: totals ? totals.fail_network : 0,
+          auth: totals ? totals.fail_auth : 0,
+          notfound: totals ? totals.fail_notfound : 0,
+          server: totals ? totals.fail_server : 0,
+          other: totals ? totals.fail_other : 0,
+        },
+      },
+      // 画质与超分
+      quality: {
+        hd: sumHd,
+        sd: sumSd,
+        hd_ratio: pct(sumHd, sumHd + sumSd),
+        sr_on: totals ? totals.sr_on : 0,
+        sr_supported: totals ? totals.sr_supported : 0,
+        sr_support_rate: pct(totals ? totals.sr_supported : 0, totalDevices),
+        sr_on_rate: pct(totals ? totals.sr_on : 0, totalDevices),
+      },
+      // 页面访问分布
+      pages: {
+        home: totals ? totals.page_home : 0,
+        search: totals ? totals.page_search : 0,
+        category: totals ? totals.page_category : 0,
+        profile: totals ? totals.page_profile : 0,
+        player: totals ? totals.page_player : 0,
+      },
       avg_duration_sec_per_session: sumSessions > 0 ? Math.round(sumDuration / sumSessions) : 0,
       avg_vv_per_device: totalDevices > 0 ? Math.round((sumVv / totalDevices) * 10) / 10 : 0,
       window_days: days,
       generated_at: new Date(now * 1000).toISOString(),
-    });
+    }, 200, { 'cache-control': 'private, max-age=60' });
   } catch {
     return json({ error: 'storage_failed' }, 500);
   }
@@ -343,12 +484,37 @@ function parseStats(raw) {
   if (day === 0) {
     return null;
   }
+  const n = (v) => toSafeInt(v, 0, 0, MAX_COUNTER);
   return {
     day,
-    sessions: toSafeInt(raw.sessions, 0, 0, MAX_COUNTER),
-    durationSec: toSafeInt(raw.duration_sec, 0, 0, MAX_COUNTER),
-    vv: toSafeInt(raw.vv, 0, 0, MAX_COUNTER),
-    crash: toSafeInt(raw.crash, 0, 0, MAX_COUNTER),
+    sessions: n(raw.sessions),
+    durationSec: n(raw.duration_sec),
+    vv: n(raw.vv),
+    crash: n(raw.crash),
+    // 启动耗时：设备内 p50/p90 + 均值用的 sum/count
+    startupP50: toSafeInt(raw.startup_p50_ms, 0, 0, 600000),
+    startupP90: toSafeInt(raw.startup_p90_ms, 0, 0, 600000),
+    startupSum: toSafeInt(raw.startup_ms_sum, 0, 0, 600000 * MAX_COUNTER),
+    startupCount: n(raw.startup_ms_count),
+    // 播放失败
+    playFail: n(raw.play_fail),
+    failNetwork: n(raw.fail_network),
+    failAuth: n(raw.fail_auth),
+    failNotFound: n(raw.fail_notfound),
+    failServer: n(raw.fail_server),
+    failOther: n(raw.fail_other),
+    // 超分 / 画质 / 完播
+    srOn: n(raw.sr_on),
+    srSupported: n(raw.sr_supported),
+    qualityHd: n(raw.quality_hd),
+    qualitySd: n(raw.quality_sd),
+    playComplete: n(raw.play_complete),
+    // 页面分布
+    pageHome: n(raw.page_home),
+    pageSearch: n(raw.page_search),
+    pageCategory: n(raw.page_category),
+    pageProfile: n(raw.page_profile),
+    pagePlayer: n(raw.page_player),
   };
 }
 

@@ -95,14 +95,40 @@ npm run deploy
 
 ## 统计口径
 
-| 指标 | 含义 |
+### 规模与留存
+
+| 字段 | 含义 |
 |---|---|
 | `devices_total` | **累积去重设备数**（徽章显示的就是这个） |
-| `devices_active_7d` | 最近 7 天有上报的设备数 |
-| `devices_active_30d` | 最近 30 天有上报的设备数 |
+| `devices_active_7d` / `devices_active_30d` | 最近 7 / 30 天有上报的设备数 |
 | `devices_new_7d` | 最近 7 天首次出现的设备数 |
+| `new_devices_daily` | 按首见日的新增设备曲线 |
+| `returning_7d` / `returning_7d_ratio` | 最近一天活跃设备中，过去 7 天也活跃过的数量与比例 |
+| `daily[]` | 按天：DAU / 启动次数 / 时长 / VV / 崩溃 / 播放失败 / 完播 / 画质 / 超分 / 平均启动耗时 |
+
+### 矩阵
+
+| 字段 | 含义 |
+|---|---|
 | `by_version` | 版本分布 |
 | `by_model` | 机型分布 |
+| `by_os` | 系统版本分布 |
+
+### 体验质量
+
+| 字段 | 含义 |
+|---|---|
+| `startup` | `avg_ms` / `avg_p50_ms` / `avg_p90_ms` / `samples` |
+| `playback` | `vv` / `play_fail` / `play_fail_rate` / `play_complete` / `play_complete_rate` / `fail_breakdown` |
+| `quality` | `hd` / `sd` / `hd_ratio` / `sr_on` / `sr_supported` / `sr_support_rate` / `sr_on_rate` |
+| `pages` | `home` / `search` / `category` / `profile` / `player` 访问计数 |
+
+### 采集边界
+
+客户端上报的是**当日聚合计数**，不是逐条事件：
+
+- ✅ 上报：启动次数、使用秒数、播放次数、完播次数、失败次数（分桶）、超分开关次数、画质选择次数、页面访问次数、启动耗时样本
+- ❌ 不上报：搜索词、剧名、视频 ID、播放进度、任何时间点与内容的对应关系
 
 ## 本地测试
 
