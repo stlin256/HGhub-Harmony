@@ -1,0 +1,32 @@
+# 配置覆盖率检查白名单（常量名 glob，一行一个；# 开头为注释）
+#
+# 用途：协议 / 安全上限、模型结构、UI 规格等「本来就不该远程下发」的常量。
+# 注意：白名单只按常量名匹配，不要用它掩盖真正的业务阈值——
+#       业务阈值应注册进 services/ConfigRegistry.ets 的 DEFS（SPEC §4.3 / §9）。
+#
+# 内置白名单（脚本里硬编码，无需重复）：MAX_*_BYTES / MAX_*_LEN / *_TIMEOUT_MS
+
+# 安全 / 协议上限（放宽有风险，SPEC §4.4 明确保持硬编码）
+MAX_*
+*_LEN
+*_BYTES
+
+# 模型 / 协议结构常量（改了模型就废了）
+BUCKET*
+BUCKETS
+FALLBACK_MOD
+ITEM_EXTRA
+TEXT_DIM
+CATES
+
+# UI 尺寸 / 规格（走设计 token，不做下发）
+THUMB_*
+COVER_*
+JPEG_QUALITY
+UI_SIZE_*
+DEFAULT_REMOTE_ORDER
+
+# 摇一摇检测协议常量（SPEC §8.2 固定判定参数）
+MIN_HIT_GAP_MS
+COOLDOWN_MS
+SAMPLE_INTERVAL_NS
