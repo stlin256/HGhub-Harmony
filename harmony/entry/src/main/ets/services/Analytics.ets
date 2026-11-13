@@ -24,6 +24,25 @@ const KEY_DURATION: string = 'an_duration_sec';
 const KEY_VV: string = 'an_vv';
 const KEY_CRASH: string = 'an_crash';
 const KEY_CRASH_SEEN: string = 'an_crash_seen';
+const KEY_STARTUP_LIST: string = 'an_startup_list';
+const KEY_PLAY_FAIL: string = 'an_play_fail';
+const KEY_FAIL_NET: string = 'an_fail_network';
+const KEY_FAIL_AUTH: string = 'an_fail_auth';
+const KEY_FAIL_404: string = 'an_fail_notfound';
+const KEY_FAIL_5XX: string = 'an_fail_server';
+const KEY_FAIL_OTHER: string = 'an_fail_other';
+const KEY_SR_ON: string = 'an_sr_on';
+const KEY_SR_OK: string = 'an_sr_supported';
+const KEY_HD: string = 'an_quality_hd';
+const KEY_SD: string = 'an_quality_sd';
+const KEY_COMPLETE: string = 'an_play_complete';
+const KEY_PAGE_HOME: string = 'an_page_home';
+const KEY_PAGE_SEARCH: string = 'an_page_search';
+const KEY_PAGE_CATEGORY: string = 'an_page_category';
+const KEY_PAGE_PROFILE: string = 'an_page_profile';
+const KEY_PAGE_PLAYER: string = 'an_page_player';
+/** 启动耗时只保留最近 N 次，用于算设备内 p50/p90。 */
+const STARTUP_SAMPLES: number = 20;
 
 /** 某一天的本地聚合。 */
 interface DayStats {
@@ -32,6 +51,26 @@ interface DayStats {
   durationSec: number;
   vv: number;
   crash: number;
+  startupP50: number;
+  startupP90: number;
+  startupSum: number;
+  startupCount: number;
+  playFail: number;
+  failNetwork: number;
+  failAuth: number;
+  failNotFound: number;
+  failServer: number;
+  failOther: number;
+  srOn: number;
+  srSupported: number;
+  qualityHd: number;
+  qualitySd: number;
+  playComplete: number;
+  pageHome: number;
+  pageSearch: number;
+  pageCategory: number;
+  pageProfile: number;
+  pagePlayer: number;
 }
 
 /**
@@ -124,6 +163,151 @@ export class Analytics {
     }
   }
 
+  /** 记录一次启动耗时（毫秒），保留最近 N 次用于算 p50/p90。 */
+  static recordStartup(ms: number): void {
+    if (ms <= 0 || !UserPrefs.analytics()) {
+      return;
+    }
+    try {
+      const list: number[] = Analytics.readStartupList();
+      list.push(ms);
+      while (list.length > STARTUP_SAMPLES) {
+        list.shift();
+      }
+      Prefs.putString(KEY_STARTUP_LIST, JSON.stringify(list));
+    } catch (err) {
+    }
+  }
+
+  /** 播放失败一次（按错误码/文案分桶）。 */
+  static countPlayFail(code: number, message: string): void {
+    if (!UserPrefs.analytics()) {
+      return;
+    }
+    try {
+      Analytics.bump(KEY_PLAY_FAIL);
+      const bucket: string = Analytics.classifyFail(code, message);
+      if (bucket === 'network') {
+        Analytics.bump(KEY_FAIL_NET);
+      } else if (bucket === 'auth') {
+        Analytics.bump(KEY_FAIL_AUTH);
+      } else if (bucket === 'notfound') {
+        Analytics.bump(KEY_FAIL_404);
+      } else if (bucket === 'server') {
+        Analytics.bump(KEY_FAIL_5XX);
+      } else {
+        Analytics.bump(KEY_FAIL_OTHER);
+      }
+    } catch (err) {
+    }
+  }
+
+  /** 记录一次「超分是否可用 / 是否开启」（每次播放页打开记录一次）。 */
+  static setSuperResolution(on: boolean, supported: boolean): void {
+    if (!UserPrefs.analytics()) {
+      return;
+    }
+    try {
+      if (supported) {
+        Analytics.bump(KEY_SR_OK);
+      }
+      if (on) {
+        Analytics.bump(KEY_SR_ON);
+      }
+    } catch (err) {
+    }
+  }
+
+  /** 记录一次画质（HD / SD）。 */
+  static countQuality(hd: boolean): void {
+    if (!UserPrefs.analytics()) {
+      return;
+    }
+    try {
+      Analytics.bump(hd ? KEY_HD : KEY_SD);
+    } catch (err) {
+    }
+  }
+
+  /** 记录一次完播。 */
+  static countPlayComplete(): void {
+    if (!UserPrefs.analytics()) {
+      return;
+    }
+    try {
+      Analytics.bump(KEY_COMPLETE);
+    } catch (err) {
+    }
+  }
+
+  /** 记录一次页面访问（home / search / category / profile / player）。 */
+  static countPage(name: string): void {
+    if (!UserPrefs.analytics()) {
+      return;
+    }
+    let key: string = '';
+    if (name === 'home') {
+      key = KEY_PAGE_HOME;
+    } else if (name === 'search') {
+      key = KEY_PAGE_SEARCH;
+    } else if (name === 'category') {
+      key = KEY_PAGE_CATEGORY;
+    } else if (name === 'profile') {
+      key = KEY_PAGE_PROFILE;
+    } else if (name === 'player') {
+      key = KEY_PAGE_PLAYER;
+    }
+    if (key.length === 0) {
+      return;
+    }
+    try {
+      Analytics.bump(key);
+    } catch (err) {
+    }
+  }
+
+  /** 计数器 +1。 */
+  private static bump(key: string): void {
+    Prefs.putNumber(key, Prefs.getNumber(key, 0) + 1);
+  }
+
+  /** 错误分桶：网络 / 鉴权 / 资源不存在 / 服务端 / 其他。 */
+  private static classifyFail(code: number, message: string): string {
+    if (code >= 2300000 && code < 2400000) {
+      return 'network';
+    }
+    if (code === 5400104 || code === 5400103) {
+      return 'network';
+    }
+    if (message.indexOf('401') >= 0 || message.indexOf('403') >= 0) {
+      return 'auth';
+    }
+    if (message.indexOf('404') >= 0) {
+      return 'notfound';
+    }
+    if (message.indexOf('HTTP 5') >= 0 || message.indexOf('500') >= 0 || message.indexOf('502') >= 0 ||
+      message.indexOf('503') >= 0 || message.indexOf('504') >= 0) {
+      return 'server';
+    }
+    if (message.indexOf('超时') >= 0 || message.indexOf('网络') >= 0 || message.indexOf('连接') >= 0) {
+      return 'network';
+    }
+    return 'other';
+  }
+
+  private static readStartupList(): number[] {
+    try {
+      const raw: string = Prefs.getString(KEY_STARTUP_LIST, '[]');
+      const parsed = JSON.parse(raw);
+      if (parsed === null) {
+        return [];
+      }
+      return parsed as number[];
+    } catch (err) {
+      return [];
+    }
+  }
+
   /** 把 CrashGuard 新增的崩溃条数计入今天的 crash 计数。 */
   static harvestCrashes(): void {
     try {
@@ -167,21 +351,62 @@ export class Analytics {
   }
 
   private static readStats(day: number): DayStats {
+    const list: number[] = Analytics.readStartupList();
+    const sorted: number[] = list.slice().sort((a: number, b: number) => a - b);
+    let sum: number = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      sum += sorted[i];
+    }
     return {
       day: day,
       sessions: Prefs.getNumber(KEY_SESSIONS, 0),
       durationSec: Prefs.getNumber(KEY_DURATION, 0),
       vv: Prefs.getNumber(KEY_VV, 0),
-      crash: Prefs.getNumber(KEY_CRASH, 0)
+      crash: Prefs.getNumber(KEY_CRASH, 0),
+      startupP50: Analytics.percentile(sorted, 0.5),
+      startupP90: Analytics.percentile(sorted, 0.9),
+      startupSum: sum,
+      startupCount: sorted.length,
+      playFail: Prefs.getNumber(KEY_PLAY_FAIL, 0),
+      failNetwork: Prefs.getNumber(KEY_FAIL_NET, 0),
+      failAuth: Prefs.getNumber(KEY_FAIL_AUTH, 0),
+      failNotFound: Prefs.getNumber(KEY_FAIL_404, 0),
+      failServer: Prefs.getNumber(KEY_FAIL_5XX, 0),
+      failOther: Prefs.getNumber(KEY_FAIL_OTHER, 0),
+      srOn: Prefs.getNumber(KEY_SR_ON, 0),
+      srSupported: Prefs.getNumber(KEY_SR_OK, 0),
+      qualityHd: Prefs.getNumber(KEY_HD, 0),
+      qualitySd: Prefs.getNumber(KEY_SD, 0),
+      playComplete: Prefs.getNumber(KEY_COMPLETE, 0),
+      pageHome: Prefs.getNumber(KEY_PAGE_HOME, 0),
+      pageSearch: Prefs.getNumber(KEY_PAGE_SEARCH, 0),
+      pageCategory: Prefs.getNumber(KEY_PAGE_CATEGORY, 0),
+      pageProfile: Prefs.getNumber(KEY_PAGE_PROFILE, 0),
+      pagePlayer: Prefs.getNumber(KEY_PAGE_PLAYER, 0)
     };
+  }
+
+  /** 已排序数组的分位数（空数组返回 0）。 */
+  private static percentile(sorted: number[], ratio: number): number {
+    if (sorted.length === 0) {
+      return 0;
+    }
+    const idx: number = Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * ratio)));
+    return sorted[idx];
   }
 
   private static resetCounters(day: number): void {
     Prefs.putNumber(KEY_DAY, day);
-    Prefs.putNumber(KEY_SESSIONS, 0);
-    Prefs.putNumber(KEY_DURATION, 0);
-    Prefs.putNumber(KEY_VV, 0);
-    Prefs.putNumber(KEY_CRASH, 0);
+    const keys: string[] = [
+      KEY_SESSIONS, KEY_DURATION, KEY_VV, KEY_CRASH,
+      KEY_PLAY_FAIL, KEY_FAIL_NET, KEY_FAIL_AUTH, KEY_FAIL_404, KEY_FAIL_5XX, KEY_FAIL_OTHER,
+      KEY_SR_ON, KEY_SR_OK, KEY_HD, KEY_SD, KEY_COMPLETE,
+      KEY_PAGE_HOME, KEY_PAGE_SEARCH, KEY_PAGE_CATEGORY, KEY_PAGE_PROFILE, KEY_PAGE_PLAYER
+    ];
+    for (let i = 0; i < keys.length; i++) {
+      Prefs.putNumber(keys[i], 0);
+    }
+    Prefs.putString(KEY_STARTUP_LIST, '[]');
   }
 
   /** 本地时区的 YYYYMMDD。 */
@@ -229,7 +454,27 @@ export class Analytics {
         'sessions': pending.sessions,
         'duration_sec': pending.durationSec,
         'vv': pending.vv,
-        'crash': pending.crash
+        'crash': pending.crash,
+        'startup_p50_ms': pending.startupP50,
+        'startup_p90_ms': pending.startupP90,
+        'startup_ms_sum': pending.startupSum,
+        'startup_ms_count': pending.startupCount,
+        'play_fail': pending.playFail,
+        'fail_network': pending.failNetwork,
+        'fail_auth': pending.failAuth,
+        'fail_notfound': pending.failNotFound,
+        'fail_server': pending.failServer,
+        'fail_other': pending.failOther,
+        'sr_on': pending.srOn,
+        'sr_supported': pending.srSupported,
+        'quality_hd': pending.qualityHd,
+        'quality_sd': pending.qualitySd,
+        'play_complete': pending.playComplete,
+        'page_home': pending.pageHome,
+        'page_search': pending.pageSearch,
+        'page_category': pending.pageCategory,
+        'page_profile': pending.pageProfile,
+        'page_player': pending.pagePlayer
       };
       payload['stats'] = stats;
     }

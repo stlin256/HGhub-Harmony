@@ -214,8 +214,10 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, TAG, 'Main page loaded');
-      // 启动耗时：onCreate → 首帧加载完成（本地记录，不上报）。
-      PerfMark.recordStartup(PerfMark.end('startup'));
+      // 启动耗时：onCreate → 首帧加载完成（本地记录；匿名统计只上报 p50/p90）。
+      const startupMs: number = PerfMark.end('startup');
+      PerfMark.recordStartup(startupMs);
+      Analytics.recordStartup(startupMs);
       this.setupKeyboardAvoidMode(windowStage);
       this.setupWindow(windowStage);
       // 收藏/历史详情预取：延迟约 1.2s 后台预热（内部不阻塞），打开「我的」直接命中共享详情缓存。
