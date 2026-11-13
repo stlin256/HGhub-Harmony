@@ -1,5 +1,5 @@
 /**
- * HGhub Harmony 匿名统计 Worker（Cloudflare Workers + D1）
+ * HGhub Harmony 匿名统计服务（Worker 逻辑；生产由自建 VPS 适配器调用，数据落 SQLite）
  *
  * 回答四类问题：
  *   1. 安装数（徽章口径）—— 有多少台设备启动过，累积去重
