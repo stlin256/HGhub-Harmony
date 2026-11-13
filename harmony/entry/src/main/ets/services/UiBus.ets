@@ -1,4 +1,6 @@
-/** 页面与全局 UI（登录面板、线路面板、Toast）之间的轻量事件总线。 */
+import { UpdateInfo } from '../models/Types';
+
+/** 页面与全局 UI（登录面板、线路面板、Toast、更新弹窗）之间的轻量事件总线。 */
 export class UiBus {
   static openLogin: () => void = () => {};
   static openLines: () => void = () => {};
@@ -8,4 +10,6 @@ export class UiBus {
   static toast: (message: string) => void = () => {};
   static toastOk: (message: string) => void = () => {};
   static toastInfo: (message: string) => void = () => {};
+  /** 后台检查到新版本：由 Index 弹出更新弹窗（每次冷启动至多一次）。 */
+  static showUpdate: (info: UpdateInfo) => void = () => {};
 }

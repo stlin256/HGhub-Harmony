@@ -1,5 +1,5 @@
 import { promptAction } from '@kit.ArkUI';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { JSON } from '@kit.ArkTS';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -12,6 +12,9 @@ import { WindowChrome } from '../services/WindowChrome';
 import { Prefs } from '../services/Prefs';
 import { Api } from '../services/Api';
 import { ContinuationState, ContinuePayload } from '../services/ContinuationState';
+import { UpdateChecker } from '../services/UpdateChecker';
+import { UpdateInfo } from '../models/Types';
+import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgColor, HgFont, HgSize } from '../design/HgTokens';
 import { HgMotion } from '../design/HgMotion';
 import { HomePage } from './HomePage';
@@ -57,6 +60,21 @@ struct Index {
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
   @State loginVisible: boolean = false;
+  /** 更新弹窗文案与本次冷启动是否已弹过（保证至多一次）。 */
+  private updateCopy: ConfirmCopy = new ConfirmCopy('', '', '打开下载链接', '稍后', false);
+  private updateShown: boolean = false;
+  private updateUrl: string = '';
+  private updateController: CustomDialogController = new CustomDialogController({
+    builder: ConfirmDialog({
+      copyOf: (): ConfirmCopy => this.updateCopy,
+      onConfirm: (): void => {
+        this.openUpdatePage();
+      }
+    }),
+    autoCancel: true,
+    alignment: DialogAlignment.Center,
+    customStyle: true
+  });
   @State lineVisible: boolean = false;
   @State currentIndex: number = 0;
   @State activeIndex: number = 0;
@@ -134,6 +152,18 @@ struct Index {
     UiBus.toastInfo = (message: string) => {
       promptAction.showToast({ message: message, duration: 2000 });
     };
+    // 后台检查更新：每次冷启动至多检查一次；命中新版本弹一次窗。
+    UiBus.showUpdate = (info: UpdateInfo) => {
+      this.presentUpdate(info);
+    };
+    UpdateChecker.scheduleOnLaunch();
+    // 兜底：检查可能在 Index 挂载前就完成，这里补一次消费，保证「至少弹一次」。
+    setTimeout(() => {
+      const pending: UpdateInfo | undefined = UpdateChecker.takePending();
+      if (pending !== undefined) {
+        this.presentUpdate(pending);
+      }
+    }, 500);
     // 平行视窗：根页面保持全宽多列瀑布流，只有打开内容页时才带动画切 Split（左侧列表 + 右侧播放/内容）。
     // 在 willShow 阶段提前切模式，Navigation 的模式切换动画才能生效；didShow 再兜底校正。
     try {
@@ -154,6 +184,41 @@ struct Index {
     WindowChrome.syncSystemBarColors(this.dark);
     this.syncNavMode();
     this.maybeShowTabletNotice();
+  }
+
+  /** 弹出更新弹窗：每次冷启动至多一次。 */
+  private presentUpdate(info: UpdateInfo): void {
+    if (this.updateShown || !info.has_update) {
+      return;
+    }
+    this.updateShown = true;
+    this.updateUrl = info.url;
+    const title: string = '有新版本 v' + info.latest;
+    let message: string = '当前 v' + info.current + '，最新 v' + info.latest + '。';
+    if (info.notes !== undefined && info.notes !== null && info.notes.length > 0) {
+      const brief: string = info.notes.length > 120 ? info.notes.substring(0, 120) + '…' : info.notes;
+      message = message + '\n\n' + brief;
+    }
+    this.updateCopy = new ConfirmCopy(title, message, '打开下载链接', '稍后', false);
+    try {
+      this.updateController.open();
+    } catch (err) {
+    }
+  }
+
+  /** 打开下载页并把链接复制到剪贴板。 */
+  private openUpdatePage(): void {
+    const url: string = this.updateUrl.length > 0 ? this.updateUrl :
+      'https://github.com/stlin256/HGhub-Harmony/releases';
+    Api.openUrl(url);
+    try {
+      const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, url);
+      pasteboard.getSystemPasteboard().setData(data).then(() => {
+        promptAction.showToast({ message: '下载链接已复制', duration: 2000 });
+      }).catch(() => {
+      });
+    } catch (err) {
+    }
   }
 
   /** to 是否为 NavDestination 内容页（而非底部 Tab 的 NavBar）。 */
