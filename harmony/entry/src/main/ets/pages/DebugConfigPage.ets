@@ -39,6 +39,7 @@ import { abGroup, bucket } from '../services/Rollout';
 import { UiBus } from '../services/UiBus';
 import { UpdateChecker } from '../services/UpdateChecker';
 import { IS_TEST_VARIANT, VARIANT_NAME } from '../utils/BuildVariant';
+import { AppChannel } from '../utils/AppChannel';
 import { hostOf } from '../utils/Format';
 
 /** 调试用 Prefs 键：灰度 bucket 模拟（-1 / 不存在 = 不模拟）。 */
@@ -1117,6 +1118,7 @@ export struct DebugConfigPage {
     this.InfoRow('配置接口', Endpoints.configUrl())
     this.InfoRow('App 版本', 'v' + this.appVersion + ' (' + this.appVersionCode + ')')
     this.InfoRow('变体', VARIANT_NAME + (IS_TEST_VARIANT ? '（测试）' : '（发布）'))
+    this.InfoRow('分发渠道', AppChannel.id())
     this.InfoRow('系统 API', this.apiVersion)
     this.InfoRow('设备型号', this.deviceModel)
     this.InfoRow('当前线路', hostOf(Lines.current()))
