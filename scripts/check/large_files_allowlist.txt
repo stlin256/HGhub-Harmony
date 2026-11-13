@@ -1,0 +1,4 @@
+# 大文件允许清单：path<TAB>max_lines
+# 超过 2000 行的文件必须登记在此，且不得超过登记上限（防止继续膨胀）。
+# 目标：逐步拆分后从清单移除。
+harmony/entry/src/main/ets/pages/PlayerPage.ets	4400

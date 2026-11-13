@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/HarmonyOS-7-4D6BFE?style=flat-square" alt="HarmonyOS 7">
   <img src="https://img.shields.io/badge/API-26-2EA44F?style=flat-square" alt="HarmonyOS API 26">
   <img src="https://img.shields.io/badge/ArkTS-ArkUI-3178C6?style=flat-square" alt="ArkTS/ArkUI">
-  <a href="https://github.com/stlin256/HGhub-Harmony/releases"><img src="https://img.shields.io/badge/release-v2.1.0-4D6BFE?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/stlin256/HGhub-Harmony/releases"><img src="https://img.shields.io/badge/release-v2.2.0-4D6BFE?style=flat-square" alt="Release"></a>
 </p>
 
 <p align="center">
