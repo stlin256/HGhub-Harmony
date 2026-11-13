@@ -43,6 +43,8 @@ import { IS_TEST_VARIANT } from '../utils/BuildVariant';
 import { DebugLine, PlayerDiagnostics } from '../components/player/PlayerDiagnostics';
 import { PlayerSheetContent } from '../components/player/PlayerSheetContent';
 import { PlayerMoreMenu } from '../components/player/PlayerMoreMenu';
+import { PlayerRailChrome, PlayerTopChrome } from '../components/player/PlayerChrome';
+import { PlayerBottomChrome } from '../components/player/PlayerBottomChrome';
 import { AppChannel } from '../utils/AppChannel';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
@@ -2520,22 +2522,7 @@ export struct PlayerPage {
     }, 1600);
   }
 
-  private rateItems(): MenuElement[] {
-    const items: MenuElement[] = [];
-    for (let i = 0; i < RATES.length; i++) {
-      const value = RATES[i];
-      const label = value === 1 ? I18n.fmt0($r('app.string.fmt_rate_normal')) :
-        I18n.fmt1($r('app.string.fmt_rate_value'), value);
-      const item: MenuElement = {
-        value: label,
-        action: () => {
-          this.changeRate(value);
-        }
-      };
-      items.push(item);
-    }
-    return items;
-  }
+
 
   /* ── 文案 ─────────────────────────────────────────── */
   private titleText(): string {
@@ -2869,505 +2856,6 @@ export struct PlayerPage {
   }
 
   /* ── UI ───────────────────────────────────────────── */
-  @Builder
-  TopChrome() {
-    Column() {
-      Row() {
-        HgPressable({ dark: true, noTap: true }) {
-          Stack() {
-            SymbolGlyph($r('sys.symbol.chevron_left'))
-              .fontSize(HgIconSize.emphasis)
-              .fontColor([HgColor.videoInk])
-          }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .borderRadius(HgSize.hitTarget / 2)
-          .backgroundColor(HgColor.videoChip)
-          .onClick(() => {
-            this.handlePlayerBack();
-          })
-          .accessibilityText($r('app.string.ui_11d02415'))
-        }
-
-        Column({ space: 2 }) {
-          Text(this.titleText())
-            .fontSize(HgFont.playerTitle)
-            .fontWeight(HgFont.weightMedium)
-            .fontColor(HgColor.videoInk)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%')
-          Text(this.subtitleText())
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.videoInk3)
-            .maxLines(1)
-            .width('100%')
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        .margin({ left: HgSpace.s, right: HgSpace.s })
-        // 切集/换线时标题与副标题随进度区一起 fast 淡出淡入，避免文案硬切。
-        .opacity(this.progressSwitching ? 0 : 1)
-        .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-
-        if (this.qualityBadge.length > 0) {
-          Column() {
-            HgPressable({ dark: true, noTap: true }) {
-              Text(this.qualityBadge)
-                .fontSize(HgFont.micro)
-                .fontWeight(HgFont.weightMedium)
-                .fontColor(HgColor.videoInk)
-                .maxLines(1)
-                .height(32)
-                .padding({ left: 10, right: 10 })
-                .backgroundColor(HgColor.videoChip)
-                .borderRadius(16)
-                .textAlign(TextAlign.Center)
-                .margin({ right: HgSpace.s })
-                .onClick(() => {
-                  this.toggleQuality();
-                })
-                .accessibilityText(this.qualityBadge === 'HD' ? '当前高清，点击切换标准' : '当前标准，点击切换高清')
-            }
-          }
-          .transition(this.chipFade())
-        }
-
-        if (this.castAvailable) {
-          Stack({ alignContent: Alignment.Center }) {
-            AVCastPicker({
-              normalColor: HgColor.videoInk,
-              activeColor: HgColor.accent(true),
-              colorMode: AVCastPickerColorMode.AUTO,
-              // 视频内容用 video 会话，投播面板才有视频预览与正确的设备语义。
-              sessionType: 'video',
-              // 面板式投播界面（比菜单式更适合视频投播预览）。
-              pickerStyle: AVCastPickerStyle.STYLE_PANEL,
-              // 面板开合回调：打开期间保活 chrome，避免 picker 随 TopChrome 卸载而消失。
-              onStateChange: (state: AVCastPickerState) => {
-                this.onCastPanelChanged(state);
-              }
-            })
-              .width(24)
-              .height(24)
-          }
-          .width(32)
-          .height(32)
-          .borderRadius(16)
-          .backgroundColor(HgColor.videoChip)
-          .margin({ right: HgSpace.xs })
-          .accessibilityText($r('app.string.ui_bc88087e'))
-          .transition(this.chipFade())
-        }
-
-        if (this.canToggleFullscreen()) {
-          Column() {
-            HgPressable({ dark: true, noTap: true }) {
-              Text(this.forceFullscreen ? '退出全屏' : '全屏')
-                .fontSize(HgFont.micro)
-                .fontColor(HgColor.videoInk2)
-                .maxLines(1)
-                .height(32)
-                .padding({ left: 10, right: 10 })
-                .backgroundColor(HgColor.videoChip)
-                .borderRadius(16)
-                .margin({ right: HgSpace.xs })
-                .accessibilityText('投播到其他设备')
-                .onClick(() => {
-                  this.togglePaneFullscreen();
-                })
-                .accessibilityText(this.forceFullscreen ? '退出全屏，回到平行视窗' : '全屏播放')
-            }
-          }
-          .transition(this.chipFade())
-        }
-
-        HgPressable({ dark: true, noTap: true }) {
-          Row({ space: 2 }) {
-            Text($r('app.string.ui_5922d95f'))
-              .fontSize(HgFont.micro)
-              .fontColor(HgColor.videoInk2)
-              .maxLines(1)
-            SymbolGlyph($r('sys.symbol.chevron_down'))
-              .fontSize(HgFont.nano)
-              .fontColor([HgColor.videoInk3])
-          }
-          .height(32)
-          .padding({ left: 10, right: 10 })
-          .backgroundColor(HgColor.videoChip)
-          .borderRadius(16)
-          .onClick(() => {
-            this.openLines();
-          })
-          .accessibilityText($r('app.string.ui_5902c97c'))
-        }
-
-        HgPressable({ dark: true, noTap: true }) {
-          Stack() {
-            SymbolGlyph($r('sys.symbol.ellipsis_circle'))
-              .fontSize(HgIconSize.emphasis)
-              .fontColor([HgColor.videoInk])
-          }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .onClick(() => {
-            this.toggleMenu();
-          })
-          .accessibilityText($r('app.string.ui_9b0c6c78'))
-        }
-      }
-      .width('100%')
-      .height(44)
-      .padding({ left: HgSpace.s, right: HgSpace.s })
-    }
-    .width('100%')
-    .padding({
-      left: this.leftInset,
-      right: this.rightInset,
-      top: this.topSafePad(),
-      bottom: HgSpace.xxl
-    })
-    .linearGradient({
-      angle: 180,
-      colors: [['#B3000000', 0.0], ['#00000000', 1.0]]
-    })
-    .transition(this.chromeFade())
-  }
-
-  @Builder
-  RailChrome() {
-    Stack({ alignContent: Alignment.BottomEnd }) {
-      Column({ space: HgSpace.l }) {
-        Column({ space: HgSpace.xs }) {
-          Stack() {
-            SymbolGlyph(this.liked ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
-              .fontSize(HgIconSize.player)
-              .fontColor([this.liked ? HgColor.like(true) : HgColor.videoInk])
-          }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .borderRadius(HgSize.hitTarget / 2)
-          .backgroundColor(HgColor.videoChip)
-          // 点赞状态切换脉冲（1→1.12→1），由 pulseRail 用 animateTo 驱动。
-          .scale({ x: this.likePulse, y: this.likePulse })
-          Text(fmt(this.likeCount))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.videoInk2)
-        }
-        .width(48)
-        .scale({ x: this.chromeScale('like'), y: this.chromeScale('like') })
-        .animation({ duration: this.chromePressMs('like'), curve: HgMotion.curve })
-        .onTouch((event: TouchEvent) => {
-          this.chromeTouch('like', event);
-        })
-        .onClick(() => {
-          this.toggleLike();
-        })
-        .accessibilityText(this.liked ? '取消点赞' : '点赞')
-
-        Column({ space: HgSpace.xs }) {
-          Stack() {
-            SymbolGlyph(this.faved ? $r('sys.symbol.star_fill') : $r('sys.symbol.star'))
-              .fontSize(HgIconSize.player)
-              .fontColor([this.faved ? HgColor.videoGold : HgColor.videoInk])
-          }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .borderRadius(HgSize.hitTarget / 2)
-          .backgroundColor(HgColor.videoChip)
-          // 收藏状态切换脉冲（1→1.12→1），由 pulseRail 用 animateTo 驱动。
-          .scale({ x: this.favPulse, y: this.favPulse })
-          Text($r('app.string.ui_d07cee78'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.videoInk2)
-        }
-        .width(48)
-        .scale({ x: this.chromeScale('fav'), y: this.chromeScale('fav') })
-        .animation({ duration: this.chromePressMs('fav'), curve: HgMotion.curve })
-        .onTouch((event: TouchEvent) => {
-          this.chromeTouch('fav', event);
-        })
-        .onClick(() => {
-          this.toggleFav();
-        })
-        .accessibilityText(this.faved ? '取消收藏' : '收藏')
-
-        if (ConfigRegistry.getBool(ConfigKey.COMMENTS_ENABLED)) {
-          Column({ space: HgSpace.xs }) {
-            Stack() {
-              SymbolGlyph($r('sys.symbol.message'))
-                .fontSize(HgIconSize.player)
-                .fontColor([HgColor.videoInk])
-            }
-            .width(HgSize.hitTarget)
-            .height(HgSize.hitTarget)
-            .borderRadius(HgSize.hitTarget / 2)
-            .backgroundColor(HgColor.videoChip)
-            Text(fmt(this.commentCount))
-              .fontSize(HgFont.micro)
-              .fontColor(HgColor.videoInk2)
-          }
-          .width(48)
-          .scale({ x: this.chromeScale('comment'), y: this.chromeScale('comment') })
-          .animation({ duration: this.chromePressMs('comment'), curve: HgMotion.curve })
-          .onTouch((event: TouchEvent) => {
-            this.chromeTouch('comment', event);
-          })
-          .onClick(() => {
-            this.openComments();
-            this.showChrome();
-          })
-          .accessibilityText($r('app.string.ui_cf510562'))
-        }
-
-        Column({ space: HgSpace.xs }) {
-          Stack() {
-            SymbolGlyph($r('sys.symbol.arrowshape_turn_up_right'))
-              .fontSize(HgIconSize.player)
-              .fontColor([HgColor.videoInk])
-          }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .borderRadius(HgSize.hitTarget / 2)
-          .backgroundColor(HgColor.videoChip)
-          Text($r('app.string.ui_7a924341'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.videoInk2)
-        }
-        .width(48)
-        .scale({ x: this.chromeScale('share'), y: this.chromeScale('share') })
-        .animation({ duration: this.chromePressMs('share'), curve: HgMotion.curve })
-        .onTouch((event: TouchEvent) => {
-          this.chromeTouch('share', event);
-        })
-        .onClick(() => {
-          this.share();
-        })
-        .accessibilityText($r('app.string.ui_7a924341'))
-      }
-      .alignItems(HorizontalAlign.Center)
-      .margin({ right: HgSpace.m + this.rightInset, bottom: this.bottomSafePad() + 150 })
-    }
-    .width('100%')
-    .height('100%')
-    .hitTestBehavior(HitTestMode.None)
-    .transition(this.chromeFade())
-  }
-
-  @Builder
-  BottomChrome() {
-    Stack({ alignContent: Alignment.BottomStart }) {
-      Column() {
-        Column({ space: HgSpace.xs }) {
-          Text(this.titleText())
-            .fontSize(HgFont.playerTitle)
-            .fontWeight(HgFont.weightMedium)
-            .fontColor(HgColor.videoInk)
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%')
-          Text(this.metaText())
-            .fontSize(HgFont.playerMeta)
-            .fontColor(HgColor.videoInk2)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%')
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        .padding({ right: 72 })
-        // 切集/换线时标题与 meta 随进度区一起 fast 淡出淡入，避免文案硬切。
-        .opacity(this.progressSwitching ? 0 : 1)
-        .animation({ duration: HgMotion.ms(HgMotion.fast), curve: HgMotion.curve })
-        .onClick(() => {
-          this.openSheet('detail');
-        })
-
-        PlayerSeekBar({
-          durationMs: this.durationMs,
-          positionMs: this.positionMs,
-          bufferedMs: this.bufferedMs,
-          seekEnabled: this.errorText.length === 0 && !this.loading,
-          showTime: true,
-          onSeekStart: () => {
-            this.beginSeekPreview();
-          },
-          onSeekPreview: (ms: number) => {
-            this.dragMs = ms;
-          },
-          onSeekEnd: (ms: number, moved: boolean) => {
-            this.dragging = false;
-            // 记录提交时间：进度条与手势共用 180ms 防连点窗口。
-            this.lastSeekCommitAt = Date.now();
-            // 拖到片尾：视为看完，直接续播下一集（末集复用 handleCompleted 记录完播信号）。
-            // 只认「拖动」：轻点进度条右侧也会落在片尾附近，不应被当成看完。
-            if (PlayerSeekPolicy.isSeekToEnd(moved, ms, this.durationMs) &&
-              this.params.feedKind !== 'post') {
-              this.stopSeeking();
-              this.positionMs = ms;
-              this.handleCompleted();
-              return;
-            }
-            // 松手才真正跳转：保持加载态直到 seekDone（2s 兜底），恢复播放不提前闪出暂停图标。
-            this.startSeeking();
-            this.service.seekTo(ms);
-            this.positionMs = ms;
-            if (this.seekWasPlaying) {
-              this.service.play();
-            }
-            this.showChrome();
-          },
-          onSeekCancel: () => {
-            // 拖动被系统打断：不 seek，只把拖动浮层与「拖动前暂停」的状态恢复，避免卡在暂停/浮层常驻。
-            this.dragging = false;
-            this.stopSeeking();
-            if (this.seekWasPlaying) {
-              this.service.play();
-            }
-            this.showChrome();
-          }
-        })
-        .margin({ top: HgSpace.m })
-        // 切集/换剧/换线时 standard 220ms 淡出，准备好后淡入，避免进度条与时间数字瞬间跳变。
-        .opacity(this.progressSwitching ? 0 : 1)
-        .animation({ duration: HgMotion.ms(HgMotion.standard), curve: HgMotion.curve })
-
-        Row({ space: HgSpace.s }) {
-          Stack() {
-            if (this.seeking || this.buffering || this.loading) {
-              // seek 跳转/缓冲/加载中：播放暂停图标改为加载圈，避免出现「正在加载却显示暂停按钮」的违和状态。
-              LoadingProgress()
-                .width(24)
-                .height(24)
-                .color(HgColor.videoInk)
-                .transition(this.chipFade())
-            } else {
-              SymbolGlyph(this.playing ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
-                .fontSize(HgIconSize.player)
-                .fontColor([HgColor.videoInk])
-                .transition(this.chipFade())
-            }
-          }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .borderRadius(HgSize.hitTarget / 2)
-          .backgroundColor(HgColor.videoChip)
-          .scale({ x: this.chromeScale('play'), y: this.chromeScale('play') })
-          .animation({ duration: this.chromePressMs('play'), curve: HgMotion.curve })
-          .onTouch((event: TouchEvent) => {
-            this.chromeTouch('play', event);
-          })
-          .onClick(() => {
-            this.togglePlay();
-          })
-          .accessibilityText(this.seeking || this.buffering || this.loading ? '正在加载' :
-            (this.playing ? '暂停' : '播放'))
-
-          Stack() {
-            SymbolGlyph(this.muted ? $r('sys.symbol.speaker_slash') : $r('sys.symbol.speaker_wave_2'))
-              .fontSize(HgIconSize.control)
-              .fontColor([HgColor.videoInk])
-          }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .borderRadius(HgSize.hitTarget / 2)
-          .backgroundColor(HgColor.videoChip)
-          .scale({ x: this.chromeScale('mute'), y: this.chromeScale('mute') })
-          .animation({ duration: this.chromePressMs('mute'), curve: HgMotion.curve })
-          .onTouch((event: TouchEvent) => {
-            this.chromeTouch('mute', event);
-          })
-          .onClick(() => {
-            this.toggleMute();
-          })
-          .accessibilityText(this.muted ? '打开声音' : '静音')
-
-          Blank()
-
-          Stack() {
-            Text(this.rateLabel())
-              .fontSize(HgFont.micro)
-              .fontWeight(HgFont.weightMedium)
-              .fontColor(HgColor.videoInk)
-              .height(32)
-              .padding({ left: 10, right: 10 })
-              .backgroundColor(HgColor.videoChip)
-              .borderRadius(16)
-              // 倍速切换脉冲（由 pulseRateChip 用 animateTo 驱动）。
-              .scale({ x: this.ratePulse, y: this.ratePulse })
-              .bindMenu(this.rateItems())
-          }
-          .scale({ x: this.chromeScale('rate'), y: this.chromeScale('rate') })
-          .animation({ duration: this.chromePressMs('rate'), curve: HgMotion.curve })
-          .onTouch((event: TouchEvent) => {
-            this.chromeTouch('rate', event);
-          })
-
-          if (this.params.feedKind !== 'post') {
-            Row({ space: HgSpace.xs }) {
-              SymbolGlyph($r('sys.symbol.list_bullet'))
-                .fontSize(HgIconSize.compact)
-                .fontColor([HgColor.videoInk])
-              Text($r('app.string.ui_e31ef097'))
-                .fontSize(HgFont.caption)
-                .fontColor(HgColor.videoInk)
-            }
-            .height(32)
-            .padding({ left: 10, right: 10 })
-            .backgroundColor(HgColor.videoChip)
-            .borderRadius(16)
-            .scale({ x: this.chromeScale('episode'), y: this.chromeScale('episode') })
-            .animation({ duration: this.chromePressMs('episode'), curve: HgMotion.curve })
-            .onTouch((event: TouchEvent) => {
-              this.chromeTouch('episode', event);
-            })
-            .onClick(() => {
-              PlaybackLog.info('ui.episode', 'tap');
-              this.openSheet('episode');
-            })
-            .accessibilityText($r('app.string.ui_e31ef097'))
-          }
-
-          Stack() {
-            SymbolGlyph($r('sys.symbol.lock'))
-              .fontSize(HgIconSize.compact)
-              .fontColor([HgColor.videoInk])
-          }
-          .width(HgSize.hitTarget)
-          .height(HgSize.hitTarget)
-          .borderRadius(HgSize.hitTarget / 2)
-          .backgroundColor(HgColor.videoChip)
-          .scale({ x: this.chromeScale('lock'), y: this.chromeScale('lock') })
-          .animation({ duration: this.chromePressMs('lock'), curve: HgMotion.curve })
-          .onTouch((event: TouchEvent) => {
-            this.chromeTouch('lock', event);
-          })
-          .onClick(() => {
-            this.toggleLock();
-          })
-          .accessibilityText($r('app.string.ui_13143e50'))
-        }
-        .width('100%')
-        .height(44)
-      }
-      .width('100%')
-      .padding({
-        left: this.chromeLeftPad(),
-        right: this.chromeRightPad(),
-        top: HgSpace.xxl,
-        bottom: this.bottomSafePad() + HgSpace.m
-      })
-      .linearGradient({
-        angle: 180,
-        colors: [['#00000000', 0.0], ['#66000000', 0.45], ['#E6000000', 1.0]]
-      })
-    }
-    .width('100%')
-    .height('100%')
-    .hitTestBehavior(HitTestMode.None)
-    .transition(this.chromeFade())
-  }
-
   @Builder
   OverlayLayer() {
     Stack({ alignContent: Alignment.Center }) {
@@ -3750,12 +3238,117 @@ export struct PlayerPage {
           this.handleTouch(event);
         })
       if (this.chromeVisible && !this.locked) {
-        this.TopChrome()
+        PlayerTopChrome({
+          title: this.titleText(),
+          subtitle: this.subtitleText(),
+          progressSwitching: this.progressSwitching,
+          qualityBadge: this.qualityBadge,
+          castAvailable: this.castAvailable,
+          forceFullscreen: this.forceFullscreen,
+          canFullscreen: this.canToggleFullscreen(),
+          leftInset: this.leftInset,
+          rightInset: this.rightInset,
+          topPad: this.topSafePad(),
+          onBack: () => { this.handlePlayerBack(); },
+          onToggleQuality: () => { this.toggleQuality(); },
+          onCastState: (state: AVCastPickerState) => { this.onCastPanelChanged(state); },
+          onToggleFullscreen: () => { this.togglePaneFullscreen(); },
+          onOpenLines: () => { this.openLines(); },
+          onMenu: () => { this.toggleMenu(); }
+        })
         // 宽屏评论侧栏占用右侧：互动栏让位（隐藏且不参与命中），避免与侧栏重叠。
         if (!this.commentPanelVisible) {
-          this.RailChrome()
+          PlayerRailChrome({
+            liked: this.liked,
+            faved: this.faved,
+            likeCount: this.likeCount,
+            commentCount: this.commentCount,
+            commentsEnabled: ConfigRegistry.getBool(ConfigKey.COMMENTS_ENABLED),
+            rightInset: this.rightInset,
+            bottomPad: this.bottomSafePad(),
+            pressedChrome: this.pressedChrome,
+            onLike: () => { this.toggleLike(); },
+            onFav: () => { this.toggleFav(); },
+            onComment: () => { this.openComments(); this.showChrome(); },
+            onShare: () => { this.share(); },
+            onChromeTouch: (key: string, event: TouchEvent) => { this.chromeTouch(key, event); }
+          })
         }
-        this.BottomChrome()
+        PlayerBottomChrome({
+          title: this.titleText(),
+          meta: this.metaText(),
+          progressSwitching: this.progressSwitching,
+          durationMs: this.durationMs,
+          positionMs: this.positionMs,
+          bufferedMs: this.bufferedMs,
+          seekEnabled: this.errorText.length === 0 && !this.loading,
+          seeking: this.seeking,
+          buffering: this.buffering,
+          loading: this.loading,
+          playing: this.playing,
+          muted: this.muted,
+          ratePulse: this.ratePulse,
+          rateLabel: this.rateLabel(),
+          showEpisode: this.params.feedKind !== 'post',
+          pressedChrome: this.pressedChrome,
+          leftPad: this.chromeLeftPad(),
+          rightPad: this.chromeRightPad(),
+          bottomPad: this.bottomSafePad(),
+          onDetail: () => {
+            this.openSheet('detail');
+          },
+          onSeekStart: () => {
+            this.beginSeekPreview();
+          },
+          onSeekPreview: (ms: number) => {
+            this.dragMs = ms;
+          },
+          onSeekEnd: (ms: number, moved: boolean) => {
+            this.dragging = false;
+            this.lastSeekCommitAt = Date.now();
+            if (PlayerSeekPolicy.isSeekToEnd(moved, ms, this.durationMs) &&
+              this.params.feedKind !== 'post') {
+              this.stopSeeking();
+              this.positionMs = ms;
+              this.handleCompleted();
+              return;
+            }
+            this.startSeeking();
+            this.service.seekTo(ms);
+            this.positionMs = ms;
+            if (this.seekWasPlaying) {
+              this.service.play();
+            }
+            this.showChrome();
+          },
+          onSeekCancel: () => {
+            this.dragging = false;
+            this.stopSeeking();
+            if (this.seekWasPlaying) {
+              this.service.play();
+            }
+            this.showChrome();
+          },
+          onPlay: () => {
+            this.togglePlay();
+          },
+          onMute: () => {
+            this.toggleMute();
+          },
+          onRate: (rate: number) => {
+            this.changeRate(rate);
+          },
+          onEpisode: () => {
+            PlaybackLog.info('ui.episode', 'tap');
+            this.openSheet('episode');
+          },
+          onLock: () => {
+            this.toggleLock();
+          },
+          onChromeTouch: (key: string, event: TouchEvent) => {
+            this.chromeTouch(key, event);
+          }
+        })
       }
       // AI 超分提示：定位于「视频画面中心」（不是播放器窗口中心），横屏/分栏时也不会跑到画面外。
       if (this.srHintOpacity > 0) {
