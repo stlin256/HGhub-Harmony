@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成黄果短剧（HGhub Harmony）横屏宣传图。
+"""生成HGhub（HGhub Harmony）横屏宣传图。
 
 用法:
   python scripts/harmony/gen-promo.py
@@ -214,9 +214,9 @@ def brand(img, x, y, size=32, logo=None, align="left"):
     if logo is not None:
         img.alpha_composite(logo.resize((ls, ls), Image.LANCZOS), (lx, y - int(ls * .18)))
         lx += ls + 14
-    d.text((lx, y), "黄果短剧", font=font(size, bold=True), fill=WHITE)
+    d.text((lx, y), "HGhub", font=font(size, bold=True), fill=WHITE)
     if align == "left":
-        d.text((lx + d.textlength("黄果短剧", font=font(size, bold=True)) + 16, y + int(size * .4)),
+        d.text((lx + d.textlength("HGhub", font=font(size, bold=True)) + 16, y + int(size * .4)),
                "HGhub Harmony", font=font(int(size * .5), latin=True), fill=(255, 255, 255, 120))
 
 

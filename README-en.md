@@ -1,3 +1,5 @@
+> **Disclaimer**: This is a personal open-source project for learning HarmonyOS client development, intended for programming study only. All resources loaded inside the app come from the internet and are unrelated to the developer. Do not misuse; for learning purposes only.
+
 <p align="center">
   <img src="public/logo.png" width="96" height="96" alt="HGhub HarmonyOS">
 </p>

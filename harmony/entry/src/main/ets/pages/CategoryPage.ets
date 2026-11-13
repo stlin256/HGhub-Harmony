@@ -846,7 +846,7 @@ export struct CategoryPage {
   @Builder
   PostsSection() {
     Column() {
-      this.SectionTitle($r('sys.symbol.message'), '黄果吃瓜', '圈内爆料 · 每日更新', () => {
+      this.SectionTitle($r('sys.symbol.message'), 'HGhub吃瓜', '圈内爆料 · 每日更新', () => {
         this.navStack.pushPathByName(ROUTE_POSTS, null);
       })
       if (this.postsLoading) {

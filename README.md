@@ -1,11 +1,13 @@
+> **免责声明**：此为个人进行鸿蒙客户端开发学习的开源项目，仅为程序开发学习使用；APP 内部加载的资源仅为互联网资源，与开发者无关，请勿滥用，仅做程序学习。
+
 <p align="center">
-  <img src="public/logo.png" width="96" height="96" alt="黄果短剧 HarmonyOS">
+  <img src="public/logo.png" width="96" height="96" alt="HGhub HarmonyOS">
 </p>
 
 <h1 align="center">HGhub Harmony</h1>
 
 <p align="center">
-  <strong>把黄果短剧装进 HarmonyOS</strong><br>
+  <strong>把HGhub装进 HarmonyOS</strong><br>
   完全鸿蒙原生的第三方短剧客户端，使用 ArkTS / ArkUI 原生实现浏览、选集与沉浸播放。
 </p>
 
@@ -26,9 +28,9 @@
 
 ---
 
-## 完全鸿蒙原生的黄果短剧
+## 完全鸿蒙原生的HGhub
 
-黄果短剧的 HarmonyOS 原生客户端：用 **ArkTS / ArkUI** 直接开发，基于 Stage 模型与系统原生组件，不套 WebView、不内嵌 H5。
+HGhub的 HarmonyOS 原生客户端：用 **ArkTS / ArkUI** 直接开发，基于 Stage 模型与系统原生组件，不套 WebView、不内嵌 H5。
 
 首页发现、搜索分类、榜单吃瓜、详情选集与沉浸式竖屏播放，全部由原生组件、原生手势、原生播放器与原生系统能力承载；底栏使用系统沉浸光感材质，播放链路带预加载与本地媒体缓存。
 
@@ -146,7 +148,7 @@
 
 ## 上游与官方声明
 
-- **本项目官方下载渠道**：[GitHub Releases](https://github.com/stlin256/HGhub-Harmony/releases)。源码页不放任何可执行文件；其余网站、网盘、QQ 群、公众号、第三方下载站分发的「黄果短剧 / HGhub」安装包一律非官方，作者不保证其安全性与完整性。
+- **本项目官方下载渠道**：[GitHub Releases](https://github.com/stlin256/HGhub-Harmony/releases)。源码页不放任何可执行文件；其余网站、网盘、QQ 群、公众号、第三方下载站分发的「HGhub / HGhub」安装包一律非官方，作者不保证其安全性与完整性。
 - 🚫 **已知恶意修改版**：任何在旧版本源码基础上擅自加入**卡密验证、VIP 付费解锁**等变现功能的修改版均与本项目无关，代码改动不透明、安全性无法验证。**请勿下载、勿注册、勿付费**；如已安装，建议立即卸载。
 - 本项目**从未、也不会**加入任何卡密 / VIP / 付费解锁 / 广告功能。
 

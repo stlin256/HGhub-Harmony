@@ -16,7 +16,7 @@ import { fmt } from '../utils/Format';
 // @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 20;
 
-/** 黄果吃瓜列表：响应式瀑布流（手机 2 列 / 平板 3–4 列，内容区最大 960vp 居中）+ 下拉刷新 + 触底分页 + 骨架/错误态。 */
+/** HGhub吃瓜列表：响应式瀑布流（手机 2 列 / 平板 3–4 列，内容区最大 960vp 居中）+ 下拉刷新 + 触底分页 + 骨架/错误态。 */
 @Component
 export struct PostsPage {
   @Consume('hgNavStack') navStack: NavPathStack;
@@ -323,7 +323,7 @@ export struct PostsPage {
     NavDestination() {
       Column() {
         HgTopBar({
-          title: '黄果吃瓜',
+          title: 'HGhub吃瓜',
           dark: this.dark,
           showBack: true,
           onBack: () => {
