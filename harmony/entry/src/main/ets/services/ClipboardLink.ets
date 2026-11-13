@@ -6,11 +6,6 @@ import { Prefs } from './Prefs';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGClip';
-/**
- * 两次剪贴板检查的最小间隔（避免每次回前台都触发系统读剪贴板提示）。
- * @config-exempt: ConfigRegistry 未注册 clipboard_check_interval_ms（SPEC §4.4 建议 key 尚未落地），保留硬编码。
- */
-const CHECK_INTERVAL_MS: number = 120 * 1000;
 const KEY_LAST_CHECK: string = 'clip_last_check_at';
 const KEY_LAST_LINK: string = 'clip_last_link';
 
@@ -132,7 +127,7 @@ export class ClipboardLink {
     }
     const now: number = Date.now();
     const last: number = Prefs.getNumber(KEY_LAST_CHECK, 0);
-    if (last > 0 && now - last < CHECK_INTERVAL_MS) {
+    if (last > 0 && now - last < ConfigRegistry.getNumber(ConfigKey.CLIPBOARD_CHECK_INTERVAL_MS)) {
       return 0;
     }
     Prefs.putNumber(KEY_LAST_CHECK, now);

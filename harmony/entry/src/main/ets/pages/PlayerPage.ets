@@ -44,25 +44,29 @@ const CHROME_HIDE_MS: number = 3000;
 /** 顶部安全区兜底（vp）：topInset 上报 0 时保证标题/返回键不与状态栏/挖孔重叠。 */
 const TOP_SAFE_FALLBACK: number = HgSpace.xxl;
 /** 横屏视频「适应」时，视频中心所在屏幕高度比例（略高于正中心，给底部控件留空间）。 */
+// @config-exempt: UI 布局比例（横屏视频中心位置），非业务阈值
 const LANDSCAPE_CENTER_Y_RATIO: number = 0.42;
-const LONG_PRESS_MS: number = 380;
-const SEEK_FULL_WIDTH_SECONDS: number = 120;
 /** seek 加载态兜底时长（ms）：seekDone 未回调时也要恢复按钮，避免一直卡在加载圈。 */
+// @config-exempt: UI 交互兜底时长（seek 加载态），非业务阈值
 const SEEK_LOADING_MS: number = 2000;
 /** seek 后 onState('playing') 兜底清除的宽限（ms）：避免 play() 恢复早于 seekDone 时闪出暂停图标。 */
+// @config-exempt: UI 交互兜底宽限（seek 播放态），非业务阈值
 const SEEK_PLAYING_GRACE_MS: number = 600;
 /** seek 松手后防连点窗口（ms）：DESIGN §4.8.5 要求 180ms 内不接受第二次拖动。 */
+// @config-exempt: UI 交互（seek 防连点窗口，DESIGN §4.8.5）
 const SEEK_REARM_MS: number = 180;
-/** 画中画状态提示展示时长（ms，非动效时长）。 */
-const PIP_HINT_MS: number = 1600;
 /** 分栏淡出动画结束后再出栈的缓冲（ms）：保证退场动画先完成。 */
 const PANE_POP_BUFFER_MS: number = 20;
 /** 滑动时视频层 Y 位移的方向系数：SwiperAnimationEvent.currentOffset 与页面位移同号时取 1。 */
+// @config-exempt: UI 手势常量（滑动方向系数）
 const VIDEO_DRAG_SIGN: number = 1;
 /** 宽屏评论侧栏宽度（vp）与最小宽度。 */
+// @config-exempt: UI 布局尺寸（宽屏评论侧栏宽度 vp）
 const COMMENT_PANEL_W: number = 380;
+// @config-exempt: UI 布局尺寸（评论侧栏最小宽度 vp）
 const COMMENT_PANEL_MIN_W: number = 280;
 /** 评论侧栏打开时左侧视频区最小宽度（vp）。 */
+// @config-exempt: UI 布局尺寸（评论侧栏打开时视频区最小宽度 vp）
 const COMMENT_VIDEO_MIN_W: number = 320;
 
 class StartPoint {
@@ -1720,7 +1724,7 @@ export struct PlayerPage {
       } else if (this.gestureMode === 1) {
         // 横滑灵敏度按当前视频区宽度归一（宽屏评论侧栏打开时手势区已收窄为左侧视频区）。
         const width = this.videoAreaWidth();
-        const delta = dx / width * SEEK_FULL_WIDTH_SECONDS * 1000;
+        const delta = dx / width * ConfigRegistry.getNumber(ConfigKey.SEEK_FULL_WIDTH_SECONDS) * 1000;
         let target = this.seekBaseMs + delta;
         if (target < 0) {
           target = 0;
@@ -2002,7 +2006,7 @@ export struct PlayerPage {
       this.pulseRateChip();
       this.haptic(10);
       this.showChrome();
-    }, LONG_PRESS_MS);
+    }, ConfigRegistry.getNumber(ConfigKey.LONG_PRESS_MS));
   }
 
   private cancelLongPress(): void {
@@ -2484,7 +2488,7 @@ export struct PlayerPage {
     }
   }
 
-  /** 画中画状态提示：fast 淡入、exitFast 淡出，PIP_HINT_MS 后自动隐藏。 */
+  /** 画中画状态提示：fast 淡入、exitFast 淡出，pip_hint_ms（默认 1600ms）后自动隐藏。 */
   private showPiPHint(text: string): void {
     if (this.pipHintTimer >= 0) {
       clearTimeout(this.pipHintTimer);
@@ -2497,7 +2501,7 @@ export struct PlayerPage {
         return;
       }
       this.pipHint = '';
-    }, PIP_HINT_MS);
+    }, ConfigRegistry.getNumber(ConfigKey.PIP_HINT_MS));
   }
 
   /** 超分提示：淡入 190ms → 停留 1.4s → 淡出 260ms（每次打开播放器最多一次）。 */

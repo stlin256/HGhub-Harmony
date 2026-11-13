@@ -32,7 +32,9 @@ const HERO_COUNT: number = 5;
 // @config-exempt: 未注册（ConfigRegistry 无 home_hero_autoplay_ms）
 const HERO_AUTO_PLAY_MS: number = 4200;
 /** Hero 封面解码包围盒（px）：竖版海报 Contain 后显示高度≈700px（宽≈525px），900×1200 足够清晰。 */
+// @config-exempt: UI 渲染参数（Hero 封面解码包围盒 px），非业务阈值
 const HERO_DECODE_W: number = 900;
+// @config-exempt: UI 渲染参数（Hero 封面解码包围盒 px），非业务阈值
 const HERO_DECODE_H: number = 1200;
 /** 提前加载：滚动到距末尾约 4~5 行（2 列 ≈ 9~10 格）时就请求下一页，触底瞬间数据已就绪。 */
 // @config-exempt: 未注册（ConfigRegistry 无 home_load_ahead）
@@ -51,14 +53,14 @@ const DISPLAY_SIZE: number = PAGE_SIZE * 2;
 /** 整表替换（换一批/切 TAG/下拉刷新）统一走 HgMotion.listSwapOut(120)/listSwapIn(220)。 */
 const BATCH_FADE_LIFT: number = 6;
 /** 动画兜底释放闸门的额外余量（ms）：仅供定时器保险，不参与动画时长。 */
+// @config-exempt: UI 动效兜底（列表替换动画闸门余量），非业务阈值
 const BATCH_GUARD_MS: number = 120;
 /** 滚动合并调度延迟（ms）：滚动回调里只登记，到点统一做预取/预挑，避免每帧分配。 */
+// @config-exempt: 内部调度（滚动合并延迟），非业务阈值
 const SCROLL_WORK_DELAY: number = 60;
 /** 停止滚动多久后才允许重建 Hero（ms）：避免后台补池的 Hero 更新把 Grid 中途重排。 */
+// @config-exempt: 内部调度（滚动空闲后重建 Hero），非业务阈值
 const HERO_REFRESH_IDLE: number = 400;
-/** 随包目录注入：延迟多久尝试（等 RecService 异步载入）与一次并入多少条候选。 */
-const CATALOG_INJECT_DELAY: number = 1200;
-const CATALOG_INJECT_COUNT: number = 120;
 /**
  * 远程资源在启动 8s 后后台拉取：首屏读一次 banner 路径，再在该延迟后补读一次，
  * 让本次冷启动新下载的 banner 无需等下次启动即可展示（无下发时保持空串，零行为）。
@@ -486,7 +488,8 @@ export struct HomePage {
         }
         return;
       }
-      const cards: VideoCard[] = RecService.pick(RecService.catalogCards(), CATALOG_INJECT_COUNT);
+      const cards: VideoCard[] = RecService.pick(RecService.catalogCards(),
+        ConfigRegistry.getNumber(ConfigKey.CATALOG_INJECT_COUNT));
       if (cards.length === 0) {
         return;
       }
@@ -495,7 +498,7 @@ export struct HomePage {
         this.refreshHero();
       }
       // 池已不再是"只有 feed 前几页"：把池标记为可持续（finished 由后续 feed 进度决定）。
-    }, CATALOG_INJECT_DELAY);
+    }, ConfigRegistry.getNumber(ConfigKey.CATALOG_INJECT_DELAY_MS));
   }
 
   /**

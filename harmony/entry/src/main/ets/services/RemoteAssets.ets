@@ -26,6 +26,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { AppContext } from './AppContext';
 import { Api } from './Api';
+import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Net, RawBytes, RawText } from './Net';
 import { Prefs } from './Prefs';
 import { bucket } from './Rollout';
@@ -36,8 +37,6 @@ const LOG_TAG: string = 'HGRemoteAssets';
 /** 下发端点（telemetry-worker）。 */
 const ENDPOINT_BASE: string = 'https://hghub-telemetry.stlin256.workers.dev';
 const MANIFEST_URL: string = ENDPOINT_BASE + '/v1/assets/manifest';
-/** 启动后延迟多久拉取：避开首屏与启动动画，不阻塞启动。 */
-const INIT_DELAY_MS: number = 8000;
 /** 单次请求超时（资源最大 512 KB，15s 足够；失败静默）。 */
 const FETCH_TIMEOUT_MS: number = 15000;
 /** manifest 响应上限（清单本身很小，64 KB 留足余量）。 */
@@ -176,7 +175,7 @@ export class RemoteAssets {
 
   /**
    * 启动时调用一次（EntryAbility 初始化完 Prefs 后）。
-   * 先同步加载本地 manifest 缓存（path() 立即生效），再延迟 8s 后台拉取；不阻塞首屏。
+   * 先同步加载本地 manifest 缓存（path() 立即生效），再按 remote_assets_delay_ms（默认 8s）后台拉取；不阻塞首屏。
    */
   static init(): void {
     if (RemoteAssets.inited) {
@@ -190,7 +189,7 @@ export class RemoteAssets {
         RemoteAssets.fetch().catch((err: Object) => {
           hilog.warn(LOG_DOMAIN, LOG_TAG, 'fetch rejected');
         });
-      }, INIT_DELAY_MS);
+      }, ConfigRegistry.getNumber(ConfigKey.REMOTE_ASSETS_DELAY_MS));
     } catch (err) {
       hilog.warn(LOG_DOMAIN, LOG_TAG, 'schedule failed');
     }

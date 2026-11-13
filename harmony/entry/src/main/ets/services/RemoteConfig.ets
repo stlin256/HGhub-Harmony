@@ -29,7 +29,7 @@ import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Api } from './Api';
-import { ConfigRegistry, ConfigValue, RemoteConfigMeta, RemoteUiOverrides } from './ConfigRegistry';
+import { ConfigKey, ConfigRegistry, ConfigValue, RemoteConfigMeta, RemoteUiOverrides } from './ConfigRegistry';
 import { Net, RawText } from './Net';
 import { Prefs } from './Prefs';
 import { bucket } from './Rollout';
@@ -39,8 +39,6 @@ const LOG_TAG: string = 'HGRemoteConfig';
 
 /** 配置下发端点（telemetry-worker）。 */
 const ENDPOINT: string = 'https://hghub-telemetry.stlin256.workers.dev/v1/config';
-/** 启动后延迟多久拉取：避开首屏与启动动画，不阻塞启动。 */
-const INIT_DELAY_MS: number = 5000;
 /** 单次拉取超时（配置很小，8s 足够；失败静默）。 */
 const FETCH_TIMEOUT_MS: number = 8000;
 /** 响应体上限：SPEC 约定 16 KB，超限整包丢弃。 */
@@ -169,7 +167,7 @@ export class RemoteConfig {
 
   /**
    * 启动时调用一次（EntryAbility 初始化完 Prefs 后）。
-   * 同步应用本地缓存，再延迟 5s 后台拉取；不阻塞首屏。
+   * 同步应用本地缓存，再按 remote_config_delay_ms（默认 5s）后台拉取；不阻塞首屏。
    */
   static init(): void {
     if (RemoteConfig.inited) {
@@ -183,7 +181,7 @@ export class RemoteConfig {
         RemoteConfig.fetch().catch((err: Object) => {
           hilog.warn(LOG_DOMAIN, LOG_TAG, 'fetch rejected');
         });
-      }, INIT_DELAY_MS);
+      }, ConfigRegistry.getNumber(ConfigKey.REMOTE_CONFIG_DELAY_MS));
     } catch (err) {
       hilog.warn(LOG_DOMAIN, LOG_TAG, 'schedule failed');
     }

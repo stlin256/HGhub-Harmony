@@ -29,13 +29,18 @@ import { isSafeWebUrl, parseHttpsUrl } from '../utils/Security';
 /** 退场时长（与统一弹窗壳一致：200ms）。 */
 const EXIT_MS: number = HgMotion.exitStandard;
 /** toast 自动消失时长：无按钮 4s，有按钮留 6s 方便点击。 */
+// @config-exempt: 动效/交互时长（toast 自动消失），非业务阈值
 const TOAST_MS: number = 4000;
+// @config-exempt: 动效/交互时长（带按钮 toast），非业务阈值
 const TOAST_WITH_BUTTONS_MS: number = 6000;
 /** 弹窗正文最大高度（超出滚动，避免长文把按钮顶出屏幕）。 */
+// @config-exempt: UI 尺寸（弹窗正文最大高度 vp）
 const DIALOG_BODY_MAX_HEIGHT: number = 240;
 /** toast 距底部的避让距离（悬浮 Tab 栏约 68vp + 安全区）。 */
+// @config-exempt: UI 布局（toast 底部避让 vp）
 const TOAST_BOTTOM_OFFSET: number = 110;
 /** 弹窗入场起始缩放（与 HgDialogMotion.enterScale 一致：0.96→1）。 */
+// @config-exempt: 动效参数（弹窗入场缩放）
 const ENTER_SCALE: number = 0.96;
 
 @Component

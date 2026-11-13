@@ -166,6 +166,18 @@ export class ConfigKey {
   static readonly COMMENT_PAGE_SIZE: string = 'comment_page_size';
   static readonly RECOMMEND_EXPLORE_PCT: string = 'recommend_explore_pct';
   static readonly RECOMMEND_POOL_SIZE: string = 'recommend_pool_size';
+
+  /* ── 补充阈值（10 项，P3-D 覆盖率收口）────────────── */
+  static readonly ANALYTICS_INTERVAL_MS: string = 'analytics_interval_ms';
+  static readonly REMOTE_ASSETS_DELAY_MS: string = 'remote_assets_delay_ms';
+  static readonly CLIPBOARD_CHECK_INTERVAL_MS: string = 'clipboard_check_interval_ms';
+  static readonly REMOTE_CONFIG_DELAY_MS: string = 'remote_config_delay_ms';
+  static readonly LONG_PRESS_MS: string = 'long_press_ms';
+  static readonly SEEK_FULL_WIDTH_SECONDS: string = 'seek_full_width_seconds';
+  static readonly PIP_HINT_MS: string = 'pip_hint_ms';
+  static readonly CATALOG_INJECT_DELAY_MS: string = 'catalog_inject_delay_ms';
+  static readonly CATALOG_INJECT_COUNT: string = 'catalog_inject_count';
+  static readonly LOAD_MORE_THRESHOLD: string = 'load_more_threshold';
 }
 
 /** 本地覆盖持久化键（测试变体调试菜单写入）。 */
@@ -227,7 +239,7 @@ function threshold(key: string, defaultValue: number, min: number, max: number, 
 }
 
 /**
- * 全量配置注册表（53 项 = 用户偏好 9 + 功能开关 17 + 阈值 27）。
+ * 全量配置注册表（63 项 = 用户偏好 9 + 功能开关 17 + 阈值 27 + 补充阈值 10）。
  * 新增可配置项时必须在此登记，否则 CI 的配置覆盖率检查会告警。
  */
 const DEFS: ConfigDef[] = [
@@ -290,7 +302,26 @@ const DEFS: ConfigDef[] = [
   threshold(ConfigKey.SEARCH_PAGE_SIZE, 18, 5, 50, '搜索结果分页大小（SearchPage.PAGE_SIZE）'),
   threshold(ConfigKey.COMMENT_PAGE_SIZE, 20, 5, 50, '评论分页大小（CommentsSheet.PAGE_SIZE）'),
   threshold(ConfigKey.RECOMMEND_EXPLORE_PCT, 10, 0, 100, '推荐探索比例（%）'),
-  threshold(ConfigKey.RECOMMEND_POOL_SIZE, 200, 20, 1000, '推荐候选池大小')
+  threshold(ConfigKey.RECOMMEND_POOL_SIZE, 200, 20, 1000, '推荐候选池大小'),
+
+  /* ── 补充阈值（10 项，P3-D 覆盖率收口）：默认值对齐原硬编码常量 ── */
+  threshold(ConfigKey.ANALYTICS_INTERVAL_MS, 3600000, 60000, 86400000,
+    '统计上报最小间隔（毫秒，Analytics.REPORT_INTERVAL_MS）'),
+  threshold(ConfigKey.REMOTE_ASSETS_DELAY_MS, 8000, 1000, 60000,
+    '远程资源拉取启动延迟（毫秒，RemoteAssets.INIT_DELAY_MS）'),
+  threshold(ConfigKey.CLIPBOARD_CHECK_INTERVAL_MS, 120000, 10000, 3600000,
+    '剪贴板检查最小间隔（毫秒，ClipboardLink.CHECK_INTERVAL_MS）'),
+  threshold(ConfigKey.REMOTE_CONFIG_DELAY_MS, 5000, 1000, 60000,
+    '远程配置拉取启动延迟（毫秒，RemoteConfig.INIT_DELAY_MS）'),
+  threshold(ConfigKey.LONG_PRESS_MS, 380, 100, 2000, '播放页长按判定（毫秒，PlayerPage.LONG_PRESS_MS）'),
+  threshold(ConfigKey.SEEK_FULL_WIDTH_SECONDS, 120, 10, 600,
+    '进度条满宽对应秒数（PlayerPage.SEEK_FULL_WIDTH_SECONDS）'),
+  threshold(ConfigKey.PIP_HINT_MS, 1600, 500, 10000, '画中画状态提示时长（毫秒，PlayerPage.PIP_HINT_MS）'),
+  threshold(ConfigKey.CATALOG_INJECT_DELAY_MS, 1200, 0, 60000,
+    '随包目录注入延迟（毫秒，HomePage.CATALOG_INJECT_DELAY）'),
+  threshold(ConfigKey.CATALOG_INJECT_COUNT, 120, 0, 500, '随包目录一次注入条数（HomePage.CATALOG_INJECT_COUNT）'),
+  threshold(ConfigKey.LOAD_MORE_THRESHOLD, 300, 0, 2000,
+    '距列表底部触发加载更多的阈值（vp，ProfilePage.LOAD_MORE_THRESHOLD）')
 ];
 
 /** key → 定义索引（模块加载时构建一次）。 */

@@ -178,11 +178,15 @@
 | P3-A | `6ec5476` | services 层 8 key + 3 开关检查（UserPrefs / Ipv6 / Analytics / CrashReporter / CrashGuard / DeviceMetrics / UpdateChecker / ClipboardLink / PowerGuard） |
 | P3-B | `3c13f81` | 播放器与网络层 15 key（PlayerQuality / PlayerSeekPolicy / PlayerService / MediaCache / MediaPrefetch / Net / LineAuto） |
 | P3-C | `f27db95` | UI 层功能入口 3 项（专题 / 关注 / 画中画 + 投播） |
+| P3-C 第二批 | `0fd746c` | UI 功能开关 5 项（分享 / 评论 / 推荐 / 热搜 / 用户主页）+ 分页 4 key（comment_page_size / search_page_size / home_prefetch_rows / recommend_explore_pct） |
+| P3-D | 本提交 | 覆盖率收口：新增 10 个阈值 key（analytics_interval_ms / clipboard_check_interval_ms / remote_assets_delay_ms / remote_config_delay_ms / long_press_ms / seek_full_width_seconds / pip_hint_ms / catalog_inject_delay_ms / catalog_inject_count / load_more_threshold）；23 个 UI/动效/内部调度/安全常量标注 `@config-exempt`；`config_coverage.py --strict` 已启用 |
 
-**未迁移项**：17 个文件里的常量标注了 `// @config-exempt: 原因`，分三类：
-1. ConfigRegistry 未注册（如 `analytics_interval_ms` / `crash_retry_interval_ms` / `history_max`）
-2. 语义不匹配（如 `Ipv6Preference.CACHE_TTL_MS` 是 5min，`line_probe_ttl_ms` 是 60s）
-3. 协议/安全/平台常量
+**未迁移项**：剩余常量标注了 `// @config-exempt: 原因`，分三类：
+1. 语义/默认值不匹配（如 `Ipv6Preference.CACHE_TTL_MS` 是 5min，`line_probe_ttl_ms` 是 60s；`HomePage.POOL_MAX` 是 120，`recommend_pool_size` 默认 200）
+2. 协议/安全/平台常量（`MAX_*` / `*_TIMEOUT_MS` / 模型结构 / 卡片规格）
+3. UI 尺寸/动效/内部调度常量（解码尺寸、手势窗口、动画闸门、滚动合并延迟等）
+
+`config_coverage.py --strict` 已接入 CI：新增数值常量必须注册进 `ConfigRegistry`（默认值对齐）或标注 `@config-exempt` 说明原因，否则 CI 失败。
 
 #### 保持硬编码（标注 `@config-exempt`）
 

@@ -16,11 +16,6 @@ const LOG_TAG: string = 'HGAnalytics';
 
 /** 上报端点（telemetry-worker）。 */
 const ENDPOINT: string = 'https://hghub-telemetry.stlin256.workers.dev/v1/report';
-/**
- * 同一设备两次上报的最小间隔：1 小时（服务端按天去重，这里只防频繁请求）。
- * @config-exempt: ConfigRegistry 未注册 analytics_interval_ms（SPEC §4.4 建议 key 尚未落地），保留硬编码。
- */
-const REPORT_INTERVAL_MS: number = 3600 * 1000;
 /** 单次上报最多携带的配置变化条数（SPEC §15.4：超出丢弃最旧的）。 */
 // @config-exempt: SPEC §15.4 固定值（协议常量），不可远程配置。
 const MAX_CONFIG_APPLY: number = 20;
@@ -173,7 +168,7 @@ export class Analytics {
       Prefs.putNumber(KEY_SESSIONS, Prefs.getNumber(KEY_SESSIONS, 0) + 1);
 
       const last: number = Prefs.getNumber(KEY_LAST_REPORT, 0);
-      if (last > 0 && Date.now() - last < REPORT_INTERVAL_MS) {
+      if (last > 0 && Date.now() - last < ConfigRegistry.getNumber(ConfigKey.ANALYTICS_INTERVAL_MS)) {
         return;
       }
       Analytics.post(id, today, pending).catch(() => {
