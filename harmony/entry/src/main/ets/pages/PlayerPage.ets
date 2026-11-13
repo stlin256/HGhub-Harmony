@@ -33,6 +33,7 @@ import { DetailSheet } from '../components/player/DetailSheet';
 import { LineSheet } from '../components/LineSheet';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { fmt, fmtTime } from '../utils/Format';
+import { I18n } from '../utils/I18n';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
 const CHROME_HIDE_MS: number = 3000;
@@ -638,7 +639,7 @@ export struct PlayerPage {
       }
     };
     this.service.onRetry = (attempt: number, max: number) => {
-      this.retryText = '正在重试（' + attempt + '/' + max + '）…';
+      this.retryText = I18n.fmt2($r('app.string.fmt_retry_progress'), attempt, max);
     };
     this.service.onSessionReady = () => {
       this.castAvailable = true;
@@ -903,9 +904,9 @@ export struct PlayerPage {
     }
     let subtitle: string = '';
     if (this.episodeCount > 1) {
-      subtitle = '第 ' + this.ep + ' 集 · 共 ' + this.episodeCount + ' 集';
+      subtitle = I18n.fmt2($r('app.string.fmt_ep_meta'), this.ep, this.episodeCount);
     } else if (this.ep > 1) {
-      subtitle = '第 ' + this.ep + ' 集';
+      subtitle = I18n.fmt1($r('app.string.fmt_episode'), this.ep);
     }
     return { title: this.title, cover: this.coverUrl, subtitle: subtitle };
   }
@@ -1633,7 +1634,8 @@ export struct PlayerPage {
     this.service.setSpeed(rate);
     this.pulseRateChip();
     this.showChrome();
-    UiBus.toastInfo(rate === 1 ? '已恢复 1.0x 倍速' : rate + 'x 倍速');
+    UiBus.toastInfo(rate === 1 ? I18n.fmt0($r('app.string.fmt_rate_restored')) :
+        I18n.fmt1($r('app.string.fmt_rate_value'), rate));
   }
 
   /** 倍速 chip 数字变化时做一个 instant 80ms 的轻微缩放脉冲（切倍速/锁倍速都有过渡反馈）。 */
@@ -2505,7 +2507,8 @@ export struct PlayerPage {
     const items: MenuElement[] = [];
     for (let i = 0; i < RATES.length; i++) {
       const value = RATES[i];
-      const label = value === 1 ? '1.0x（常速）' : value + 'x';
+      const label = value === 1 ? I18n.fmt0($r('app.string.fmt_rate_normal')) :
+        I18n.fmt1($r('app.string.fmt_rate_value'), value);
       const item: MenuElement = {
         value: label,
         action: () => {
@@ -2530,12 +2533,12 @@ export struct PlayerPage {
       return '';
     }
     if (this.episodeCount > 1) {
-      return '第 ' + this.ep + ' 集 · 共 ' + this.episodeCount + ' 集';
+      return I18n.fmt2($r('app.string.fmt_ep_meta'), this.ep, this.episodeCount);
     }
     if (this.ids.length > 1) {
       return (this.currentIndex + 1) + ' / ' + this.ids.length;
     }
-    return '第 ' + this.ep + ' 集';
+    return I18n.fmt1($r('app.string.fmt_episode'), this.ep);
   }
 
   private metaText(): string {
@@ -2544,7 +2547,7 @@ export struct PlayerPage {
       parts.push(this.authorName);
     }
     if (this.episodeCount > 1) {
-      parts.push('第 ' + this.ep + '/' + this.episodeCount + ' 集');
+      parts.push(I18n.fmt2($r('app.string.fmt_episode_of'), this.ep, this.episodeCount));
     }
     if (this.score > 0) {
       parts.push('★ ' + this.score.toFixed(1));
@@ -2742,7 +2745,7 @@ export struct PlayerPage {
     if (index === this.currentIndex) {
       return this.titleText();
     }
-    return '第 ' + (index + 1) + ' 条';
+    return I18n.fmt1($r('app.string.fmt_index'), index + 1);
   }
 
   private pageSubtitleAt(index: number): string {
@@ -2751,10 +2754,10 @@ export struct PlayerPage {
     const meta: PageMeta = this.metaAt(index);
     const parts: string[] = [];
     if (progress !== null && progress.ep > 1) {
-      parts.push('看到第 ' + progress.ep + ' 集');
+      parts.push(I18n.fmt1($r('app.string.fmt_watched_ep'), progress.ep));
     }
     if (meta.episodeCount > 1) {
-      parts.push('共 ' + meta.episodeCount + ' 集');
+      parts.push(I18n.fmt1($r('app.string.fmt_episodes_total'), meta.episodeCount));
     }
     if (parts.length === 0) {
       return index === this.currentIndex ? this.subtitleText() : '';
@@ -2773,7 +2776,7 @@ export struct PlayerPage {
       parts.push(meta.author);
     }
     if (meta.episodeCount > 1) {
-      parts.push('共 ' + meta.episodeCount + ' 集');
+      parts.push(I18n.fmt1($r('app.string.fmt_episodes_total'), meta.episodeCount));
     }
     if (meta.score > 0) {
       parts.push('★ ' + meta.score.toFixed(1));
@@ -2829,7 +2832,8 @@ export struct PlayerPage {
     if (diff === 0) {
       return '原位';
     }
-    return diff > 0 ? '+' + diff + ' 秒' : diff + ' 秒';
+    return diff > 0 ? I18n.fmt1($r('app.string.fmt_seek_delta_plus'), diff) :
+      I18n.fmt1($r('app.string.fmt_seek_delta'), diff);
   }
 
   /** 拖动预览浮层内 62% 宽进度条的填充百分比（DESIGN §4.8.4）。 */
@@ -3733,7 +3737,8 @@ export struct PlayerPage {
       .onClick(() => {
         this.pickScale(mode);
       })
-      .accessibilityText(this.scaleLabel(mode) + (this.menuCheck(mode) ? '，已选' : ''))
+      .accessibilityText(this.menuCheck(mode) ?
+              I18n.fmt1($r('app.string.fmt_selected'), this.scaleLabel(mode)) : this.scaleLabel(mode))
     }
   }
 

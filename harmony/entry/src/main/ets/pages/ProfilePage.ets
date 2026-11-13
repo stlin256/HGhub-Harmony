@@ -16,6 +16,7 @@ import {
 import { UiBus } from '../services/UiBus';
 import { PlayerParam, ROUTE_FOLLOW, ROUTE_PLAYER, ROUTE_RANKS, ROUTE_SETTINGS } from '../state/Routes';
 import { fmt, fmtTime } from '../utils/Format';
+import { I18n } from '../utils/I18n';
 
 /** 首屏 / 每次滚动加载的条数（分页大小）。 */
 const PAGE_SIZE: number = 12;
@@ -792,7 +793,7 @@ export struct ProfilePage {
     if (progress === undefined) {
       return '';
     }
-    return '第 ' + progress.ep + ' 集';
+    return I18n.fmt1($r('app.string.fmt_episode'), progress.ep);
   }
 
   private progressTimeLabel(id: number): string {
@@ -1079,7 +1080,7 @@ export struct ProfilePage {
       .aspectRatio(0.75)
       .borderRadius(HgRadius.row)
       .clip(true)
-      .accessibilityText('打开第 ' + (index + 1) + ' 个内容')
+      .accessibilityText($r('app.string.fmt_open_item', index + 1))
       .onClick(() => {
         this.openCard(item, index);
       })
@@ -1294,7 +1295,7 @@ export struct ProfilePage {
           }
           .width('100%')
           .opacity(this.cardsFade)
-          Text('HGhub ' + Api.appVersion() + ' · HarmonyOS NEXT 客户端')
+          Text($r('app.string.fmt_app_footer', Api.appVersion()))
             .width('100%')
             .fontSize(HgFont.micro)
             .fontColor(HgColor.textTertiary(this.dark))

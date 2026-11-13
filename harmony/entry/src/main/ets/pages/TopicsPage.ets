@@ -134,7 +134,7 @@ export struct TopicsPage {
           coverWidth: '100%',
           coverHeight: 120
         })
-        Text(topic.video_count + ' 部')
+        Text($r('app.string.fmt_titles_only', topic.video_count))
           .fontSize(HgFont.micro)
           .fontColor('#FFFFFFFF')
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
@@ -155,7 +155,7 @@ export struct TopicsPage {
     }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
-      .accessibilityText(topic.title + '，' + topic.video_count + ' 部')
+      .accessibilityText($r('app.string.fmt_topic_count', topic.title, topic.video_count))
     }
   }
 

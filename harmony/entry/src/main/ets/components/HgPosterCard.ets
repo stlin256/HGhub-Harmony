@@ -31,7 +31,7 @@ export struct HgPosterCard {
           coverHeight: '100%'
         })
         if (this.episodeCount > 0) {
-          Text(this.episodeCount + '集')
+          Text($r('app.string.fmt_episodes_only', this.episodeCount))
             .fontSize(HgFont.nano)
             .fontWeight(HgFont.weightMedium)
             .fontColor('#FFFFFFFF')

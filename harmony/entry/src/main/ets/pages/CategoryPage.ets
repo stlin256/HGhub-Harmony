@@ -607,7 +607,7 @@ export struct CategoryPage {
           coverHeight: '100%'
         })
         if (item.episode_count > 0) {
-          Text(item.episode_count + '集')
+          Text($r('app.string.fmt_episodes_only', item.episode_count))
             .fontSize(HgFont.nano)
             .fontWeight(HgFont.weightMedium)
             .fontColor(HgColor.videoInk)
@@ -629,7 +629,7 @@ export struct CategoryPage {
         .fontColor(HgColor.textPrimary(this.dark))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-      Text(item.tags !== undefined && item.tags.length > 0 ? item.tags.join(' · ') : fmt(item.hot) + ' 播放')
+      Text(item.tags !== undefined && item.tags.length > 0 ? item.tags.join(' · ') : $r('app.string.fmt_plays', fmt(item.hot)))
         .width(this.rowCardW())
         .fontSize(HgFont.micro)
         .fontColor(HgColor.textTertiary(this.dark))

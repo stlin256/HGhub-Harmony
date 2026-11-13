@@ -9,6 +9,7 @@ import { HgMotion } from '../design/HgMotion';
 import { HgPressable } from './HgPressable';
 import { HgSkeletonBlock } from './HgSkeletonBlock';
 import { hostOf } from '../utils/Format';
+import { I18n } from '../utils/I18n';
 
 /** 延迟探测候选上限：一次性探测全部固定线路 + 镜像（并发由 Lines.probe 内部限制 64）。 */
 const MAX_PROBE_LINES: number = 64;
@@ -209,7 +210,7 @@ export struct LineSheet {
       this.autoStatus = LineAuto.statusText();
       if (changed && Lines.current() !== before) {
         UserPrefs.setUser(null);
-        UiBus.toastOk('已自动切换到 ' + hostOf(Lines.current()));
+        UiBus.toastOk(I18n.fmt1($r('app.string.fmt_switched_to'), hostOf(Lines.current())));
         this.probeLatency();
       } else if (this.autoStatus.indexOf('可用') >= 0) {
         UiBus.toastInfo('当前线路可用');
@@ -288,8 +289,9 @@ export struct LineSheet {
       .onClick(() => {
         this.switchTo(item.url);
       })
-      .accessibilityText('线路 ' + this.lineName(item) + '，' + hostOf(item.url) +
-        (this.current === item.url ? '，使用中' : '，点击切换'))
+      .accessibilityText($r('app.string.fmt_line_state', this.lineName(item), hostOf(item.url),
+        this.current === item.url ? I18n.fmt0($r('app.string.fmt_line_in_use')) :
+          I18n.fmt0($r('app.string.fmt_line_tap_switch'))))
     }
   }
 
@@ -565,7 +567,7 @@ export struct LineSheet {
                 .fontSize(HgFont.caption)
                 .fontColor(HgColor.textTertiary(this.dark))
               if (this.mirrors.length > 0) {
-                Text(' · ' + this.mirrors.length + ' 条')
+                Text($r('app.string.fmt_items_only', this.mirrors.length))
                   .fontSize(HgFont.micro)
                   .fontColor(HgColor.textTertiary(this.dark))
               }

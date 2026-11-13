@@ -41,7 +41,7 @@ export struct AboutPage {
       .padding({ left: 10, right: 10, top: 3, bottom: 3 })
       .backgroundColor(HgColor.accentSoft(this.dark))
       .borderRadius(HgRadius.chip)
-      .accessibilityText('当前版本 v' + this.version)
+      .accessibilityText($r('app.string.fmt_current_version', this.version))
   }
 
   @Builder
@@ -180,7 +180,7 @@ export struct AboutPage {
             .padding({ left: HgSpace.m, right: HgSpace.m })
             .backgroundColor(HgColor.surface1(this.dark))
             .borderRadius(HgRadius.group)
-            .accessibilityText('作者 ' + AUTHOR_NAME + '，打开 GitHub 主页')
+            .accessibilityText($r('app.string.fmt_author_github', AUTHOR_NAME))
             .onClick(() => {
               this.openLink('https://github.com/' + AUTHOR_NAME);
             })

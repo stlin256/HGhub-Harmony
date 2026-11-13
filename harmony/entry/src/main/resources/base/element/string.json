@@ -655,6 +655,318 @@
     {
       "name": "ui_fe65e02e",
       "value": "画像还是空的：先收藏/播放几部剧，偏好会慢慢积累。"
+    },
+    {
+      "name": "fmt_items",
+      "value": "共 %d 条"
+    },
+    {
+      "name": "fmt_items_only",
+      "value": "%d 条"
+    },
+    {
+      "name": "fmt_episodes_total",
+      "value": "共 %d 集"
+    },
+    {
+      "name": "fmt_episode",
+      "value": "第 %d 集"
+    },
+    {
+      "name": "fmt_episode_of",
+      "value": "第 %d/%d 集"
+    },
+    {
+      "name": "fmt_index",
+      "value": "第 %d 条"
+    },
+    {
+      "name": "fmt_titles_total",
+      "value": "共 %d 部"
+    },
+    {
+      "name": "fmt_titles_only",
+      "value": "%d 部"
+    },
+    {
+      "name": "fmt_episodes_only",
+      "value": "%d 集"
+    },
+    {
+      "name": "fmt_replies",
+      "value": "%d 条回复"
+    },
+    {
+      "name": "fmt_score",
+      "value": "%s 分"
+    },
+    {
+      "name": "fmt_plays",
+      "value": "%s 播放"
+    },
+    {
+      "name": "fmt_likes",
+      "value": "%s 点赞"
+    },
+    {
+      "name": "fmt_favs",
+      "value": "%s 收藏"
+    },
+    {
+      "name": "fmt_updated_to",
+      "value": "更新至 %d 集"
+    },
+    {
+      "name": "fmt_watched_ep",
+      "value": "看到第 %d 集"
+    },
+    {
+      "name": "fmt_play_ep",
+      "value": "播放第 %d 集"
+    },
+    {
+      "name": "fmt_ep_current",
+      "value": "第 %d 集，当前集"
+    },
+    {
+      "name": "fmt_open_item",
+      "value": "打开第 %d 个内容"
+    },
+    {
+      "name": "fmt_open_link",
+      "value": "打开链接 %d"
+    },
+    {
+      "name": "fmt_author_page",
+      "value": "作者 %s，查看主页"
+    },
+    {
+      "name": "fmt_author_github",
+      "value": "作者 %s，打开 GitHub 主页"
+    },
+    {
+      "name": "fmt_line_item",
+      "value": "线路 %s，%s"
+    },
+    {
+      "name": "fmt_switched_to",
+      "value": "已自动切换到 %s"
+    },
+    {
+      "name": "fmt_retry_progress",
+      "value": "正在重试（%d/%d）…"
+    },
+    {
+      "name": "fmt_rate_restored",
+      "value": "已恢复 1.0x 倍速"
+    },
+    {
+      "name": "fmt_rate_value",
+      "value": "%sx 倍速"
+    },
+    {
+      "name": "fmt_rate_normal",
+      "value": "1.0x（常速）"
+    },
+    {
+      "name": "fmt_seek_delta",
+      "value": "%s 秒"
+    },
+    {
+      "name": "fmt_seek_delta_plus",
+      "value": "+%s 秒"
+    },
+    {
+      "name": "fmt_continue_ep_time",
+      "value": "继续观看 · 第 %d 集 %s"
+    },
+    {
+      "name": "fmt_continue_ep",
+      "value": "继续观看 · 第 %d 集"
+    },
+    {
+      "name": "fmt_new_version",
+      "value": "有新版本 v%s"
+    },
+    {
+      "name": "fmt_version_pair",
+      "value": "当前 v%s，最新 v%s。"
+    },
+    {
+      "name": "fmt_latest_version",
+      "value": "已是最新版本 v%s"
+    },
+    {
+      "name": "fmt_update_failed",
+      "value": "获取更新信息失败：%s"
+    },
+    {
+      "name": "fmt_update_failed_hint",
+      "value": "无法检查更新"
+    },
+    {
+      "name": "fmt_copy_failed_url",
+      "value": "复制失败，请手动打开 %s"
+    },
+    {
+      "name": "fmt_aspect_ratio",
+      "value": "画面比例：%s"
+    },
+    {
+      "name": "fmt_cache_used",
+      "value": "已占用 %s"
+    },
+    {
+      "name": "fmt_fav_history",
+      "value": "%d 部收藏 · %d 条观看记录"
+    },
+    {
+      "name": "fmt_search_records",
+      "value": "%d 条搜索记录"
+    },
+    {
+      "name": "fmt_profile_tags",
+      "value": "画像 %d 个标签 · 可导入 / 导出 / 清空"
+    },
+    {
+      "name": "fmt_checking_version",
+      "value": "正在检查…"
+    },
+    {
+      "name": "fmt_current_version_vs",
+      "value": "当前 v%s · 对比 GitHub Release"
+    },
+    {
+      "name": "fmt_crash_count_prefix",
+      "value": "%d 条崩溃 · "
+    },
+    {
+      "name": "fmt_last_startup",
+      "value": "最近一次 %d ms（本地打点）"
+    },
+    {
+      "name": "fmt_version_license",
+      "value": "v%s · PolyForm 非商业许可证"
+    },
+    {
+      "name": "fmt_app_footer",
+      "value": "HGhub %s · HarmonyOS NEXT 客户端"
+    },
+    {
+      "name": "fmt_app_footer_license",
+      "value": "HGhub %s · HarmonyOS NEXT 客户端 · 仅限非商业使用"
+    },
+    {
+      "name": "fmt_exported",
+      "value": "已导出到剪贴板（%d 个标签，%d 字符）"
+    },
+    {
+      "name": "fmt_import_ok",
+      "value": "导入成功：%d 个标签（已替换当前画像）"
+    },
+    {
+      "name": "fmt_import_fail",
+      "value": "导入失败：数据格式不正确"
+    },
+    {
+      "name": "fmt_profile_events",
+      "value": "本地画像 %d 个标签 · 行为事件 %d 条"
+    },
+    {
+      "name": "fmt_model_scored",
+      "value": "模型 %s · 打分 %d"
+    },
+    {
+      "name": "fmt_events_pack",
+      "value": "行为事件 %d 条 · 目录包 %s"
+    },
+    {
+      "name": "fmt_search_title",
+      "value": "搜索 · %s"
+    },
+    {
+      "name": "fmt_hot_rank",
+      "value": "热榜第%d：%s"
+    },
+    {
+      "name": "fmt_search_results",
+      "value": "「%s」共 %d 条结果"
+    },
+    {
+      "name": "fmt_search_empty",
+      "value": "没有找到「%s」"
+    },
+    {
+      "name": "fmt_rank_update",
+      "value": "%s · 每 10 分钟更新"
+    },
+    {
+      "name": "fmt_topic_count",
+      "value": "%s，%d 部"
+    },
+    {
+      "name": "fmt_comments_total",
+      "value": "共 %d 条"
+    },
+    {
+      "name": "fmt_comments_total_ep",
+      "value": "共 %d 条 · 第 %d 集"
+    },
+    {
+      "name": "fmt_comments_empty",
+      "value": "暂无"
+    },
+    {
+      "name": "fmt_comments_empty_ep",
+      "value": "暂无 · 第 %d 集"
+    },
+    {
+      "name": "fmt_current_page",
+      "value": "%s，当前页"
+    },
+    {
+      "name": "fmt_selected",
+      "value": "%s，已选"
+    },
+    {
+      "name": "fmt_current_version",
+      "value": "当前版本 v%s"
+    },
+    {
+      "name": "fmt_ep_plays",
+      "value": "共 %d 集 · %s 播放"
+    },
+    {
+      "name": "fmt_ep_meta",
+      "value": "第 %d 集 · 共 %d 集"
+    },
+    {
+      "name": "fmt_ep_of_total_short",
+      "value": "第 %d/%d 集"
+    },
+    {
+      "name": "fmt_switch_auto",
+      "value": "自动选择"
+    },
+    {
+      "name": "fmt_update_failed_title",
+      "value": "无法检查更新"
+    },
+    {
+      "name": "fmt_update_failed_body",
+      "value": "%s\n\n可以复制下载页地址，稍后在浏览器中打开。"
+    },
+    {
+      "name": "fmt_line_state",
+      "value": "线路 %s，%s，%s"
+    },
+    {
+      "name": "fmt_line_in_use",
+      "value": "使用中"
+    },
+    {
+      "name": "fmt_line_tap_switch",
+      "value": "点击切换"
     }
   ]
 }

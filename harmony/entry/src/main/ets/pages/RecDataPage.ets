@@ -10,6 +10,7 @@ import { parseBoundedJson } from '../utils/Security';
 import { RecService } from '../recommend/RecService';
 import { RecDiagnostics } from '../recommend/RecTypes';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
+import { I18n } from '../utils/I18n';
 
 /** 剪贴板导入的画像 JSON 大小上限（画像最多 2000 条标签，64KB 足够且防止超大输入拖垮解析）。 */
 const PROFILE_JSON_MAX: number = 64 * 1024;
@@ -97,7 +98,7 @@ export struct RecDataPage {
       const json: string = RecService.exportProfileJson();
       const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, json);
       await pasteboard.getSystemPasteboard().setData(data);
-      this.status = '已导出到剪贴板（' + this.rows.length + ' 个标签，' + json.length + ' 字符）';
+      this.status = I18n.fmt2($r('app.string.fmt_exported'), this.rows.length, json.length);
     } catch (err) {
       this.status = '导出失败，请稍后重试';
     }
@@ -122,7 +123,8 @@ export struct RecDataPage {
       }
       const ok: boolean = RecService.importProfileJson(text);
       this.refreshAnimated(() => {
-        this.status = ok ? ('导入成功：' + this.rows.length + ' 个标签（已替换当前画像）') : '导入失败：数据格式不正确';
+        this.status = ok ? I18n.fmt1($r('app.string.fmt_import_ok'), this.rows.length) :
+        I18n.fmt0($r('app.string.fmt_import_fail'));
       });
     } catch (err) {
       this.status = '导入失败，请检查剪贴板内容';
@@ -172,7 +174,7 @@ export struct RecDataPage {
         })
 
         Column() {
-          Text('本地画像 ' + this.rows.length + ' 个标签 · 行为事件 ' + this.eventCount + ' 条')
+          Text($r('app.string.fmt_profile_events', this.rows.length, this.eventCount))
             .width('100%')
             .fontSize(HgFont.caption)
             .fontColor(HgColor.textTertiary(this.dark))
@@ -286,11 +288,11 @@ export struct RecDataPage {
               .fontSize(HgFont.micro)
               .fontWeight(HgFont.weightMedium)
               .fontColor(HgColor.textTertiary(this.dark))
-            Text('模型 ' + this.textOr(this.modelVersion) + ' · 打分 ' + this.modelScored)
+            Text($r('app.string.fmt_model_scored', this.textOr(this.modelVersion), this.modelScored))
               .fontSize(HgFont.caption)
               .lineHeight(HgFont.lineCaption)
               .fontColor(HgColor.textSecondary(this.dark))
-            Text('行为事件 ' + this.eventCount + ' 条 · 目录包 ' + this.textOr(this.packVersion))
+            Text($r('app.string.fmt_events_pack', this.eventCount, this.textOr(this.packVersion)))
               .fontSize(HgFont.micro)
               .lineHeight(HgFont.lineMicro)
               .fontColor(HgColor.textTertiary(this.dark))

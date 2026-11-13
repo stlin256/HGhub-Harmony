@@ -157,7 +157,7 @@ export struct TopicDetailPage {
           .maxLines(3)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
-        Text('共 ' + this.topic.video_count + ' 部')
+        Text($r('app.string.fmt_titles_total', this.topic.video_count))
           .fontSize(HgFont.micro)
           .fontColor(HgColor.textTertiary(this.dark))
           .width('100%')
