@@ -591,3 +591,18 @@ CPU/内存观测：设备端 `top` / `hidumper` 的参数随版本差异较大�
   - `docs/DEPLOYMENT.md`：构建部署与 devecocli 说明（本机 DevEco 26 未提供 devecocli，改用 hvigor 直调）
 - hap-sign-tool 帮助：`& "<DevEco>\jbr\bin\java.exe" -jar "<DevEco>\sdk\default\openharmony\toolchains\lib\hap-sign-tool.jar"`
 - 签名材料模板：`<DevEco>\sdk\default\openharmony\toolchains\lib\{UnsgnedDebugProfileTemplate.json, OpenHarmonyProfileDebug.pem, OpenHarmony.p12}`
+
+## 服务端端点注入（编译期）
+
+上报与下发走自建服务器，端点（IP / 端口 / 接入密钥）**不入库**：
+
+```bash
+# 正式构建：注入真实端点（生成 ServerEndpoint.local.ets，已 gitignore）
+./scripts/harmony/build.ps1 -ServerIp <ip> -ServerPort 8443 -ServerKey <32hex>
+
+# 仅做静态检查 / CI：生成占位值
+node scripts/harmony/set-server.mjs --placeholder
+```
+
+`ServerEndpoint.local.ets` 缺失时，`scripts/check/arkts_lint.py` 会**自动生成占位**，
+所以全新 clone 直接跑检查也能通过；真实构建必须用 `build.ps1` 注入。
