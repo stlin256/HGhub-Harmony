@@ -12,13 +12,9 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "hghub_telemetry"
-# 执行 `wrangler d1 create hghub_telemetry` 后把返回的 database_id 填到这里
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "3b1e4007-fda5-4052-9fdd-29693985f735"
 
-[vars]
-# 哈希盐：建议用 `openssl rand -hex 32` 生成后替换，并通过 wrangler secret 管理更安全
-HASH_SALT = "REPLACE_WITH_RANDOM_SALT"
-
-# 以下两个通过 `wrangler secret put` 配置，不要写进仓库：
-#   SHARED_SECRET  可选，配置后启用 HMAC 校验
+# 以下三个通过 `wrangler secret put` 配置，不写进仓库（仓库是公开的）：
+#   HASH_SALT      必填，设备 ID / IP 的哈希盐（openssl rand -hex 32）
 #   STATS_KEY      必填，/stats 查询口令
+#   SHARED_SECRET  可选，配置后启用 HMAC 校验（当前客户端未实现，保持未配置）

@@ -42,7 +42,19 @@ App 冷启动
 > 因此 `SHARED_SECRET` 必须保持未配置（默认状态），否则所有上报会被 401 拒绝。
 > 若要启用，需先在客户端补上 HMAC-SHA256 计算并重新发版。
 
-## 部署（5 步）
+## 部署状态
+
+**已部署**：<https://hghub-telemetry.stlin256.workers.dev>
+
+| 资源 | 值 |
+|---|---|
+| Worker | `hghub-telemetry` |
+| D1 数据库 | `hghub_telemetry`（`3b1e4007-fda5-4052-9fdd-29693985f735`） |
+| 端点 | `/v1/install`、`/badge`、`/stats`、`/health` |
+| Worker Secrets | `HASH_SALT`、`STATS_KEY`（已配置，值不落仓库） |
+| GitHub Secret | `CLOUDFLARE_API_TOKEN`（用于 CI 自动部署） |
+
+## 首次部署（5 步，已完成，留作参考）
 
 ```bash
 cd telemetry-worker
