@@ -38,6 +38,7 @@ import { TopicDetailPage } from './TopicDetailPage';
 import { UserPage } from './UserPage';
 import { FollowPage } from './FollowPage';
 import { AboutPage } from './AboutPage';
+import { DynamicPage } from './DynamicPage';
 import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
 import { TabletNoticeDialog } from '../components/TabletNoticeDialog';
@@ -45,7 +46,8 @@ import { RemoteNoticeDialog } from '../components/RemoteNoticeDialog';
 import {
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
   ROUTE_REC_DATA, ROUTE_REC_HOW, ROUTE_TOPICS, ROUTE_TOPIC, ROUTE_USER, ROUTE_FOLLOW, ROUTE_ABOUT,
-  PlayerParam, ChannelParam, PostParam, VideoParam, TopicParam, UserParam
+  ROUTE_DYNAMIC_PAGE, PlayerParam, ChannelParam, PostParam, VideoParam, TopicParam, UserParam,
+  DynamicPageParam
 } from '../state/Routes';
 import { I18n } from '../utils/I18n';
 
@@ -586,6 +588,8 @@ struct Index {
       FollowPage()
     } else if (name === ROUTE_ABOUT) {
       AboutPage()
+    } else if (name === ROUTE_DYNAMIC_PAGE) {
+      DynamicPage({ params: param as DynamicPageParam })
     }
   }
 
