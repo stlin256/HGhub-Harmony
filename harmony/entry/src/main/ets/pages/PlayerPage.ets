@@ -157,6 +157,11 @@ export struct PlayerPage {
   @State castAvailable: boolean = true;
   /** 系统投播面板是否打开：打开期间禁止 chrome 自动隐藏，否则 picker 随 chrome 卸载而消失。 */
   @State castPanelOpen: boolean = false;
+  /** AI 超分提示的透明度（0 隐藏 / 1 显示）。 */
+  @State srHintOpacity: number = 0;
+  /** 本次打开播放器是否已提示过超分（每次进入页面最多一次）。 */
+  private srHintShown: boolean = false;
+  private srHintTimer: number = -1;
   @State positionMs: number = 0;
   @State durationMs: number = 0;
   @State bufferedMs: number = 0;
@@ -635,6 +640,12 @@ export struct PlayerPage {
     this.service.onSessionReady = () => {
       this.castAvailable = true;
     };
+    // AI 超分：系统确认开启后，每次打开播放器提示一次（极简淡入淡出）。
+    this.service.onSuperResolutionChanged = (enabled: boolean, supported: boolean) => {
+      if (enabled && supported) {
+        this.showSrHint();
+      }
+    };
     this.service.onSeekDone = (ms: number) => {
       this.positionMs = ms;
       // seek 完成（手势/进度条共用结束点）：恢复中央浮层与底部按钮的播放/暂停图标。
@@ -689,6 +700,10 @@ export struct PlayerPage {
   }
 
   private clearAllTimers(): void {
+    if (this.srHintTimer >= 0) {
+      clearTimeout(this.srHintTimer);
+      this.srHintTimer = -1;
+    }
     if (this.hideTimer >= 0) {
       clearTimeout(this.hideTimer);
       this.hideTimer = -1;
@@ -2462,6 +2477,24 @@ export struct PlayerPage {
     }, PIP_HINT_MS);
   }
 
+  /** 超分提示：淡入 190ms → 停留 1.4s → 淡出 260ms（每次打开播放器最多一次）。 */
+  private showSrHint(): void {
+    if (this.srHintShown || this.destroyed) {
+      return;
+    }
+    this.srHintShown = true;
+    this.srHintOpacity = 0;
+    animateTo({ duration: HgMotion.ms(HgMotion.base), curve: HgMotion.curve }, () => {
+      this.srHintOpacity = 1;
+    });
+    this.srHintTimer = setTimeout(() => {
+      this.srHintTimer = -1;
+      animateTo({ duration: HgMotion.ms(HgMotion.surface), curve: HgMotion.curve }, () => {
+        this.srHintOpacity = 0;
+      });
+    }, 1600);
+  }
+
   private rateItems(): MenuElement[] {
     const items: MenuElement[] = [];
     for (let i = 0; i < RATES.length; i++) {
@@ -3798,6 +3831,29 @@ export struct PlayerPage {
         }
         this.BottomChrome()
       }
+      // AI 超分提示：顶部居中，不拦截触摸。
+      if (this.srHintOpacity > 0) {
+        Row() {
+          Row({ space: 6 }) {
+            SymbolGlyph($r('sys.symbol.sparkles'))
+              .fontSize(12)
+              .fontColor([HgColor.accent(true)])
+            Text('已开启 AI 超分')
+              .fontSize(HgFont.micro)
+              .fontColor(HgColor.videoInk)
+          }
+          .padding({ left: 10, right: 12, top: 6, bottom: 6 })
+          .backgroundColor(HgColor.videoChipStrong)
+          .borderRadius(14)
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+        .position({ x: 0, y: this.topSafePad() + 56 })
+        .opacity(this.srHintOpacity)
+        .hitTestBehavior(HitTestMode.None)
+        .accessibilityText('已开启 AI 超分')
+      }
+
       // 加载/缓冲/播放/错误浮层也放进页内，滑动时跟着一起走，不会悬停在固定位置。
       this.OverlayLayer()
     }
