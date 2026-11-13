@@ -14,84 +14,27 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
-      - name: 校验推荐资源 JSON 可解析
-        run: |
-          python3 - <<'PY'
-          import json, pathlib, sys
-          root = pathlib.Path("harmony/entry/src/main/resources/rawfile")
-          bad = []
-          files = sorted(root.rglob("*.json"))
-          for p in files:
-              try:
-                  json.loads(p.read_text(encoding="utf-8"))
-              except Exception as exc:
-                  bad.append(f"{p}: {exc}")
-          if bad:
-              print("\n".join(bad))
-              sys.exit(1)
-          print(f"JSON ok: {len(files)} files")
-          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: 检查超大文件（>8MB 不应入库）
-        run: |
-          find . -path ./.git -prune -o -type f -size +8M -print > /tmp/big.txt
-          if [ -s /tmp/big.txt ]; then
-            echo "以下文件超过 8MB，请改用 Release 或 LFS："
-            cat /tmp/big.txt
-            exit 1
-          fi
-          echo "no oversized files"
+      - name: ArkTS 静态检查（语法 / JSON5 / 资源引用 / 路由 / 导入 / 大文件）
+        run: python3 scripts/check/arkts_lint.py
 
-      - name: 检查私钥与凭据
-        run: |
-          if grep -rIl --exclude-dir=.git --exclude-dir=.github \
-              -E 'BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY' . ; then
-            echo "发现私钥文件，禁止入库"
-            exit 1
-          fi
-          echo "no private keys"
+      - name: 版本号一致性（app.json5 / README badge / git tag）
+        run: python3 scripts/check/version_sync.py
 
-      - name: 检查构建产物未入库
-        run: |
-          if find . -path ./.git -prune -o -type d \( -name build -o -name oh_modules -o -name .hvigor \) -print | grep -q .; then
-            echo "发现构建产物目录，禁止入库"
-            exit 1
-          fi
-          echo "no build artifacts"
+      - name: 敏感信息与危险 API 扫描
+        run: python3 scripts/check/secrets_scan.py
 
-      - name: 检查文档相对链接
-        run: |
-          python3 - <<'PY'
-          import pathlib, re, sys
-          root = pathlib.Path(".")
-          link_re = re.compile(r'\[[^\]]*\]\(([^)]+)\)')
-          bad = []
-          for md in list(root.rglob("*.md")):
-              if ".git" in md.parts:
-                  continue
-              text = md.read_text(encoding="utf-8", errors="ignore")
-              for m in link_re.finditer(text):
-                  target = m.group(1).strip()
-                  if target.startswith(("http://", "https://", "#", "mailto:")):
-                      continue
-                  target = target.split("#")[0].strip()
-                  if not target:
-                      continue
-                  path = (md.parent / target).resolve()
-                  if not path.exists():
-                      bad.append(f"{md}: {target}")
-          if bad:
-              print("断链：")
-              print("\n".join(bad[:30]))
-              sys.exit(1)
-          print("docs links ok")
-          PY
+      - name: 文档相对链接
+        run: python3 scripts/check/docs_links.py
 
-      - name: 检查代码规范（any / console / TODO）
+      - name: 代码规范（禁 any / console）
         run: |
           fail=0
           if grep -rn --include="*.ets" -E ":\s*any\b|<any>" harmony/entry/src/main/ets ; then
@@ -103,15 +46,20 @@ jobs:
           if [ "$fail" -ne 0 ]; then exit 1; fi
           echo "code conventions ok"
 
-      - name: 检查推荐资源体积
+      - name: 超大文件（>8MB）
         run: |
-          fail=0
-          while IFS= read -r f; do
-            size=$(stat -c%s "$f")
-            if [ "$size" -gt 3145728 ]; then
-              echo "$f 超过 3MB（$size bytes）"
-              fail=1
-            fi
-          done < <(find harmony/entry/src/main/resources/rawfile -type f 2>/dev/null)
-          if [ "$fail" -ne 0 ]; then exit 1; fi
-          echo "resource size ok"
+          find . -path ./.git -prune -o -type f -size +8M -print > /tmp/big.txt
+          if [ -s /tmp/big.txt ]; then
+            echo "以下文件超过 8MB，请改用 Release 或 LFS："
+            cat /tmp/big.txt
+            exit 1
+          fi
+          echo "no oversized files"
+
+      - name: 构建产物未入库
+        run: |
+          if find . -path ./.git -prune -o -type d \( -name build -o -name oh_modules -o -name .hvigor \) -print | grep -q .; then
+            echo "发现构建产物目录，禁止入库"
+            exit 1
+          fi
+          echo "no build artifacts"
