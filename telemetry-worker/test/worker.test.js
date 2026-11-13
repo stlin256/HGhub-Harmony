@@ -14,6 +14,7 @@ function makeDB() {
   const remoteConfig = new Map();
   const configApplies = new Map();
   const appRelease = new Map();
+  const remoteAssets = new Map();
   return {
     devices,
     rates,
@@ -24,6 +25,7 @@ function makeDB() {
     remoteConfig,
     configApplies,
     appRelease,
+    remoteAssets,
     prepare(sql) {
       let args = [];
       const stmt = {
@@ -143,6 +145,31 @@ function makeDB() {
             const row = appRelease.get(args[0]);
             return row ? { ...row } : null;
           }
+          if (sql.includes('COUNT(*) AS n FROM remote_assets')) {
+            let n = 0;
+            for (const row of remoteAssets.values()) {
+              if (row.name !== args[0]) n += 1;
+            }
+            return { n };
+          }
+          if (sql.includes('COALESCE(SUM(size), 0) AS total FROM remote_assets')) {
+            let total = 0;
+            for (const row of remoteAssets.values()) {
+              if (row.name !== args[0]) total += row.size;
+            }
+            return { total };
+          }
+          if (sql.includes('COALESCE(MAX(version), 0) AS max_version FROM remote_assets')) {
+            let max = 0;
+            for (const row of remoteAssets.values()) {
+              if (row.version > max) max = row.version;
+            }
+            return { max_version: max };
+          }
+          if (sql.includes('SELECT content, size, sha256 FROM remote_assets')) {
+            const row = remoteAssets.get(args[0]);
+            return row ? { content: row.content, size: row.size, sha256: row.sha256 } : null;
+          }
           return null;
         },
         async all() {
@@ -155,6 +182,14 @@ function makeDB() {
           }
           if (sql.includes('FROM config_applies')) {
             return { results: [...configApplies.values()] };
+          }
+          if (sql.includes('SELECT name, version, sha256, size FROM remote_assets')) {
+            const results = [...remoteAssets.values()]
+              .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+              .map((row) => ({
+                name: row.name, version: row.version, sha256: row.sha256, size: row.size,
+              }));
+            return { results };
           }
           if (sql.includes('FROM daily_active')) {
             const from = args[0];
@@ -292,6 +327,13 @@ function makeDB() {
             appRelease.set(id, {
               id, latest, min_version: minVersion, rollout_pct: rolloutPct,
               notes, url, updated_at: updatedAt,
+            });
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.includes('INSERT INTO remote_assets')) {
+            const [name, version, sha256, size, content, updatedAt] = args;
+            remoteAssets.set(name, {
+              name, version, sha256, size, content, updated_at: updatedAt,
             });
             return { success: true, meta: { changes: 1 } };
           }
@@ -1531,4 +1573,209 @@ test('/admin/release：rollout_pct 边界 0 与 100 可写入', async () => {
   assert.equal((await (await worker.fetch(updateGet(), e, ctx)).json()).rollout_pct, 0);
   assert.equal((await worker.fetch(releasePost({ latest: '2.4.0', min_version: '2.1.0', rollout_pct: 100 }, h), e, ctx)).status, 200);
   assert.equal((await (await worker.fetch(updateGet(), e, ctx)).json()).rollout_pct, 100);
+});
+
+/* ── 资源热更新（/v1/assets）──────────────────────── */
+
+const ASSET_SHA_HELLO = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
+
+function manifestGet() {
+  return new Request('https://w/v1/assets/manifest');
+}
+
+function assetGet(name) {
+  return new Request('https://w/v1/assets/' + name);
+}
+
+function assetPost(body, headers = {}) {
+  return new Request('https://w/admin/asset', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+
+function assetBase64(bytes) {
+  return Buffer.from(bytes).toString('base64');
+}
+
+async function sha256Bytes(bytes) {
+  const buf = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** 直接向 mock D1 写入一条资源（等价于一次成功的 POST /admin/asset）。 */
+function seedAsset(db, name, bytes, version = 1) {
+  const buffer = new ArrayBuffer(bytes.length);
+  new Uint8Array(buffer).set(bytes);
+  db.remoteAssets.set(name, {
+    name, version, sha256: 'pending', size: bytes.length, content: buffer, updated_at: 1731600000,
+  });
+}
+
+test('/v1/assets/manifest：空清单返回 version 0 + sig', async () => {
+  const e = configEnv();
+  const res = await worker.fetch(manifestGet(), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=300');
+  const body = await res.json();
+  assert.equal(body.version, 0);
+  assert.deepEqual(body.assets, []);
+  assert.match(body.sig, /^[0-9a-f]{32}$/);
+});
+
+test('/v1/assets/manifest：返回资源清单且 sig 正确', async () => {
+  const e = configEnv();
+  const hello = new TextEncoder().encode('hello');
+  const world = new TextEncoder().encode('world');
+  seedAsset(e.DB, 'home_banner', hello, 3);
+  seedAsset(e.DB, 'splash', world, 5);
+  // seedAsset 的 sha256 占位值会被 manifest 过滤掉，这里补真实值。
+  e.DB.remoteAssets.get('home_banner').sha256 = await sha256Bytes(hello);
+  e.DB.remoteAssets.get('splash').sha256 = await sha256Bytes(world);
+
+  const res = await worker.fetch(manifestGet(), e, ctx);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.version, 5);
+  assert.equal(body.assets.length, 2);
+  assert.equal(body.assets[0].name, 'home_banner');
+  assert.equal(body.assets[0].url, '/v1/assets/home_banner');
+  assert.equal(body.assets[0].size, 5);
+  assert.equal(body.assets[0].sha256, ASSET_SHA_HELLO);
+  assert.equal(body.assets[1].name, 'splash');
+
+  const unsigned = { ...body };
+  delete unsigned.sig;
+  const expected = (await hmacSha256Hex(CONFIG_KEY, JSON.stringify(unsigned))).slice(0, 32);
+  assert.equal(body.sig, expected);
+});
+
+test('/v1/assets/manifest：未配置 CONFIG_SIGNING_KEY 返回 503', async () => {
+  const e = env();
+  const res = await worker.fetch(manifestGet(), e, ctx);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'assets_unavailable');
+});
+
+test('/admin/asset：上传后可下载且 SHA-256 与内容一致', async () => {
+  const e = configEnv();
+  const content = new TextEncoder().encode('hello');
+  const res = await worker.fetch(assetPost({
+    name: 'home_banner', content_base64: assetBase64(content),
+  }, { 'x-admin-key': 'k' }), e, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.name, 'home_banner');
+  assert.equal(body.version, 1);
+  assert.equal(body.size, 5);
+  assert.equal(body.sha256, ASSET_SHA_HELLO);
+
+  const manifest = await (await worker.fetch(manifestGet(), e, ctx)).json();
+  assert.equal(manifest.version, 1);
+  assert.equal(manifest.assets.length, 1);
+  assert.equal(manifest.assets[0].sha256, ASSET_SHA_HELLO);
+
+  const dl = await worker.fetch(assetGet('home_banner'), e, ctx);
+  assert.equal(dl.status, 200);
+  assert.equal(dl.headers.get('content-type'), 'application/octet-stream');
+  assert.equal(dl.headers.get('x-content-sha256'), ASSET_SHA_HELLO);
+  const bytes = new Uint8Array(await dl.arrayBuffer());
+  assert.deepEqual([...bytes], [...content]);
+  // 客户端校验契约：下载内容的 SHA-256 必须等于清单里的 sha256。
+  assert.equal(await sha256Bytes(bytes), manifest.assets[0].sha256);
+});
+
+test('/admin/asset：同名覆盖上传推进 version 并更新内容', async () => {
+  const e = configEnv();
+  const h = { 'x-admin-key': 'k' };
+  const first = await (await worker.fetch(assetPost({
+    name: 'home_banner', content_base64: assetBase64(new TextEncoder().encode('v1')),
+  }, h), e, ctx)).json();
+  assert.equal(first.version, 1);
+  const second = await (await worker.fetch(assetPost({
+    name: 'home_banner', content_base64: assetBase64(new TextEncoder().encode('v2')),
+  }, h), e, ctx)).json();
+  assert.equal(second.version, 2);
+  assert.notEqual(second.sha256, first.sha256);
+
+  const manifest = await (await worker.fetch(manifestGet(), e, ctx)).json();
+  assert.equal(manifest.version, 2);
+  assert.equal(manifest.assets[0].sha256, second.sha256);
+});
+
+test('/admin/asset：单文件超过 512 KB 被拒 413', async () => {
+  const e = configEnv();
+  const big = new Uint8Array(512 * 1024 + 1);
+  const res = await worker.fetch(assetPost({
+    name: 'home_banner', content_base64: assetBase64(big),
+  }, { 'x-admin-key': 'k' }), e, ctx);
+  assert.equal(res.status, 413);
+  assert.equal((await res.json()).error, 'asset_too_large');
+  assert.equal(e.DB.remoteAssets.size, 0);
+});
+
+test('/admin/asset：总量超过 4 MB 被拒 413，边界 4 MB 可写', async () => {
+  const e = configEnv();
+  const h = { 'x-admin-key': 'k' };
+  // 已有 7 个 512 KB = 3.5 MB。
+  for (let i = 0; i < 7; i++) {
+    e.DB.remoteAssets.set('a' + i, {
+      name: 'a' + i, version: i + 1, sha256: 'a'.repeat(64),
+      size: 512 * 1024, content: new Uint8Array(1).buffer, updated_at: 1,
+    });
+  }
+  // 3.5 MB + 512 KB = 4 MB，正好到上限，允许。
+  const ok = await worker.fetch(assetPost({
+    name: 'big', content_base64: assetBase64(new Uint8Array(512 * 1024)),
+  }, h), e, ctx);
+  assert.equal(ok.status, 200);
+  // 再加 1 字节就超过 4 MB，拒绝。
+  const over = await worker.fetch(assetPost({
+    name: 'tiny', content_base64: assetBase64(new Uint8Array(1)),
+  }, h), e, ctx);
+  assert.equal(over.status, 413);
+  assert.equal((await over.json()).error, 'assets_too_large');
+});
+
+test('/admin/asset：非法 name / base64 被拒 400', async () => {
+  const e = configEnv();
+  const h = { 'x-admin-key': 'k' };
+  assert.equal((await worker.fetch(assetPost({ name: 'Bad Name!', content_base64: 'aGVsbG8=' }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(assetPost({ name: 'home_banner', content_base64: '***' }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(assetPost({ name: 'home_banner' }, h), e, ctx)).status, 400);
+  assert.equal((await worker.fetch(assetPost('{bad', h), e, ctx)).status, 400);
+});
+
+test('/admin/asset：缺少或错误 x-admin-key 返回 401，未配置管理密钥返回 503', async () => {
+  const e = configEnv();
+  const body = { name: 'home_banner', content_base64: 'aGVsbG8=' };
+  assert.equal((await worker.fetch(assetPost(body), e, ctx)).status, 401);
+  assert.equal((await worker.fetch(assetPost(body, { 'x-admin-key': 'wrong' }), e, ctx)).status, 401);
+  const noKey = configEnv({ STATS_KEY: '' });
+  assert.equal((await worker.fetch(assetPost(body, { 'x-admin-key': '' }), noKey, ctx)).status, 503);
+});
+
+test('/v1/assets/<name>：不存在或非法 name 返回 404', async () => {
+  const e = configEnv();
+  assert.equal((await worker.fetch(assetGet('missing'), e, ctx)).status, 404);
+  assert.equal((await worker.fetch(assetGet('..%2Fsecret'), e, ctx)).status, 404);
+  assert.equal((await worker.fetch(assetGet('UPPER'), e, ctx)).status, 404);
+});
+
+test('/admin/asset：资源条数超过 100 被拒 413', async () => {
+  const e = configEnv();
+  for (let i = 0; i < 100; i++) {
+    e.DB.remoteAssets.set('a' + i, {
+      name: 'a' + i, version: i + 1, sha256: 'a'.repeat(64),
+      size: 1, content: new Uint8Array(1).buffer, updated_at: 1,
+    });
+  }
+  const res = await worker.fetch(assetPost({
+    name: 'extra', content_base64: assetBase64(new TextEncoder().encode('hello')),
+  }, { 'x-admin-key': 'k' }), e, ctx);
+  assert.equal(res.status, 413);
+  assert.equal((await res.json()).error, 'too_many_assets');
 });

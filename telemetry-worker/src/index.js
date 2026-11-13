@@ -23,6 +23,9 @@
  *   POST /admin/config 发布远程配置（需要 CONFIG_ADMIN_KEY，未配置时回落 STATS_KEY）
  *   GET  /v1/update    更新闸门（强制/灰度/普通三态判定所需数据）
  *   POST /admin/release 发布版本信息（鉴权同 /admin/config）
+ *   GET  /v1/assets/manifest 资源清单（HMAC 签名）
+ *   GET  /v1/assets/<name>   资源原始字节
+ *   POST /admin/asset  上传资源（鉴权同 /admin/config）
  *   GET  /badge        shields.io endpoint 格式，只显示安装数
  *   GET  /stats?key=   聚合统计（需要 STATS_KEY）
  *   GET  /health       健康检查
@@ -35,6 +38,10 @@
  * 更新闸门（P4）：
  *   GET /v1/update 从 D1 app_release 读最新版本信息，附加同样的 HMAC-SHA256 签名；
  *   客户端据 min_version / latest / rollout_pct 判定 force / soft / none 三态。
+ *
+ * 资源热更新（P5）：
+ *   GET /v1/assets/manifest 返回资源清单（name / sha256 / size / url）并签名；
+ *   GET /v1/assets/<name> 返回原始字节，客户端按清单里的 SHA-256 校验后落盘。
  */
 
 import DASHBOARD_HTML from './dashboard.generated.js';
@@ -76,6 +83,14 @@ const RELEASE_ROW_ID = 'global';
 const MAX_RELEASE_NOTES_LEN = 800;
 const MAX_RELEASE_URL_LEN = 512;
 const DEFAULT_RELEASE_URL = 'https://github.com/stlin256/HGhub-Harmony/releases';
+/** 资源热更新（P5）：单文件 512 KB、总量 4 MB、清单条数上限、管理端请求体上限 1 MB。 */
+const ASSET_MAX_FILE_BYTES = 512 * 1024;
+const ASSET_MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+const ASSET_MAX_COUNT = 100;
+const ASSET_CACHE_CONTROL = 'public, max-age=300';
+const MAX_ASSET_ADMIN_BODY_BYTES = 1048576;
+const ASSET_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const ASSET_SHA_RE = /^[0-9a-f]{64}$/;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VERSION_RE = /^[0-9]{1,3}(\.[0-9]{1,3}){0,3}$/;
@@ -120,6 +135,16 @@ export default {
     if (url.pathname === '/admin/release' && request.method === 'POST') {
       // 同 /admin/config：管理写端点不套 CORS。
       return await handleAdminRelease(request, env);
+    }
+    if (url.pathname === '/v1/assets/manifest' && request.method === 'GET') {
+      return withCors(await handleAssetsManifest(env));
+    }
+    if (url.pathname.startsWith('/v1/assets/') && request.method === 'GET') {
+      return withCors(await handleAssetDownload(url, env));
+    }
+    if (url.pathname === '/admin/asset' && request.method === 'POST') {
+      // 同 /admin/config：管理写端点不套 CORS。
+      return await handleAdminAsset(request, env);
     }
     if (url.pathname === '/badge' && request.method === 'GET') {
       return withCors(await handleBadge(env));
@@ -859,6 +884,234 @@ async function handleAdminRelease(request, env) {
   }
 
   return json({ ok: true, latest, min_version: minVersion, rollout_pct: rolloutPct, updated_at: now },
+    200, { 'cache-control': 'no-store' });
+}
+
+/* ── 资源热更新（P5）────────────────────────────────── */
+
+/**
+ * GET /v1/assets/manifest
+ *
+ * 返回当前全部远程资源清单：{ version, assets: [{ name, sha256, size, url }], sig }。
+ * version = 所有资源里的最大版本（每次 /admin/asset 上传都会 +1），客户端据此判断是否有更新。
+ * 未配置 CONFIG_SIGNING_KEY → 503（不发未签名清单）；无资源时返回空清单（version=0）。
+ */
+async function handleAssetsManifest(env) {
+  const signingKey = env.CONFIG_SIGNING_KEY || '';
+  if (signingKey.length === 0) {
+    return json({ error: 'assets_unavailable' }, 503);
+  }
+  if (signingKey.length < 32) {
+    return json({ error: 'assets_unavailable', reason: 'signing_key_too_short' }, 503);
+  }
+
+  let rows;
+  try {
+    rows = await env.DB.prepare(
+      'SELECT name, version, sha256, size FROM remote_assets ORDER BY name ASC'
+    ).all();
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+
+  const list = rows && Array.isArray(rows.results) ? rows.results : [];
+  let version = 0;
+  const assets = [];
+  for (let i = 0; i < list.length && assets.length < ASSET_MAX_COUNT; i++) {
+    const row = list[i];
+    if (!row || typeof row !== 'object') {
+      continue;
+    }
+    const name = typeof row.name === 'string' ? row.name : '';
+    if (!ASSET_NAME_RE.test(name)) {
+      continue;
+    }
+    const sha = typeof row.sha256 === 'string' ? row.sha256.toLowerCase() : '';
+    if (!ASSET_SHA_RE.test(sha)) {
+      continue;
+    }
+    const size = toSafeInt(row.size, 0, 0, ASSET_MAX_FILE_BYTES);
+    if (size <= 0) {
+      continue;
+    }
+    const rowVersion = toSafeInt(row.version, 0, 0, MAX_CONFIG_VERSION);
+    if (rowVersion > version) {
+      version = rowVersion;
+    }
+    assets.push({ name, sha256: sha, size, url: '/v1/assets/' + name });
+  }
+
+  const body = { version, assets };
+  // 签名覆盖「去掉 sig 的完整响应体」，客户端删掉 sig 后重新序列化即可校验。
+  const unsigned = JSON.stringify(body);
+  const sig = (await hmacSha256Hex(signingKey, unsigned)).slice(0, 32);
+  const out = JSON.stringify({ ...body, sig });
+
+  return new Response(out, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': ASSET_CACHE_CONTROL,
+    },
+  });
+}
+
+/**
+ * GET /v1/assets/<name>
+ *
+ * 返回资源原始字节（application/octet-stream）。完整性由客户端按清单里的
+ * SHA-256 校验，服务端不重复计算；name 只允许白名单字符，非法/不存在统一 404。
+ */
+async function handleAssetDownload(url, env) {
+  const prefix = '/v1/assets/';
+  const name = url.pathname.slice(prefix.length);
+  if (!ASSET_NAME_RE.test(name)) {
+    return json({ error: 'asset_not_found' }, 404);
+  }
+
+  let row;
+  try {
+    row = await env.DB.prepare(
+      'SELECT content, size, sha256 FROM remote_assets WHERE name = ?'
+    ).bind(name).first();
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  if (!row || !row.content) {
+    return json({ error: 'asset_not_found' }, 404);
+  }
+
+  const headers = {
+    'content-type': 'application/octet-stream',
+    'cache-control': ASSET_CACHE_CONTROL,
+  };
+  const sha = typeof row.sha256 === 'string' ? row.sha256.toLowerCase() : '';
+  if (ASSET_SHA_RE.test(sha)) {
+    headers['x-content-sha256'] = sha;
+  }
+  return new Response(row.content, { status: 200, headers });
+}
+
+/**
+ * POST /admin/asset
+ * header: x-admin-key = CONFIG_ADMIN_KEY（未配置时回落 STATS_KEY）
+ * body: { name: "home_banner", content_base64: "..." }
+ *
+ * 服务端计算 SHA-256 并落库；单文件 ≤ 512 KB，全部资源总量 ≤ 4 MB。
+ * 每次上传把 manifest 版本推进 1（同名覆盖也推进），客户端据此重新拉取。
+ */
+async function handleAdminAsset(request, env) {
+  const authError = adminAuthError(request, env);
+  if (authError !== null) {
+    return authError;
+  }
+
+  const declared = Number(request.headers.get('content-length') || '0');
+  if (declared > MAX_ASSET_ADMIN_BODY_BYTES) {
+    return json({ error: 'payload_too_large' }, 413);
+  }
+  let raw;
+  try {
+    raw = await request.text();
+  } catch {
+    return json({ error: 'bad_body' }, 400);
+  }
+  if (raw.length === 0 || raw.length > MAX_ASSET_ADMIN_BODY_BYTES) {
+    return json({ error: 'payload_too_large' }, 413);
+  }
+
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ error: 'bad_json' }, 400);
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return json({ error: 'bad_json' }, 400);
+  }
+
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!ASSET_NAME_RE.test(name)) {
+    return json({ error: 'bad_name' }, 400);
+  }
+  const contentBase64 = typeof body.content_base64 === 'string' ? body.content_base64 : '';
+  if (contentBase64.length === 0) {
+    return json({ error: 'bad_content' }, 400);
+  }
+  let bytes;
+  try {
+    bytes = base64ToBytes(contentBase64);
+  } catch {
+    return json({ error: 'bad_content' }, 400);
+  }
+  if (bytes.length === 0) {
+    return json({ error: 'bad_content' }, 400);
+  }
+  if (bytes.length > ASSET_MAX_FILE_BYTES) {
+    return json({ error: 'asset_too_large' }, 413);
+  }
+
+  // 总量上限：排除同名旧文件（覆盖上传只增加差值）。
+  let total = 0;
+  try {
+    const row = await env.DB.prepare(
+      'SELECT COALESCE(SUM(size), 0) AS total FROM remote_assets WHERE name != ?'
+    ).bind(name).first();
+    total = row && typeof row.total === 'number' ? row.total : 0;
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  if (total + bytes.length > ASSET_MAX_TOTAL_BYTES) {
+    return json({ error: 'assets_too_large' }, 413);
+  }
+
+  // 条数上限：manifest 一次最多下发 ASSET_MAX_COUNT 条，超出会导致部分资源永远不可见。
+  let count = 0;
+  try {
+    const row = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM remote_assets WHERE name != ?'
+    ).bind(name).first();
+    count = row && typeof row.n === 'number' ? row.n : 0;
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  if (count >= ASSET_MAX_COUNT) {
+    return json({ error: 'too_many_assets' }, 413);
+  }
+
+  // manifest 版本 = 当前最大版本 + 1（每次上传单调递增）。
+  let maxVersion = 0;
+  try {
+    const row = await env.DB.prepare(
+      'SELECT COALESCE(MAX(version), 0) AS max_version FROM remote_assets'
+    ).first();
+    maxVersion = row && typeof row.max_version === 'number' ? row.max_version : 0;
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+  const version = maxVersion + 1;
+  if (version > MAX_CONFIG_VERSION) {
+    return json({ error: 'storage_failed' }, 500);
+  }
+
+  const sha = await sha256BytesHex(bytes);
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      `INSERT INTO remote_assets (name, version, sha256, size, content, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(name) DO UPDATE SET
+         version = excluded.version,
+         sha256 = excluded.sha256,
+         size = excluded.size,
+         content = excluded.content,
+         updated_at = excluded.updated_at`
+    ).bind(name, version, sha, bytes.length, bytes.buffer, now).run();
+  } catch {
+    return json({ error: 'storage_failed' }, 500);
+  }
+
+  return json({ ok: true, name, version, sha256: sha, size: bytes.length, updated_at: now },
     200, { 'cache-control': 'no-store' });
 }
 
@@ -1660,6 +1913,22 @@ async function hmacSha256Hex(secret, text) {
   );
   const mac = await crypto.subtle.sign('HMAC', key, enc.encode(text));
   return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Base64 → 字节数组；非法输入抛异常（调用方转 400）。 */
+function base64ToBytes(text) {
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/** 字节数组的 SHA-256 → 64 位小写十六进制。 */
+async function sha256BytesHex(bytes) {
+  const buf = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function verifySignature(secret, ts, id, version, sig, now) {

@@ -180,3 +180,13 @@ CREATE TABLE IF NOT EXISTS app_release (
   url TEXT,
   updated_at INTEGER NOT NULL
 );
+
+-- 资源热更新（P5 / SPEC §5.3 / §7）：远程资源按 name 单行存储，content 为 BLOB
+CREATE TABLE IF NOT EXISTS remote_assets (
+  name TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  content BLOB NOT NULL,
+  updated_at INTEGER NOT NULL
+);
