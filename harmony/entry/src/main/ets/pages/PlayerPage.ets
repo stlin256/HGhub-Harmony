@@ -41,6 +41,8 @@ import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { RemoteConfig } from '../services/RemoteConfig';
 import { IS_TEST_VARIANT } from '../utils/BuildVariant';
 import { DebugLine, PlayerDiagnostics } from '../components/player/PlayerDiagnostics';
+import { PlayerSheetContent } from '../components/player/PlayerSheetContent';
+import { PlayerMoreMenu } from '../components/player/PlayerMoreMenu';
 import { AppChannel } from '../utils/AppChannel';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
@@ -1563,9 +1565,7 @@ export struct PlayerPage {
   }
 
   /** Sheet 内容过渡：仅 kind 切换时 crossfade（standard/exitFast），首次打开交给系统 Sheet 动画。 */
-  private sheetContentTransition(): TransitionEffect {
-    return this.sheetKindSwitching ? HgMotion.statusTransition() : TransitionEffect.IDENTITY;
-  }
+
 
   private showChrome(): void {
     if (this.locked || this.destroyed) {
@@ -2404,7 +2404,7 @@ export struct PlayerPage {
 
   /** 点选画面比例：写偏好 → AVPlayer 立即换模式 → 重算展示矩形；面板保持打开以便看到 ✓ 与画面变化。 */
   private pickScale(mode: string): void {
-    if (this.scaleRowDisabled(mode)) {
+    if (mode === 'cover' && this.isContainForced()) {
       UiBus.toastInfo('横屏自动适应，不裁切');
       return;
     }
@@ -2424,29 +2424,15 @@ export struct PlayerPage {
     }
   }
 
-  private scaleLabel(mode: string): string {
-    if (mode === 'cover') {
-      return '全屏沉浸（裁切铺满）';
-    }
-    if (mode === 'fill') {
-      return '拉伸铺满';
-    }
-    return '适应画面（完整显示）';
-  }
+
 
   /** 当前是否勾选某比例：按「实际生效」模式判断（横屏视频的 cover 回退为 contain），面板打开时实时刷新。 */
-  private menuCheck(mode: string): boolean {
-    return this.effectiveVideoScale() === mode;
-  }
+
 
   /** 横屏视频/横屏窗口禁用「全屏沉浸」项：避免出现「勾了裁切但画面是适应」的错觉。 */
-  private scaleRowDisabled(mode: string): boolean {
-    return mode === 'cover' && this.isContainForced();
-  }
 
-  private scaleRowColor(mode: string): string {
-    return this.scaleRowDisabled(mode) ? HgColor.textDisabled(true) : HgColor.textPrimary(true);
-  }
+
+
 
   /** 面板里的普通入口：先关面板再打开对应 Sheet。 */
   private onMenuAction(action: string): void {
@@ -3727,120 +3713,6 @@ export struct PlayerPage {
 
   /* ── 「更多」自定义弹层（遮罩 + 右上角面板） ──────── */
   @Builder
-  MoreMenuMask() {
-    Column()
-      .width('100%')
-      .height('100%')
-      .backgroundColor(HgColor.mask(true))
-      .accessibilityText('已锁定，点按解锁')
-      .onClick(() => {
-        this.setMenuVisible(false);
-      })
-      // 遮罩：standard 220ms 淡入、exitStandard 200ms 淡出（§3.6）。
-      .transition(TransitionEffect.asymmetric(
-        HgMotion.fadeIn(HgMotion.standard),
-        HgMotion.fadeOut(HgMotion.exitStandard)
-      ))
-  }
-
-  @Builder
-  MenuScaleRow(mode: string) {
-    HgPressable({ dark: true, noTap: true }) {
-      Row() {
-        Text(this.scaleLabel(mode))
-          .fontSize(HgFont.body)
-          .fontColor(this.scaleRowColor(mode))
-          .layoutWeight(1)
-        if (!this.scaleRowDisabled(mode) && this.menuCheck(mode)) {
-          SymbolGlyph($r('sys.symbol.checkmark'))
-            .fontSize(HgIconSize.compact)
-            .fontColor([HgColor.accent(true)])
-        }
-      }
-      .width('100%')
-      .height(44)
-      .padding({ left: HgSpace.m, right: HgSpace.m })
-      .onClick(() => {
-        this.pickScale(mode);
-      })
-      .accessibilityText(this.menuCheck(mode) ?
-              I18n.fmt1($r('app.string.fmt_selected'), this.scaleLabel(mode)) : this.scaleLabel(mode))
-    }
-  }
-
-  @Builder
-  MenuActionRow(action: string, label: string) {
-    HgPressable({ dark: true, noTap: true }) {
-      Row() {
-        Text(label)
-          .fontSize(HgFont.body)
-          .fontColor(HgColor.textPrimary(true))
-          .layoutWeight(1)
-      }
-      .width('100%')
-      .height(44)
-      .padding({ left: HgSpace.m, right: HgSpace.m })
-      .onClick(() => {
-        this.onMenuAction(action);
-      })
-      .accessibilityText(label)
-    }
-  }
-
-  @Builder
-  MoreMenuPanel() {
-    Column() {
-      Row() {
-        Text($r('app.string.ui_f07fc510'))
-          .fontSize(HgFont.caption)
-          .fontColor(HgColor.textTertiary(true))
-          .layoutWeight(1)
-        if (this.isContainForced()) {
-          Text($r('app.string.ui_d3e7de0f'))
-            .fontSize(HgFont.micro)
-            .fontColor(HgColor.videoInk3)
-        }
-      }
-      .width('100%')
-      .height(32)
-      .padding({ left: HgSpace.m, right: HgSpace.m })
-
-      this.MenuScaleRow('cover')
-      this.MenuScaleRow('contain')
-      this.MenuScaleRow('fill')
-
-      Divider()
-        .strokeWidth(0.5)
-        .color(HgColor.hairline(true))
-        .margin({ top: HgSpace.xs, bottom: HgSpace.xs })
-
-      this.MenuActionRow('detail', '详情与简介')
-      this.MenuActionRow('episodes', '选集')
-      if (ConfigRegistry.getBool(ConfigKey.COMMENTS_ENABLED)) {
-        this.MenuActionRow('comments', '评论')
-      }
-      this.MenuActionRow('share', '分享链接')
-      if (ConfigRegistry.getBool(ConfigKey.PIP_ENABLED)) {
-        this.MenuActionRow('pip', '画中画')
-      }
-    }
-    .width(232)
-    .padding({ top: HgSpace.s, bottom: HgSpace.s })
-    .backgroundColor(HgColor.surface1(true))
-    .borderRadius(HgRadius.group)
-    .border({ width: 1, color: HgColor.hairline(true) })
-    .shadow({ radius: 24, color: HgColor.shadowElev3, offsetX: 0, offsetY: 8 })
-    .position({ x: this.videoAreaWidth() - this.rightInset - 232 - HgSpace.m, y: this.topSafePad() + 52 })
-    .onClick(() => {
-    })
-    // 自定义弹窗：surfaceEnter 260ms（opacity+0.96 scale）进、exitStandard 200ms 出（§3.6）。
-    .transition(TransitionEffect.asymmetric(
-      HgMotion.surfaceEnter(),
-      HgMotion.fadeOut(HgMotion.exitStandard)
-    ))
-  }
-
-  @Builder
   PosterOverlay() {
     Stack() {
       if (this.coverAt(this.currentIndex).length > 0) {
@@ -4044,101 +3916,6 @@ export struct PlayerPage {
     })
   }
 
-  @Builder
-  EpisodeSheetBuilder() {
-    EpisodeSheet({
-      total: this.episodeCount,
-      current: this.ep,
-      dark: true,
-      onPick: (ep: number) => {
-        this.switchEpisode(ep);
-      }
-    })
-  }
-
-  @Builder
-  CommentsSheetBuilder() {
-    CommentsSheet({
-      videoId: this.currentId(),
-      ep: this.ep,
-      kind: this.params.feedKind,
-      dark: true
-    })
-  }
-
-  @Builder
-  DetailSheetBuilder() {
-    DetailSheet({
-      title: this.titleText(),
-      description: this.description,
-      authorName: this.authorName,
-      score: this.score,
-      episodeCount: this.episodeCount,
-      likeCount: this.likeCount,
-      collectCount: this.collectCount,
-      commentCount: this.commentCount,
-      tags: this.tags,
-      currentEp: this.ep,
-      dark: true
-    })
-  }
-
-  @Builder
-  LineSheetBuilder() {
-    LineSheet({
-      // 播放页恒为深色：线路面板必须是深色主题，否则 App 浅色主题下会出现"深底浅字"不可读。
-      dark: true,
-      // 播放页共用同一个 bindSheet（选集/评论/详情/线路），系统白色关闭按钮统一由宿主提供。
-      showCloseButton: false,
-      onClose: () => {
-        this.sheetVisible = false;
-      }
-    })
-  }
-
-  /**
-   * 单一 Sheet 的内容路由。
-   * Sheet 面板底边贴窗口底（全屏布局下系统不会自动避让手势条），
-   * 这里统一补底部安全区，避免选集最后一行 / 评论输入栏被手势条遮挡。
-   */
-  @Builder
-  SheetContent() {
-    Column() {
-      if (this.sheetKind === 'comments') {
-        Column() {
-          this.CommentsSheetBuilder()
-        }
-        .width('100%')
-        .height('100%')
-        .transition(this.sheetContentTransition())
-      } else if (this.sheetKind === 'detail') {
-        Column() {
-          this.DetailSheetBuilder()
-        }
-        .width('100%')
-        .height('100%')
-        .transition(this.sheetContentTransition())
-      } else if (this.sheetKind === 'lines') {
-        Column() {
-          this.LineSheetBuilder()
-        }
-        .width('100%')
-        .height('100%')
-        .transition(this.sheetContentTransition())
-      } else {
-        Column() {
-          this.EpisodeSheetBuilder()
-        }
-        .width('100%')
-        .height('100%')
-        .transition(this.sheetContentTransition())
-      }
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ bottom: this.bottomSafePad() })
-  }
-
   /* ── 测试变体播放诊断浮窗（媒体信息 / AI 超分 / 远端配置） ── */
 
   private srReasonText(): string {
@@ -4180,6 +3957,32 @@ export struct PlayerPage {
     out.push(new DebugLine('config_id', RemoteConfig.configId().length > 0 ? RemoteConfig.configId() : '—'));
     out.push(new DebugLine('窗口', Math.round(this.screenW) + '×' + Math.round(this.screenH) + ' vp'));
     return out;
+  }
+
+  @Builder
+  SheetContentBuilder() {
+    PlayerSheetContent({
+      sheetKind: this.sheetKind,
+      episodeCount: this.episodeCount,
+      ep: this.ep,
+      videoId: this.currentId(),
+      feedKind: this.params.feedKind,
+      titleText: this.titleText(),
+      description: this.description,
+      authorName: this.authorName,
+      score: this.score,
+      likeCount: this.likeCount,
+      collectCount: this.collectCount,
+      commentCount: this.commentCount,
+      tags: this.tags,
+      bottomPad: this.bottomSafePad(),
+      onPickEp: (ep: number) => {
+        this.switchEpisode(ep);
+      },
+      onClose: () => {
+        this.sheetVisible = false;
+      }
+    })
   }
 
   build() {
@@ -4289,10 +4092,26 @@ export struct PlayerPage {
         if (this.locked) {
           this.LockLayer()
         }
-        if (this.menuVisible) {
-          this.MoreMenuMask()
-          this.MoreMenuPanel()
-        }
+        PlayerMoreMenu({
+          visible: this.menuVisible,
+          videoScale: this.videoScale,
+          effectiveScale: this.effectiveVideoScale(),
+          containForced: this.isContainForced(),
+          commentsEnabled: ConfigRegistry.getBool(ConfigKey.COMMENTS_ENABLED),
+          pipEnabled: ConfigRegistry.getBool(ConfigKey.PIP_ENABLED),
+          videoAreaWidth: this.videoAreaWidth(),
+          rightInset: this.rightInset,
+          topPad: this.topSafePad(),
+          onSelectScale: (mode: string) => {
+            this.pickScale(mode);
+          },
+          onAction: (action: string) => {
+            this.onMenuAction(action);
+          },
+          onClose: () => {
+            this.setMenuVisible(false);
+          }
+        })
       }
       .width('100%')
       .height('100%')
@@ -4312,7 +4131,7 @@ export struct PlayerPage {
         this.recomputeVideoRect(false);
       })
       // 单一 Sheet：选集/评论/详情/线路共用（多 bindSheet 叠加在本机只生效一个、且可能残留遮罩挡住触摸）。
-      .bindSheet($$this.sheetVisible, this.SheetContent(), {
+      .bindSheet($$this.sheetVisible, this.SheetContentBuilder(), {
         height: this.sheetHeight(),
         dragBar: true,
         // 播放页恒为深色：系统默认 X 在深色 Sheet 上是黑色几乎不可见，换成白色自绘图标。
