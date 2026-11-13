@@ -1,5 +1,9 @@
 import { util } from '@kit.ArkTS';
+import { bundleManager } from '@kit.AbilityKit';
+import { display } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
+import { i18n } from '@kit.LocalizationKit';
+import { IS_TEST_VARIANT } from '../utils/BuildVariant';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Api } from './Api';
 import { CrashGuard } from './CrashGuard';
@@ -329,11 +333,11 @@ export class Analytics {
   private static readStartupList(): number[] {
     try {
       const raw: string = Prefs.getString(KEY_STARTUP_LIST, '[]');
-      const parsed = JSON.parse(raw);
+      const parsed: number[] = JSON.parse(raw) as number[];
       if (parsed === null) {
         return [];
       }
-      return parsed as number[];
+      return parsed;
     } catch (err) {
       return [];
     }
@@ -484,6 +488,60 @@ export class Analytics {
     return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
   }
 
+  /** 系统环境信息：逐项读取，任何一项失败返回空/0，不影响上报。 */
+  private static envNumber(key: string): number {
+    try {
+      if (key === 'api') {
+        return deviceInfo.sdkApiVersion;
+      }
+      if (key === 'screen_w') {
+        return Math.round(display.getDefaultDisplaySync().width);
+      }
+      if (key === 'screen_h') {
+        return Math.round(display.getDefaultDisplaySync().height);
+      }
+      if (key === 'density') {
+        return Math.round(display.getDefaultDisplaySync().densityPixels * 100) / 100;
+      }
+      if (key === 'version_code') {
+        return bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT).versionCode;
+      }
+    } catch (err) {
+    }
+    return 0;
+  }
+
+  private static envString(key: string): string {
+    try {
+      if (key === 'device_type') {
+        return deviceInfo.deviceType;
+      }
+      if (key === 'manufacture') {
+        return deviceInfo.manufacture;
+      }
+      if (key === 'brand') {
+        return deviceInfo.brand;
+      }
+      if (key === 'abi') {
+        return deviceInfo.abiList;
+      }
+      if (key === 'display_version') {
+        return deviceInfo.displayVersion;
+      }
+      if (key === 'security_patch') {
+        return deviceInfo.securityPatchTag;
+      }
+      if (key === 'language') {
+        return i18n.System.getSystemLanguage();
+      }
+      if (key === 'region') {
+        return i18n.System.getSystemRegion();
+      }
+    } catch (err) {
+    }
+    return '';
+  }
+
   private static model(): string {
     try {
       const value: string = deviceInfo.productModel;
@@ -545,6 +603,21 @@ export class Analytics {
       'ver': Api.appVersion(),
       'model': Analytics.model(),
       'os': Analytics.osName(),
+      // 系统环境信息：面板按 API 版本 / 设备类型 / 厂商 / 屏幕等维度拆分。
+      'sdk_api_version': Analytics.envNumber('api'),
+      'device_type': Analytics.envString('device_type'),
+      'manufacture': Analytics.envString('manufacture'),
+      'brand': Analytics.envString('brand'),
+      'abi': Analytics.envString('abi'),
+      'display_version': Analytics.envString('display_version'),
+      'security_patch': Analytics.envString('security_patch'),
+      'version_code': Analytics.envNumber('version_code'),
+      'variant': IS_TEST_VARIANT ? 'test' : 'release',
+      'language': Analytics.envString('language'),
+      'region': Analytics.envString('region'),
+      'screen_w': Analytics.envNumber('screen_w'),
+      'screen_h': Analytics.envNumber('screen_h'),
+      'density': Analytics.envNumber('density'),
       'install_at': Prefs.getNumber(KEY_INSTALL_AT, 0),
       'day': today
     };
