@@ -91,6 +91,570 @@
     {
       "name": "tab_profile",
       "value": "我的"
+    },
+    {
+      "name": "ui_016024b7",
+      "value": "视频暂时无法加载"
+    },
+    {
+      "name": "ui_05a28290",
+      "value": "输入关键词后按回车搜索；先看看热榜，或从搜索历史继续。"
+    },
+    {
+      "name": "ui_0e067ede",
+      "value": "关闭评论"
+    },
+    {
+      "name": "ui_10f28175",
+      "value": "已开启 AI 超分"
+    },
+    {
+      "name": "ui_11d02415",
+      "value": "返回"
+    },
+    {
+      "name": "ui_13143e50",
+      "value": "锁定屏幕"
+    },
+    {
+      "name": "ui_15dbaa78",
+      "value": "关于 HGhub，打开关于页面"
+    },
+    {
+      "name": "ui_167667a8",
+      "value": "优先高清（HEVC）"
+    },
+    {
+      "name": "ui_18dcd86b",
+      "value": "重新获取镜像线路"
+    },
+    {
+      "name": "ui_190c349c",
+      "value": "— 榜单已加载完 —"
+    },
+    {
+      "name": "ui_191e4ae3",
+      "value": "系统原生画质增强，画面更清晰"
+    },
+    {
+      "name": "ui_19fd6a38",
+      "value": "多源加速"
+    },
+    {
+      "name": "ui_1ac5f1f7",
+      "value": "AI 超分"
+    },
+    {
+      "name": "ui_1c5c171f",
+      "value": "推荐数据"
+    },
+    {
+      "name": "ui_21f1e882",
+      "value": "登录"
+    },
+    {
+      "name": "ui_24318bcc",
+      "value": "— 到底啦 —"
+    },
+    {
+      "name": "ui_2564141e",
+      "value": "上滑自动加载更多"
+    },
+    {
+      "name": "ui_27054dfb",
+      "value": "关闭页面切换、弹窗与骨架呼吸动画（省电 / 无障碍）"
+    },
+    {
+      "name": "ui_2a33a141",
+      "value": "完整榜单"
+    },
+    {
+      "name": "ui_2c808595",
+      "value": "展开或收起简介"
+    },
+    {
+      "name": "ui_2ef997a0",
+      "value": "关闭平板适配提示"
+    },
+    {
+      "name": "ui_300ee3de",
+      "value": "加载中…"
+    },
+    {
+      "name": "ui_355e7cca",
+      "value": "默认开启；关闭后记住上次音量状态"
+    },
+    {
+      "name": "ui_36a4dfc6",
+      "value": "返回热榜"
+    },
+    {
+      "name": "ui_37445711",
+      "value": "PolyForm Noncommercial License 1.0.0 · 仅限非商业使用"
+    },
+    {
+      "name": "ui_38108eaa",
+      "value": "刷新"
+    },
+    {
+      "name": "ui_3a711aad",
+      "value": "目标站点有 IPv6 地址时优先走 IPv6（默认开启）"
+    },
+    {
+      "name": "ui_3b8a6e73",
+      "value": "作者 · GitHub"
+    },
+    {
+      "name": "ui_3f62e8f5",
+      "value": "发送评论"
+    },
+    {
+      "name": "ui_408579c3",
+      "value": "作者头像"
+    },
+    {
+      "name": "ui_42a36e94",
+      "value": "反馈"
+    },
+    {
+      "name": "ui_435c5259",
+      "value": "分类"
+    },
+    {
+      "name": "ui_4989b5cf",
+      "value": "管理"
+    },
+    {
+      "name": "ui_4d0b4688",
+      "value": "取消"
+    },
+    {
+      "name": "ui_4f55ee1e",
+      "value": "详情"
+    },
+    {
+      "name": "ui_523e40a0",
+      "value": "发现"
+    },
+    {
+      "name": "ui_53fdbebb",
+      "value": "已锁定，点按解锁"
+    },
+    {
+      "name": "ui_560c03c3",
+      "value": "加载失败，点击重试"
+    },
+    {
+      "name": "ui_576374ba",
+      "value": "免责声明"
+    },
+    {
+      "name": "ui_578bbcfa",
+      "value": "清空历史"
+    },
+    {
+      "name": "ui_5902c97c",
+      "value": "切换线路"
+    },
+    {
+      "name": "ui_5922d95f",
+      "value": "线路"
+    },
+    {
+      "name": "ui_59bca9f1",
+      "value": "查看全部 ›"
+    },
+    {
+      "name": "ui_5b2cd791",
+      "value": "平板 / 大屏适配提示"
+    },
+    {
+      "name": "ui_5c37f0c6",
+      "value": "导出诊断日志"
+    },
+    {
+      "name": "ui_5e4d3706",
+      "value": "关注作者的最新作品"
+    },
+    {
+      "name": "ui_5ea2e0cd",
+      "value": "简介"
+    },
+    {
+      "name": "ui_5fc8f9d0",
+      "value": "收藏 / 观看历史"
+    },
+    {
+      "name": "ui_60192f6f",
+      "value": "启动耗时"
+    },
+    {
+      "name": "ui_60876162",
+      "value": "专题，查看全部"
+    },
+    {
+      "name": "ui_648372e0",
+      "value": "全部在手机本地完成 · 断网也能用 · 不上传任何个人数据"
+    },
+    {
+      "name": "ui_67597dbc",
+      "value": "重播"
+    },
+    {
+      "name": "ui_6fbdfa23",
+      "value": "本地计算状态"
+    },
+    {
+      "name": "ui_705090b2",
+      "value": "反馈，打开 Issue 页面"
+    },
+    {
+      "name": "ui_70ecebae",
+      "value": "创作者"
+    },
+    {
+      "name": "ui_72429b8a",
+      "value": "有高清源时优先播放，更清晰但更耗流量"
+    },
+    {
+      "name": "ui_74839625",
+      "value": "选择数据源线路；手动切换后需要重新登录"
+    },
+    {
+      "name": "ui_756f0f27",
+      "value": "镜像线路"
+    },
+    {
+      "name": "ui_7578c613",
+      "value": "如果遇到 bug，欢迎通过 GitHub Issue 反馈（README 有入口），帮助我们改进大屏体验。"
+    },
+    {
+      "name": "ui_778fc8f9",
+      "value": "全部"
+    },
+    {
+      "name": "ui_7a924341",
+      "value": "分享"
+    },
+    {
+      "name": "ui_7ac0d5c9",
+      "value": "关注"
+    },
+    {
+      "name": "ui_7b09aa5e",
+      "value": "打开项目 Issue 页（链接会复制到剪贴板）"
+    },
+    {
+      "name": "ui_7b31abb2",
+      "value": "推荐是怎么来的？"
+    },
+    {
+      "name": "ui_7debf9cb",
+      "value": "设置"
+    },
+    {
+      "name": "ui_82ca4338",
+      "value": "黄果短剧的 HarmonyOS 客户端：发现、搜索、榜单、专题与沉浸播放一站完成，支持端侧个性化推荐、画质切换、画中画、应用接续与投播。"
+    },
+    {
+      "name": "ui_82e9cc5a",
+      "value": "每周持续上新"
+    },
+    {
+      "name": "ui_84fcd70d",
+      "value": "清空"
+    },
+    {
+      "name": "ui_88f329ff",
+      "value": "登录后可使用点赞、收藏、评论与关注；账号数据仅保存在本机。"
+    },
+    {
+      "name": "ui_8c4d505e",
+      "value": "暂无内容"
+    },
+    {
+      "name": "ui_8c593599",
+      "value": "刷新镜像线路"
+    },
+    {
+      "name": "ui_8df8281c",
+      "value": "评论加载失败"
+    },
+    {
+      "name": "ui_8e48c9ea",
+      "value": "下一集"
+    },
+    {
+      "name": "ui_93a41f50",
+      "value": "我的收藏"
+    },
+    {
+      "name": "ui_95ba7e56",
+      "value": "热榜加载中…"
+    },
+    {
+      "name": "ui_9741bc8c",
+      "value": "自动选择"
+    },
+    {
+      "name": "ui_9a306145",
+      "value": "完整榜单 ›"
+    },
+    {
+      "name": "ui_9b0c6c78",
+      "value": "更多"
+    },
+    {
+      "name": "ui_9f1e3081",
+      "value": "个性化推荐"
+    },
+    {
+      "name": "ui_a0559bc8",
+      "value": "还没有评论，来抢第一个沙发"
+    },
+    {
+      "name": "ui_a0d73841",
+      "value": "简单说：你看剧 → 手机记住偏好 → 手机上的小模型给剧打分 → \"换一批\"按分数推荐。"
+    },
+    {
+      "name": "ui_a2552cea",
+      "value": "本项目仅供学习与技术交流，不存储、不分发任何音视频内容；所有内容均来自第三方站点，版权归原作者与站点所有。请支持正版。"
+    },
+    {
+      "name": "ui_a34380dc",
+      "value": "正在跳转…"
+    },
+    {
+      "name": "ui_a6df3858",
+      "value": "检查更新"
+    },
+    {
+      "name": "ui_a74866f4",
+      "value": "— 已经到底啦 —"
+    },
+    {
+      "name": "ui_a82c993d",
+      "value": "我的"
+    },
+    {
+      "name": "ui_a8638e63",
+      "value": "开发者没有平板设备，平板 / 大屏 / PC 布局尚未实机验证，可能存在界面或交互问题。"
+    },
+    {
+      "name": "ui_ad25121b",
+      "value": "减少动态效果"
+    },
+    {
+      "name": "ui_adf6d73a",
+      "value": "搜索历史"
+    },
+    {
+      "name": "ui_afc8bdd9",
+      "value": "切换登录/注册"
+    },
+    {
+      "name": "ui_b0d66234",
+      "value": "换一批"
+    },
+    {
+      "name": "ui_b0e70eec",
+      "value": "友善发言，一起讨论剧情"
+    },
+    {
+      "name": "ui_ba6a63ce",
+      "value": "搜索短剧、作者、题材…"
+    },
+    {
+      "name": "ui_bacaaa62",
+      "value": "从左侧选择内容"
+    },
+    {
+      "name": "ui_bb6138bb",
+      "value": "模型特征：标签 + 标题/简介文本"
+    },
+    {
+      "name": "ui_bc86f4f4",
+      "value": "推荐说明"
+    },
+    {
+      "name": "ui_bc88087e",
+      "value": "投播到其他设备"
+    },
+    {
+      "name": "ui_be39a686",
+      "value": "HGhub 应用图标"
+    },
+    {
+      "name": "ui_be4080c6",
+      "value": "正在缓冲…"
+    },
+    {
+      "name": "ui_bef9452a",
+      "value": "专题"
+    },
+    {
+      "name": "ui_c24aa538",
+      "value": "— 已展示全部频道 —"
+    },
+    {
+      "name": "ui_c2e144d7",
+      "value": "本集完"
+    },
+    {
+      "name": "ui_c30e213a",
+      "value": "暂未获取到镜像线路，可稍后刷新重试。"
+    },
+    {
+      "name": "ui_c36dc2ad",
+      "value": "推荐内容，点击播放"
+    },
+    {
+      "name": "ui_c3a0709c",
+      "value": "自动检测并选择可用线路"
+    },
+    {
+      "name": "ui_c8109f43",
+      "value": "镜像线路仅支持游客浏览，登录请使用固定线路。"
+    },
+    {
+      "name": "ui_cecaaf5b",
+      "value": "封面缓存"
+    },
+    {
+      "name": "ui_cf510562",
+      "value": "评论"
+    },
+    {
+      "name": "ui_d00981d6",
+      "value": "排行榜"
+    },
+    {
+      "name": "ui_d01c2df7",
+      "value": "为你推荐"
+    },
+    {
+      "name": "ui_d07cee78",
+      "value": "收藏"
+    },
+    {
+      "name": "ui_d3e7de0f",
+      "value": "横屏自动适应"
+    },
+    {
+      "name": "ui_d5a1c832",
+      "value": "启动时静音"
+    },
+    {
+      "name": "ui_dd3760c8",
+      "value": "我知道了"
+    },
+    {
+      "name": "ui_dfe74b48",
+      "value": "当前线路"
+    },
+    {
+      "name": "ui_e067f1ab",
+      "value": "一张图看懂，不需要懂技术"
+    },
+    {
+      "name": "ui_e07f300d",
+      "value": "点赞"
+    },
+    {
+      "name": "ui_e10f8bfd",
+      "value": "一张图看懂推荐是怎么来的"
+    },
+    {
+      "name": "ui_e1c90126",
+      "value": "AI 短剧 · 每日上新"
+    },
+    {
+      "name": "ui_e29f3122",
+      "value": "导出到剪贴板"
+    },
+    {
+      "name": "ui_e2d53a6d",
+      "value": "重试"
+    },
+    {
+      "name": "ui_e31ef097",
+      "value": "选集"
+    },
+    {
+      "name": "ui_e6aa2cbd",
+      "value": "使用中"
+    },
+    {
+      "name": "ui_e7ec9d80",
+      "value": "清空观看历史"
+    },
+    {
+      "name": "ui_e848ddd4",
+      "value": "主题"
+    },
+    {
+      "name": "ui_e8aa9cc6",
+      "value": "关闭线路面板"
+    },
+    {
+      "name": "ui_eb1befc2",
+      "value": "观看历史"
+    },
+    {
+      "name": "ui_ed41aa6c",
+      "value": "继续播放"
+    },
+    {
+      "name": "ui_efb28fde",
+      "value": "关于 HGhub"
+    },
+    {
+      "name": "ui_f07fc510",
+      "value": "画面比例"
+    },
+    {
+      "name": "ui_f188133a",
+      "value": "热榜"
+    },
+    {
+      "name": "ui_f2b50920",
+      "value": "IPv6 优先"
+    },
+    {
+      "name": "ui_f31811ba",
+      "value": "并发请求多条线路取最快响应（默认开启）"
+    },
+    {
+      "name": "ui_f32fba10",
+      "value": "精选合集 · 按主题浏览"
+    },
+    {
+      "name": "ui_f3b14e33",
+      "value": "热播榜 · 推荐榜 · 潜力榜"
+    },
+    {
+      "name": "ui_f3ea6d34",
+      "value": "操作"
+    },
+    {
+      "name": "ui_f526c899",
+      "value": "确定"
+    },
+    {
+      "name": "ui_f7acefd2",
+      "value": "查看"
+    },
+    {
+      "name": "ui_fa7626ef",
+      "value": "重试热榜"
+    },
+    {
+      "name": "ui_fdbbd2d4",
+      "value": "关注，查看关注作者的作品"
+    },
+    {
+      "name": "ui_fe65e02e",
+      "value": "画像还是空的：先收藏/播放几部剧，偏好会慢慢积累。"
     }
   ]
 }
