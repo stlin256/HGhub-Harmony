@@ -141,6 +141,13 @@ function makeDB() {
             }
             return { max_version: max };
           }
+          if (sql.includes('SELECT payload FROM remote_config')) {
+            let latest = null;
+            for (const row of remoteConfig.values()) {
+              if (latest === null || row.version > latest.version) latest = row;
+            }
+            return latest ? { payload: latest.payload } : null;
+          }
           if (sql.includes('FROM app_release')) {
             const row = appRelease.get(args[0]);
             return row ? { ...row } : null;
@@ -2002,4 +2009,78 @@ test('/stats：迁移未执行（ab 列缺失）时仍 200，rollout/ab 为空�
   const body = await res.json();
   assert.deepEqual(body.rollout.buckets, []);
   assert.deepEqual(body.ab.groups, []);
+});
+
+/* ── 功能级灰度（rollout map 展开）──────────────────── */
+
+test('/stats：rollout.features 展开功能级灰度并统计实际命中', async () => {
+  const e = env();
+  const day = todayStamp();
+  seedConfig(e.DB, 12, {
+    rollout: { inplace_search: 20, comments_sidebar: 50, off_feature: 0, all_feature: 100 },
+  });
+  // 10 台设备，bucket 均匀覆盖 0/10/.../90。
+  for (let i = 0; i < 10; i++) {
+    const id = `3f2504e0-4f89-41d3-9a0c-0305e82c33${String(i).padStart(2, '0')}`;
+    await worker.fetch(post({
+      id, ver: '2.3.0', day,
+      stats: { day, sessions: 1, ab_bucket: i * 10, ab_group: i % 2 },
+    }), e, ctx);
+  }
+  const body = await (await worker.fetch(new Request('https://w/stats?key=k'), e, ctx)).json();
+  assert.equal(body.rollout.devices, 10);
+  const byKey = {};
+  for (const f of body.rollout.features) {
+    byKey[f.key] = f;
+  }
+  assert.equal(byKey.inplace_search.pct, 20);
+  assert.equal(byKey.inplace_search.enabled_devices, 2);
+  assert.equal(byKey.inplace_search.total_devices, 10);
+  assert.equal(byKey.inplace_search.actual_pct, 20);
+  assert.equal(byKey.comments_sidebar.pct, 50);
+  assert.equal(byKey.comments_sidebar.enabled_devices, 5);
+  assert.equal(byKey.comments_sidebar.actual_pct, 50);
+  assert.equal(byKey.off_feature.enabled_devices, 0);
+  assert.equal(byKey.off_feature.actual_pct, 0);
+  assert.equal(byKey.all_feature.enabled_devices, 10);
+  assert.equal(byKey.all_feature.actual_pct, 100);
+});
+
+test('/stats：配置包无 rollout map（或无配置）时 features 为空', async () => {
+  const day = todayStamp();
+  // 有配置包但没有 rollout map。
+  const e = env();
+  seedConfig(e.DB, 12, { flags: { pip: true } });
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, ab_bucket: 10, ab_group: 0 },
+  }), e, ctx);
+  const body = await (await worker.fetch(new Request('https://w/stats?key=k'), e, ctx)).json();
+  assert.deepEqual(body.rollout.features, []);
+
+  // 完全没有配置包。
+  const e2 = env();
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1, ab_bucket: 10, ab_group: 0 },
+  }), e2, ctx);
+  const body2 = await (await worker.fetch(new Request('https://w/stats?key=k'), e2, ctx)).json();
+  assert.deepEqual(body2.rollout.features, []);
+});
+
+test('/stats：旧客户端 ab_bucket 全 -1 时功能灰度命中为 0', async () => {
+  const e = env();
+  const day = todayStamp();
+  seedConfig(e.DB, 12, { rollout: { inplace_search: 20 } });
+  await worker.fetch(post({
+    id: UUID, ver: '2.3.0', day,
+    stats: { day, sessions: 1 },
+  }), e, ctx);
+  const body = await (await worker.fetch(new Request('https://w/stats?key=k'), e, ctx)).json();
+  assert.equal(body.rollout.devices, 0);
+  assert.equal(body.rollout.features.length, 1);
+  assert.equal(body.rollout.features[0].key, 'inplace_search');
+  assert.equal(body.rollout.features[0].enabled_devices, 0);
+  assert.equal(body.rollout.features[0].total_devices, 0);
+  assert.equal(body.rollout.features[0].actual_pct, 0);
 });

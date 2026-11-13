@@ -221,6 +221,11 @@
   }
   .rollout-legend .swatch{ width:10px; height:10px; display:inline-block; margin-right:6px; }
 
+  /* 功能灰度小表 */
+  .fg-table{ margin-top:12px; }
+  .fg-table table{ font-size:12px; }
+  .fg-table td.fg-warn{ color:var(--warn); font-weight:600; }
+
   /* A/B 对比 */
   .ab-table td, .ab-table th{ text-align:right; }
   .ab-table td:first-child, .ab-table th:first-child{ text-align:left; }
@@ -887,13 +892,36 @@
     var covText = Object.keys(cov).map(function(k){
       return k + ' ' + fmtFixed((cov[k] || 0) * 100, 1) + '%';
     }).join(' · ');
+    // 功能级灰度（rollout map）：设定比例 vs 按 bucket 统计的实际命中。
+    var features = r.features || [];
+    var fg = '';
+    if (!features.length){
+      fg = '<div class="rollout-legend"><span>当前配置包未下发功能级灰度（rollout map）</span></div>';
+    } else {
+      fg = '<div class="table-wrap fg-table"><table><thead><tr>' +
+        '<th>功能</th><th>设定</th><th>实际命中</th><th>设备</th></tr></thead><tbody>';
+      features.forEach(function(f){
+        var setPct = f.pct || 0;
+        var actual = f.actual_pct || 0;
+        // 实际命中与设定偏差超过 5 个点：标黄提示（样本偏差或分桶不均）。
+        var warn = Math.abs(actual - setPct) > 5;
+        fg += '<tr><td><span class="cfg-key">' + esc(f.key) + '</span></td>' +
+          '<td>' + fmtFixed(setPct, 0) + '%</td>' +
+          '<td class="' + (warn ? 'fg-warn' : '') + '">' + fmtFixed(actual, 1) + '%' +
+            (warn ? ' ⚠' : '') + '</td>' +
+          '<td>' + fmtExact(f.enabled_devices || 0) + ' / ' +
+            fmtExact(f.total_devices || 0) + '</td></tr>';
+      });
+      fg += '</tbody></table></div>';
+    }
     box.innerHTML = cols +
       '<div class="rollout-legend">' +
         '<span><span class="swatch" style="background:var(--accent)"></span>放量线内</span>' +
         '<span><span class="swatch" style="background:var(--rule)"></span>放量线外</span>' +
         '<span>有效设备 ' + fmtExact(r.devices || 0) + ' 台</span>' +
       '</div>' +
-      '<div class="rollout-legend"><span>' + esc(covText || '暂无灰度数据') + '</span></div>';
+      '<div class="rollout-legend"><span>' + esc(covText || '暂无灰度数据') + '</span></div>' +
+      fg;
     return box;
   }
 

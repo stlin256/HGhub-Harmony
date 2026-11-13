@@ -95,6 +95,8 @@ const ASSET_SHA_RE = /^[0-9a-f]{64}$/;
 const ROLLOUT_BUCKETS = 100;
 const ROLLOUT_BANDS = 10;
 const AB_GROUPS = 2;
+/** 功能级灰度（rollout map）：面板最多展开的功能数，防止异常配置把响应撑大。 */
+const MAX_ROLLOUT_FEATURES = 50;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VERSION_RE = /^[0-9]{1,3}(\.[0-9]{1,3}){0,3}$/;
@@ -1565,11 +1567,59 @@ async function handleStats(url, env, preAuthorized) {
     }
     const currentRolloutPct = releaseRow && typeof releaseRow.rollout_pct === 'number'
       ? toSafeInt(releaseRow.rollout_pct, 0, 0, 100) : 0;
+
+    // 功能级灰度（SPEC §6.3）：从当前生效配置包的 rollout map 读取设定比例，
+    // 按 ab_bucket 分布统计实际命中设备数。配置缺失 / 迁移未执行 / 解析失败时保持空数组，
+    // 不影响上面的 bucket 分布与 A/B 段。
+    const rolloutFeatures = [];
+    try {
+      const configRow = await env.DB.prepare(
+        'SELECT payload FROM remote_config WHERE id = ? ORDER BY version DESC LIMIT 1'
+      ).bind(CONFIG_ROW_ID).first();
+      if (configRow && typeof configRow.payload === 'string') {
+        const configPayload = JSON.parse(configRow.payload);
+        const featureMap = configPayload && typeof configPayload === 'object' &&
+          !Array.isArray(configPayload) ? configPayload.rollout : null;
+        if (featureMap && typeof featureMap === 'object' && !Array.isArray(featureMap)) {
+          const featureKeys = Object.keys(featureMap).sort();
+          for (let i = 0; i < featureKeys.length && rolloutFeatures.length < MAX_ROLLOUT_FEATURES; i++) {
+            const key = featureKeys[i];
+            if (!CONFIG_KEY_RE.test(key)) {
+              continue;
+            }
+            const rawPct = featureMap[key];
+            if (typeof rawPct !== 'number' || !Number.isFinite(rawPct)) {
+              continue;
+            }
+            const pct = clamp(Math.trunc(rawPct), 0, 100);
+            // enabled_devices = 命中该功能灰度的设备数（ab_bucket < pct）。
+            let enabled = 0;
+            if (pct >= ROLLOUT_BUCKETS) {
+              enabled = rolloutDevices;
+            } else {
+              for (let b = 0; b < pct; b++) {
+                enabled += bucketCounts.get(b) || 0;
+              }
+            }
+            rolloutFeatures.push({
+              key,
+              pct,
+              enabled_devices: enabled,
+              total_devices: rolloutDevices,
+              actual_pct: rolloutDevices > 0 ? Math.round((enabled / rolloutDevices) * 1000) / 10 : 0,
+            });
+          }
+        }
+      }
+    } catch {
+    }
+
     const rollout = {
       buckets: rolloutBuckets,
       coverage: rolloutCoverage,
       current_pct: currentRolloutPct,
       devices: rolloutDevices,
+      features: rolloutFeatures,
     };
 
     // A/B：两组设备数 / VV / 崩溃 / 失败，以及核心指标对比（B 相对 A 的 delta%）。
