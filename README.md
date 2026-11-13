@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/API-26-2EA44F?style=flat-square" alt="HarmonyOS API 26">
   <img src="https://img.shields.io/badge/ArkTS-ArkUI-3178C6?style=flat-square" alt="ArkTS/ArkUI">
   <a href="https://github.com/stlin256/HGhub-Harmony/releases"><img src="https://img.shields.io/badge/release-v2.2.0-4D6BFE?style=flat-square" alt="Release"></a>
+  <a href="https://hghub-telemetry.stlin256.workers.dev/stats"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fhghub-telemetry.stlin256.workers.dev%2Fbadge" alt="Devices"></a>
 </p>
 
 <p align="center">
@@ -115,6 +116,20 @@
 | 图片缓存 | 按显示尺寸解码 + 内存 LRU + 磁盘持久化缓存 |
 | 存储 | @ohos.data.preferences + AppStorage |
 | 工程 | DevEco Studio 26.0.0 / HarmonyOS SDK API 26，hvigor CLI 构建 |
+
+## 隐私与匿名统计
+
+App 冷启动时会上报一次**匿名设备标识**，只用于统计「有多少台设备启动过」：
+
+| 收集 | 不收集 |
+|---|---|
+| 本地随机生成的 UUID（与硬件无关） | OAID / IMEI / SN / MAC |
+| App 版本号、设备型号、系统版本 | 账号、手机号、位置 |
+| 首次 / 最近上报时间 | 播放内容、搜索词、行为轨迹 |
+
+- 服务端只保存 UUID 的 **SHA-256**，原始 UUID 不落库、不打日志；IP 仅在内存用于限流
+- 设置页「匿名使用统计」可随时关闭，关闭后立即停止上报
+- 上报实现见 [`services/InstallReporter.ets`](harmony/entry/src/main/ets/services/InstallReporter.ets)，服务端见 [`telemetry-worker/`](telemetry-worker/README.md)
 
 ## 使用须知
 
