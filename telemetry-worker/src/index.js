@@ -213,9 +213,10 @@ async function handleReport(request, env, ctx) {
            disk_app_bytes, disk_cache_bytes, disk_data_bytes,
            soc_start, soc_end, temp_max_c, charging,
            line_primary_ok, line_primary_fail, line_mirror_ok, line_mirror_fail,
-           line_switches, line_latency_avg_ms, line_latency_p90_ms)
+           line_switches, line_latency_avg_ms, line_latency_p90_ms,
+           cpu_pct, cpu_peak_pct, thermal_level, power_mw)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(day, id_hash) DO UPDATE SET
            sessions = daily_stats.sessions + excluded.sessions,
            duration_sec = daily_stats.duration_sec + excluded.duration_sec,
@@ -257,7 +258,11 @@ async function handleReport(request, env, ctx) {
            line_mirror_fail = daily_stats.line_mirror_fail + excluded.line_mirror_fail,
            line_switches = daily_stats.line_switches + excluded.line_switches,
            line_latency_avg_ms = excluded.line_latency_avg_ms,
-           line_latency_p90_ms = excluded.line_latency_p90_ms`
+           line_latency_p90_ms = excluded.line_latency_p90_ms,
+           cpu_pct = excluded.cpu_pct,
+           cpu_peak_pct = MAX(daily_stats.cpu_peak_pct, excluded.cpu_peak_pct),
+           thermal_level = MAX(daily_stats.thermal_level, excluded.thermal_level),
+           power_mw = excluded.power_mw`
       ).bind(
         stats.day, idHash, stats.sessions, stats.durationSec, stats.vv, stats.crash,
         stats.startupP50, stats.startupP90, stats.startupSum, stats.startupCount,
@@ -268,7 +273,8 @@ async function handleReport(request, env, ctx) {
         stats.diskAppBytes, stats.diskCacheBytes, stats.diskDataBytes,
         stats.socStart, stats.socEnd, stats.tempMaxC, stats.charging,
         stats.linePrimaryOk, stats.linePrimaryFail, stats.lineMirrorOk, stats.lineMirrorFail,
-        stats.lineSwitches, stats.lineLatencyAvgMs, stats.lineLatencyP90Ms
+        stats.lineSwitches, stats.lineLatencyAvgMs, stats.lineLatencyP90Ms,
+        stats.cpuPct, stats.cpuPeakPct, stats.thermalLevel, stats.powerMw
       ).run();
     }
   } catch {
@@ -669,6 +675,10 @@ async function handleStats(url, env, preAuthorized) {
               COALESCE(SUM(line_switches), 0) AS line_switches,
               COALESCE(AVG(NULLIF(line_latency_avg_ms, 0)), 0) AS avg_latency,
               COALESCE(AVG(NULLIF(line_latency_p90_ms, 0)), 0) AS avg_latency_p90,
+              COALESCE(AVG(NULLIF(cpu_pct, 0)), 0) AS avg_cpu,
+              COALESCE(MAX(cpu_peak_pct), 0) AS max_cpu_peak,
+              COALESCE(MAX(thermal_level), 0) AS max_thermal,
+              COALESCE(AVG(NULLIF(power_mw, 0)), 0) AS avg_power_mw,
               COALESCE(SUM(page_home), 0) AS page_home,
               COALESCE(SUM(page_search), 0) AS page_search,
               COALESCE(SUM(page_category), 0) AS page_category,
@@ -796,6 +806,10 @@ async function handleStats(url, env, preAuthorized) {
         soc_drain_samples: totals ? totals.soc_drain_samples : 0,
         temp_avg_c: totals ? Math.round(totals.avg_temp * 10) / 10 : 0,
         temp_max_c: totals ? Math.round(totals.max_temp * 10) / 10 : 0,
+        cpu_avg_pct: totals ? Math.round(totals.avg_cpu) : 0,
+        cpu_peak_pct: totals ? totals.max_cpu_peak : 0,
+        thermal_max: totals ? totals.max_thermal : 0,
+        power_mw_avg: totals ? Math.round(totals.avg_power_mw) : 0,
       },
       // 线路指标
       lines: {
@@ -911,6 +925,11 @@ function parseStats(raw) {
     lineSwitches: n(raw.line_switches),
     lineLatencyAvgMs: toSafeInt(raw.line_latency_avg_ms, 0, 0, 600000),
     lineLatencyP90Ms: toSafeInt(raw.line_latency_p90_ms, 0, 0, 600000),
+    // 功耗与性能
+    cpuPct: toSafeInt(raw.cpu_pct, 0, 0, 100),
+    cpuPeakPct: toSafeInt(raw.cpu_peak_pct, 0, 0, 100),
+    thermalLevel: toSafeInt(raw.thermal_level, 0, 0, 7),
+    powerMw: toSafeInt(raw.power_mw, 0, 0, 100000),
   };
 }
 

@@ -612,6 +612,12 @@
     return b + ' B';
   }
 
+  var THERMAL_NAMES = ['冷', '正常', '温', '热', '过热', '警告', '紧急', '逃逸'];
+  function thermalLabel(level){
+    if (!level) return THERMAL_NAMES[0];
+    return THERMAL_NAMES[Math.min(level, 7)];
+  }
+
   function metricItem(k, v, unit, sub){
     return '<div class="metric"><div class="k">' + esc(k) + '</div>' +
       '<div class="v">' + esc(v) + (unit ? '<small>' + esc(unit) + '</small>' : '') + '</div>' +
@@ -631,7 +637,11 @@
       metricItem('磁盘 · 数据', fmtBytes(dv.disk_data_avg_bytes)) +
       metricItem('平均耗电', dv.soc_drain_avg_pct, '%',
         dv.soc_drain_samples ? dv.soc_drain_samples + ' 个未充电会话' : '无有效样本') +
-      metricItem('电池温度', dv.temp_max_c, '°C', '均值 ' + (dv.temp_avg_c || 0) + '°C');
+      metricItem('电池温度', dv.temp_max_c, '°C', '均值 ' + (dv.temp_avg_c || 0) + '°C') +
+      metricItem('CPU 占用', dv.cpu_avg_pct, '%', '峰值 ' + (dv.cpu_peak_pct || 0) + '%') +
+      metricItem('热等级', thermalLabel(dv.thermal_max), '', '0 冷 · 7 极热') +
+      metricItem('瞬时功率', dv.power_mw_avg, 'mW',
+        dv.power_mw_avg ? (dv.power_mw_avg / 1000).toFixed(2) + ' W' : '无样本');
     return box;
   }
 

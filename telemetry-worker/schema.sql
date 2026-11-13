@@ -85,6 +85,11 @@ CREATE TABLE IF NOT EXISTS daily_stats (
   line_switches     INTEGER NOT NULL DEFAULT 0,
   line_latency_avg_ms INTEGER NOT NULL DEFAULT 0,
   line_latency_p90_ms INTEGER NOT NULL DEFAULT 0,
+  -- 功耗与性能
+  cpu_pct        INTEGER NOT NULL DEFAULT 0,
+  cpu_peak_pct   INTEGER NOT NULL DEFAULT 0,
+  thermal_level  INTEGER NOT NULL DEFAULT 0,
+  power_mw       INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, id_hash)
 );
 

@@ -1,4 +1,4 @@
-import { batteryInfo } from '@kit.BasicServicesKit';
+import { batteryInfo, thermal } from '@kit.BasicServicesKit';
 import { storageStatistics } from '@kit.CoreFileKit';
 import { hidebug } from '@kit.PerformanceAnalysisKit';
 import { taskpool } from '@kit.ArkTS';
@@ -22,6 +22,10 @@ const KEY_SOC_END: string = 'dm_soc_end';
 const KEY_TEMP_MAX: string = 'dm_temp_max';
 const KEY_CHARGING: string = 'dm_charging';
 const KEY_LAST_SAMPLE: string = 'dm_last_sample_at';
+const KEY_CPU_PCT: string = 'dm_cpu_pct';
+const KEY_CPU_PEAK_PCT: string = 'dm_cpu_peak_pct';
+const KEY_THERMAL_MAX: string = 'dm_thermal_max';
+const KEY_POWER_MW: string = 'dm_power_mw';
 
 /** 设备指标快照（全部为聚合值，不含任何标识）。 */
 export interface DeviceMetricsSnapshot {
@@ -35,13 +39,21 @@ export interface DeviceMetricsSnapshot {
   socEnd: number;
   tempMax: number;
   charging: boolean;
+  cpuPct: number;
+  cpuPeakPct: number;
+  thermalMax: number;
+  powerMw: number;
 }
 
-/** 在 TaskPool 里读内存（/proc 读取耗时，不能放主线程）。 */
+/**
+ * 在 TaskPool 里读进程指标（/proc 与跨进程调用都耗时，不能放主线程）。
+ * @returns [pssKb, vssKb, cpuPct]  cpuPct 为 0-100 的百分比
+ */
 @Concurrent
-function readMemoryKb(): number[] {
+function readProcessStats(): number[] {
   let pss: number = 0;
   let vss: number = 0;
+  let cpuPct: number = 0;
   try {
     pss = Number(hidebug.getPss());
   } catch (err) {
@@ -50,7 +62,15 @@ function readMemoryKb(): number[] {
     vss = Number(hidebug.getVss());
   } catch (err) {
   }
-  return [pss, vss];
+  try {
+    // getCpuUsage 返回 0-1（0.5 = 50%），这里统一成百分比整数。
+    const usage: number = hidebug.getCpuUsage();
+    if (usage >= 0) {
+      cpuPct = Math.round(usage * 100);
+    }
+  } catch (err) {
+  }
+  return [pss, vss, cpuPct];
 }
 
 /**
@@ -74,6 +94,9 @@ export class DeviceMetrics {
       }
       Prefs.putNumber(KEY_TEMP_MAX, DeviceMetrics.temperature());
       Prefs.putNumber(KEY_CHARGING, DeviceMetrics.charging() ? 1 : 0);
+      // 热等级与瞬时功率：会话起止各采一次。
+      DeviceMetrics.sampleThermal();
+      DeviceMetrics.samplePower();
     } catch (err) {
     }
   }
@@ -90,6 +113,37 @@ export class DeviceMetrics {
         Prefs.putNumber(KEY_TEMP_MAX, temp);
       }
       Prefs.putNumber(KEY_CHARGING, DeviceMetrics.charging() ? 1 : 0);
+      DeviceMetrics.sampleThermal();
+      DeviceMetrics.samplePower();
+    } catch (err) {
+    }
+  }
+
+  /** 采样热等级（取会话内最大值）。 */
+  private static sampleThermal(): void {
+    try {
+      const level: number = thermal.getThermalLevel() as number;
+      if (level >= 0 && level > Prefs.getNumber(KEY_THERMAL_MAX, 0)) {
+        Prefs.putNumber(KEY_THERMAL_MAX, level);
+      }
+    } catch (err) {
+    }
+  }
+
+  /**
+   * 采样瞬时功率：P(mW) = voltage(μV) × current(mA) / 1e6。
+   * 注意 voltage 单位是**微伏**，不是毫伏。
+   */
+  private static samplePower(): void {
+    try {
+      const uv: number = batteryInfo.voltage;
+      const ma: number = batteryInfo.nowCurrent;
+      if (uv > 0 && ma > 0) {
+        const mw: number = Math.round((uv * ma) / 1000000);
+        if (mw > 0 && mw < 100000) {
+          Prefs.putNumber(KEY_POWER_MW, mw);
+        }
+      }
     } catch (err) {
     }
   }
@@ -103,15 +157,16 @@ export class DeviceMetrics {
     }
     Prefs.putNumber(KEY_LAST_SAMPLE, now);
 
-    // 内存：TaskPool 读取，避免主线程卡顿。
-    taskpool.execute(readMemoryKb).then((result: Object) => {
+    // 内存 + CPU：TaskPool 读取，避免主线程卡顿。
+    taskpool.execute(readProcessStats).then((result: Object) => {
       try {
         const pair: number[] = result as number[];
-        if (pair === undefined || pair === null || pair.length < 2) {
+        if (pair === undefined || pair === null || pair.length < 3) {
           return;
         }
         const pss: number = pair[0];
         const vss: number = pair[1];
+        const cpuPct: number = pair[2];
         if (pss > 0) {
           Prefs.putNumber(KEY_PSS_KB, pss);
           if (pss > Prefs.getNumber(KEY_PSS_PEAK_KB, 0)) {
@@ -120,6 +175,12 @@ export class DeviceMetrics {
         }
         if (vss > 0) {
           Prefs.putNumber(KEY_VSS_KB, vss);
+        }
+        if (cpuPct >= 0) {
+          Prefs.putNumber(KEY_CPU_PCT, cpuPct);
+          if (cpuPct > Prefs.getNumber(KEY_CPU_PEAK_PCT, 0)) {
+            Prefs.putNumber(KEY_CPU_PEAK_PCT, cpuPct);
+          }
         }
       } catch (err) {
       }
@@ -157,7 +218,11 @@ export class DeviceMetrics {
       socStart: Prefs.getNumber(KEY_SOC_START, 0),
       socEnd: Prefs.getNumber(KEY_SOC_END, 0),
       tempMax: Prefs.getNumber(KEY_TEMP_MAX, 0),
-      charging: Prefs.getNumber(KEY_CHARGING, 0) === 1
+      charging: Prefs.getNumber(KEY_CHARGING, 0) === 1,
+      cpuPct: Prefs.getNumber(KEY_CPU_PCT, 0),
+      cpuPeakPct: Prefs.getNumber(KEY_CPU_PEAK_PCT, 0),
+      thermalMax: Prefs.getNumber(KEY_THERMAL_MAX, 0),
+      powerMw: Prefs.getNumber(KEY_POWER_MW, 0)
     };
   }
 
@@ -167,6 +232,7 @@ export class DeviceMetrics {
       Prefs.putNumber(KEY_SOC_START, 0);
       Prefs.putNumber(KEY_SOC_END, 0);
       Prefs.putNumber(KEY_TEMP_MAX, 0);
+      Prefs.putNumber(KEY_THERMAL_MAX, 0);
     } catch (err) {
     }
   }

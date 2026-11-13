@@ -91,6 +91,11 @@ interface DayStats {
   lineSwitches: number;
   lineLatencyAvgMs: number;
   lineLatencyP90Ms: number;
+  // 功耗 / 性能
+  cpuPct: number;
+  cpuPeakPct: number;
+  thermalMax: number;
+  powerMw: number;
 }
 
 /**
@@ -405,7 +410,11 @@ export class Analytics {
       lineMirrorFail: ls.mirrorFail,
       lineSwitches: ls.switches,
       lineLatencyAvgMs: ls.latencyAvgMs,
-      lineLatencyP90Ms: ls.latencyP90Ms
+      lineLatencyP90Ms: ls.latencyP90Ms,
+      cpuPct: dm.cpuPct,
+      cpuPeakPct: dm.cpuPeakPct,
+      thermalMax: dm.thermalMax,
+      powerMw: dm.powerMw
     };
   }
 
@@ -514,7 +523,11 @@ export class Analytics {
         'line_mirror_fail': pending.lineMirrorFail,
         'line_switches': pending.lineSwitches,
         'line_latency_avg_ms': pending.lineLatencyAvgMs,
-        'line_latency_p90_ms': pending.lineLatencyP90Ms
+        'line_latency_p90_ms': pending.lineLatencyP90Ms,
+        'cpu_pct': pending.cpuPct,
+        'cpu_peak_pct': pending.cpuPeakPct,
+        'thermal_level': pending.thermalMax,
+        'power_mw': pending.powerMw
       };
       payload['stats'] = stats;
     }
