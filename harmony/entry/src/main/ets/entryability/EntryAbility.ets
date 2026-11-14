@@ -24,6 +24,12 @@ import { RemoteAssets } from '../services/RemoteAssets';
 import { Endpoints } from '../services/Endpoints';
 import { Session } from '../services/Session';
 import { Lines } from '../services/Lines';
+import { ExtensionHost } from '../runtime/ExtensionHost';
+import { ExtensionServices } from '../runtime/ExtensionServices';
+import { registerLocalExtensions } from '../runtime/Extensions.local';
+import {
+  ExtensionApp, ExtensionConfig, ExtensionEvents, ExtensionLines, ExtensionNetwork, ExtensionPreferences, ExtensionSession
+} from '../services/ExtensionFacades';
 import {
   K_APP_ACTIVE, K_BOTTOM_INSET, K_CONTENT_W, K_DARK, K_LEFT_INSET, K_NAV_W, K_RIGHT_INSET, K_TOP_INSET,
   K_WINDOW_H, K_WINDOW_W, UserPrefs
@@ -36,6 +42,8 @@ export default class EntryAbility extends UIAbility {
   private density: number = 3.5;
   /** 冷启动时由服务卡片拉起：等 Prefs/UserPrefs 初始化后再消费。 */
   private pendingFormWant: Want | null = null;
+  /** 扩展服务上下文：启动时创建，前台恢复时复用。 */
+  private extensionServices: ExtensionServices | null = null;
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     this.pendingFormWant = want;
     PerfMark.start('startup');
@@ -143,6 +151,8 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
     runtimeHub.get().onForeground();
+    // 扩展恢复：后台已释放，回到前台重新启动；未注册扩展时为空操作。
+    this.resumeExtensions();
     // 剪贴板快捷拉起：延迟读取，避开首帧；内部有 2 分钟节流与同链接去重。
     setTimeout(() => {
       ClipboardLink.detect().then((videoId: number) => {
@@ -162,6 +172,8 @@ export default class EntryAbility extends UIAbility {
     PlaybackLog.persist();
     // 兜底：播放页可能为了全屏隐藏了状态栏，退到后台时统一走 WindowChrome 串行队列恢复，避免竞态。
     WindowChrome.showStatusBar();
+    // 释放扩展占用（前后台切换复用同一批扩展，前台会重新启动）。
+    this.stopExtensions();
   }
 
   private async initServices(systemDark: boolean): Promise<void> {
@@ -202,8 +214,53 @@ export default class EntryAbility extends UIAbility {
         Api.warmHistory(2).catch(() => {
         });
       }, 800);
+      // 通用扩展：注册构建期注入的实现并注入基础服务；公开构建为空操作。
+      this.startExtensions();
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'service init failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** 启动通用扩展：注册构建期注入的实现并注入基础服务；公开构建为空操作。 */
+  private startExtensions(): void {
+    try {
+      const services = new ExtensionServices();
+      services.provide(ExtensionServices.APP, new ExtensionApp());
+      services.provide(ExtensionServices.CONFIG, new ExtensionConfig());
+      services.provide(ExtensionServices.PREFERENCES, new ExtensionPreferences());
+      services.provide(ExtensionServices.NETWORK, new ExtensionNetwork());
+      services.provide(ExtensionServices.SESSION, new ExtensionSession());
+      services.provide(ExtensionServices.LINES, new ExtensionLines());
+      services.provide(ExtensionServices.EVENTS, new ExtensionEvents());
+      this.extensionServices = services;
+      const host: ExtensionHost = ExtensionHost.get();
+      registerLocalExtensions(host);
+      host.startAll(services);
+      hilog.info(DOMAIN, TAG, 'extensions started count=%{public}d', host.count());
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'extensions start failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** 前台恢复扩展（后台已释放，注册信息保留）。 */
+  private resumeExtensions(): void {
+    const services: ExtensionServices | null = this.extensionServices;
+    if (services === null) {
+      return;
+    }
+    try {
+      ExtensionHost.get().startAll(services);
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'extensions resume failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** 释放扩展占用；后台与退出时调用，重复调用安全。 */
+  private stopExtensions(): void {
+    try {
+      ExtensionHost.get().stopAll();
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'extensions stop failed: %{public}s', JSON.stringify(err));
     }
   }
 
@@ -343,6 +400,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    // 先释放扩展占用，再释放其可能依赖的全局资源。
+    this.stopExtensions();
     // 释放 HTTP 连接池（按 host 复用的 HttpRequest 实例）。
     Net.dispose();
     PowerGuard.release();
