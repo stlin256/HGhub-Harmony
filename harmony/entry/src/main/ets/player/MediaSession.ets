@@ -24,7 +24,7 @@ export interface MediaSessionCallbacks {
  * 设计约束：
  * - 全部调用 try/catch，失败静默降级（不影响播放）；
  * - 首次播放时才创建会话，避免冷启动额外开销；
- * - 不申请后台播放权限（后台播放需 backgroundTaskManager + wantAgent，另行评估）。
+ * - 播放中由 BackgroundPlayback 申请 AUDIO_PLAYBACK 连续任务，退出播放页时释放会话。
  */
 export class MediaSession {
   private static session: avSession.AVSession | undefined = undefined;
