@@ -10,6 +10,13 @@ interface ProfileFile {
   w: number[][];
 }
 
+/** 最近行为事件（读取侧用于实时排序加权，避免 events 表只写不读）。 */
+export interface RecRecentEvent {
+  itemId: number;
+  type: string;
+  ts: number;
+}
+
 /**
  * 推荐数据 RDB 存储（P1 事件层）。
  *
@@ -196,6 +203,37 @@ export class RecStore {
         'INSERT INTO events(item_id, type, weight, ep, progress, bucket, ts) VALUES(?, ?, ?, ?, ?, ?, ?)',
         [itemId, type, weight, ep, progress, bucket, now]);
     });
+  }
+
+  /** 读取最近事件（只读；用于排序实时反馈与诊断，不参与画像写入）。 */
+  static async loadRecentEvents(sinceTs: number, limit: number): Promise<RecRecentEvent[]> {
+    const store = RecStore.store;
+    const out: RecRecentEvent[] = [];
+    if (store === null || limit <= 0) {
+      return out;
+    }
+    try {
+      const rs: relationalStore.ResultSet = await store.querySql(
+        'SELECT item_id, type, ts FROM events WHERE ts >= ? ORDER BY ts DESC LIMIT ?',
+        [sinceTs, limit]);
+      try {
+        while (rs.goToNextRow()) {
+          const itemId: number = rs.getLong(rs.getColumnIndex('item_id'));
+          if (itemId <= 0) {
+            continue;
+          }
+          out.push({
+            itemId: itemId,
+            type: rs.getString(rs.getColumnIndex('type')),
+            ts: rs.getLong(rs.getColumnIndex('ts'))
+          });
+        }
+      } finally {
+        rs.close();
+      }
+    } catch (err) {
+    }
+    return out;
   }
 
   /** 时段桶：0 通勤早 / 1 午休 / 2 通勤晚 / 3 睡前 / 4 其他（与设计文档 §8.10 对齐）。 */

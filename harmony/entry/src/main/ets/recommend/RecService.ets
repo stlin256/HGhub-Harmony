@@ -10,7 +10,7 @@ import { RecProfile } from './RecProfile';
 import { RecDiagnostics, RecEvent, RecProfileEntry } from './RecTypes';
 import { RecSync } from './RecSync';
 import { RecMeta } from './RecMeta';
-import { RecStore } from './RecStore';
+import { RecRecentEvent, RecStore } from './RecStore';
 import { RecModel } from './RecModel';
 
 /**
@@ -28,6 +28,9 @@ export class RecService {
   /** 模型分数缓存（id → sigmoid 点击率）；模型未就绪时为空，pick 回退统计排序。 */
   private static modelScores: Map<number, number> = new Map<number, number>();
   private static scoring: boolean = false;
+  /** 最近 7 天事件形成的实时排序加权（读取 events 表，避免只写不读）。 */
+  private static recentBoosts: Map<number, number> = new Map<number, number>();
+  private static recentLoaded: boolean = false;
 
   static isReady(): boolean {
     return RecService.ready;
@@ -71,6 +74,7 @@ export class RecService {
       }
       const catalogOk: boolean = await RecCatalog.init();
       await RecProfile.loadAsync();
+      await RecService.refreshRecentSignals();
       // 端侧模型：加载 .ms 并预热全量目录打分（异步，不阻塞首屏）。
       const modelOk: boolean = await RecModel.init();
       hilog.info(0x0000, 'HGRec', 'init catalog=%{public}s model=%{public}s',
@@ -142,15 +146,16 @@ export class RecService {
         missing.push(card);
       }
       let score: number;
+      const recent: number = RecService.recentBoosts.get(card.id) ?? 0;
       if (modelScore !== undefined && modelScore !== null) {
         // 模型输出作为主排序分（0..1 点击率），只加极小抖动做探索。
-        score = modelScore * (1 - explore) + Math.random() * explore;
+        score = modelScore * (1 - explore) + Math.random() * explore + recent;
       } else {
         // 模型分数尚未就绪（首次启动/新条目）：用统计分兜底，同时后台补分。
         const affNorm: number = span > 1e-6 ? (raw[i] - affMin) / span : 0.5;
         const pop: number = RecCatalog.popOf(card.id);
         const fresh: number = RecService.freshOf(card);
-        score = 0.55 * affNorm + 0.25 * pop + 0.10 * fresh + explore * Math.random();
+        score = 0.55 * affNorm + 0.25 * pop + 0.10 * fresh + explore * Math.random() + recent;
       }
       const w: number = Math.exp(score / 0.35);
       weights.push(w);
@@ -254,6 +259,71 @@ export class RecService {
       return;
     }
     RecProfile.record(event, id);
+    RecService.noteRecent(event, id);
+    RecService.modelScores.clear();
+  }
+
+  /** 快划：低进度主动退出，写 fast_skip 事件并清除排序缓存。 */
+  static recordFastSkip(id: number): void {
+    if (!RecService.ready || !RecService.enabled() || id <= 0) {
+      return;
+    }
+    RecProfile.record(RecEvent.FAST_SKIP, id);
+    RecService.noteRecent(RecEvent.FAST_SKIP, id);
+    RecService.modelScores.clear();
+  }
+
+  /** 最近事件 → 实时排序加权（启动时从 events 表读取一次）。 */
+  private static async refreshRecentSignals(): Promise<void> {
+    if (RecService.recentLoaded) {
+      return;
+    }
+    RecService.recentLoaded = true;
+    try {
+      const since: number = Date.now() - 7 * 86400 * 1000;
+      const events: RecRecentEvent[] = await RecStore.loadRecentEvents(since, 500);
+      RecService.recentBoosts.clear();
+      for (let i = 0; i < events.length; i++) {
+        RecService.noteRecent(events[i].type, events[i].itemId);
+      }
+      hilog.info(0x0000, 'HGRec', 'recent signals loaded=%{public}d', events.length);
+    } catch (err) {
+      RecService.recentLoaded = false;
+    }
+  }
+
+  private static noteRecent(event: string, id: number): void {
+    if (id <= 0) {
+      return;
+    }
+    let delta: number = 0;
+    if (event === RecEvent.CLICK) {
+      delta = 0.04;
+    } else if (event === RecEvent.PLAY_START) {
+      delta = 0.02;
+    } else if (event === RecEvent.COMPLETE) {
+      delta = 0.06;
+    } else if (event === RecEvent.FAVORITE) {
+      delta = 0.10;
+    } else if (event === RecEvent.UNFAVORITE) {
+      delta = -0.08;
+    } else if (event === RecEvent.FAST_SKIP) {
+      delta = -0.08;
+    } else if (event === RecEvent.IMPRESSION) {
+      delta = -0.003;
+    }
+    if (delta === 0) {
+      return;
+    }
+    const prev: number = RecService.recentBoosts.get(id) ?? 0;
+    let next: number = prev + delta;
+    if (next > 0.5) {
+      next = 0.5;
+    }
+    if (next < -0.5) {
+      next = -0.5;
+    }
+    RecService.recentBoosts.set(id, next);
   }
 
   /** 曝光事件（由列表可见性回调触发，调用方需去重）。 */
@@ -262,6 +332,7 @@ export class RecService {
       return;
     }
     RecProfile.record(RecEvent.IMPRESSION, id);
+    RecService.noteRecent(RecEvent.IMPRESSION, id);
   }
 
   /** 搜索信号：搜索词 → 标签 → 画像 + RDB 事件。 */
@@ -270,6 +341,7 @@ export class RecService {
       return;
     }
     const labels: number[] = RecDict.labelsFromText(keyword, '');
+    RecService.modelScores.clear();
     if (labels.length > 0) {
       RecProfile.recordLabels(labels, 1.5, RecEvent.SEARCH);
     } else {
