@@ -594,7 +594,7 @@ CPU/内存观测：设备端 `top` / `hidumper` 的参数随版本差异较大�
 
 ## 服务端端点注入（编译期）
 
-runtime与runtime走自建服务器，端点（IP / 端口 / 接入密钥）**不入库**：
+远程配置、更新闸门与资源runtime走自建服务器，端点（IP / 端口 / 接入密钥）**不入库**：
 
 ```bash
 # 正式构建：注入真实端点（生成 ServerEndpoint.local.ets，已 gitignore）
