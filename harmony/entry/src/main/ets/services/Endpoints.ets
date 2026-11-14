@@ -1,13 +1,10 @@
 /**
- * 自建服务端端点与接入凭据（唯一入口）。
+ * 自建服务端连接参数与内置 CA 装载（公开构建的通用能力）。
  *
- * - 服务器地址与 128 位接入密钥来自编译期注入（ServerEndpoint），源码/仓库不含明文；
- * - 内置自签 CA（rawfile/hgub_ca.crt）在启动时复制到沙箱，供网络层以 caPath 校验；
- * - 远程配置 / 更新闸门 / 远程资源runtime全部走自建服务器。
- *
- * 隐私边界：本文件只拼接runtime接口 URL，不采集/不携带任何设备信息。
+ * - 服务器地址与接入密钥来自编译期注入（ServerEndpoint），源码/仓库不含明文；
+ * - 内置自签 CA（rawfile/hgub_ca.crt）在启动时复制到沙箱，供网络层以 caPath 校验证书；
+ * - 具体服务端接口路径不进入公开仓库：私有构建由构建期 overlay 补充。
  */
-
 import { fileIo } from '@kit.CoreFileKit';
 import { AppContext } from './AppContext';
 import { ServerEndpoint } from './ServerEndpoint';
@@ -68,28 +65,8 @@ export class Endpoints {
     return ServerEndpoint.host();
   }
 
-  /** 128 位接入密钥（请求头 x-hgub-key）。 */
+  /** 128 位接入密钥（请求头使用）。 */
   static clientKey(): string {
     return ServerEndpoint.clientKey();
-  }
-
-  /** 远程配置runtime。 */
-  static configUrl(): string {
-    return Endpoints.baseUrl() + '/v1/config';
-  }
-
-  /** 更新闸门runtime。 */
-  static updateUrl(): string {
-    return Endpoints.baseUrl() + '/v1/update';
-  }
-
-  /** 远程资源清单。 */
-  static assetsManifestUrl(): string {
-    return Endpoints.baseUrl() + '/v1/assets/manifest';
-  }
-
-  /** 远程资源下载基址（拼 /<name>）。 */
-  static assetsBaseUrl(): string {
-    return Endpoints.baseUrl() + '/v1/assets';
   }
 }

@@ -6,12 +6,12 @@
  *      用于联调时模拟任意runtime值；
  *   2. 用户偏好：用户在设置页**显式设置过**才生效（读 Prefs 的 hasSync），
  *      未设置时返回 undefined，让远程/默认接管——避免「我关了又被远程打开」；
- *   3. 远程runtime：runtime 校验签名后写入（applyRemote）；
+ *   3. 远程runtime：RuntimeConfig 校验签名后写入（applyRemote）；
  *   4. 编译期默认值：本文件 DEFS 里的 defaultValue。
  *
  * 约定：
  * - 所有开关/阈值都必须先在这里注册，业务代码只允许通过 ConfigKey 常量读写，
- *   禁止在业务代码里写死常量（见 docs/harmony/REMOTE-CONFIG-SPEC.md §4、§9）；
+ *   禁止在业务代码里写死常量；
  * - number 类型在写入（远程/本地覆盖）和读取（getNumber）时都会按 min/max 裁剪；
  * - 安全相关项（分析 / 崩溃相关开关）标记 remoteTightenOnly：远程只能关、不能开；
  * - 未知 key 一律忽略/返回 undefined，不抛异常。
@@ -258,11 +258,11 @@ const DEFS: ConfigDef[] = [
 
   /* ── 补充阈值（10 项，P3-D 覆盖率收口）：默认值对齐原硬编码常量 ── */
   threshold(ConfigKey.REMOTE_ASSETS_DELAY_MS, 8000, 1000, 60000,
-    '远程资源拉取启动延迟（毫秒，RemoteAssets.INIT_DELAY_MS）'),
+    '资源刷新启动延迟（毫秒）'),
   threshold(ConfigKey.CLIPBOARD_CHECK_INTERVAL_MS, 120000, 10000, 3600000,
     '剪贴板检查最小间隔（毫秒，ClipboardLink.CHECK_INTERVAL_MS）'),
   threshold(ConfigKey.REMOTE_CONFIG_DELAY_MS, 5000, 1000, 60000,
-    '远程配置拉取启动延迟（毫秒，runtime.INIT_DELAY_MS）'),
+    '配置刷新启动延迟（毫秒）'),
   threshold(ConfigKey.LONG_PRESS_MS, 380, 100, 2000, '播放页长按判定（毫秒，PlayerPage.LONG_PRESS_MS）'),
   threshold(ConfigKey.SEEK_FULL_WIDTH_SECONDS, 120, 10, 600,
     '进度条满宽对应秒数（PlayerPage.SEEK_FULL_WIDTH_SECONDS）'),
@@ -352,7 +352,7 @@ function isHexColor(value: string): boolean {
  * 纯逻辑、无 UI 依赖：只依赖 Prefs（持久化）与 AppStorage（reduce_motion 兼容读取）。
  */
 export class ConfigRegistry {
-  /** 远程runtime层（key → 已校验的值）；由 runtime 写入。 */
+  /** 远程runtime层（key → 已校验的值）；由 RuntimeConfig 写入。 */
   private static remote: Map<string, ConfigValue> = new Map<string, ConfigValue>();
   /** 本地覆盖层（懒加载自 Prefs）。 */
   private static local: Map<string, ConfigValue> | null = null;

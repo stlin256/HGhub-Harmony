@@ -18,6 +18,9 @@
   编译前由 set-extensions.mjs 按本地扩展目录生成扩展注册文件（无本地扩展时为空占位），
   构建结束（含失败）恢复公开占位；公开 clone 没有本地扩展时按空实现编译。
 
+  编译前由 set-overlays.mjs 把 .local/overlays/ 下的私有真实实现按同路径覆盖到公开占位，
+  构建结束（含失败）从备份恢复公开占位；公开 clone 没有 overlay 目录时为空操作。
+
 .EXAMPLE
   .\scripts\harmony\build.ps1
   .\scripts\harmony\build.ps1 -Product default -BuildMode release
@@ -170,6 +173,16 @@ if ($extensionsExit -ne 0) {
   throw "生成扩展注册失败（exit=$extensionsExit）"
 }
 
+# 编译期私有 overlay：有 .local/overlays 时覆盖公开占位，构建结束在 finally 恢复。
+$overlaysScript = Join-Path $PSScriptRoot 'set-overlays.mjs'
+Write-Host '[ext] 应用私有 overlay（set-overlays.mjs）' -ForegroundColor Yellow
+$overlaysOut = & $toolchain.NodeExe $overlaysScript 2>&1
+$overlaysExit = $LASTEXITCODE
+Write-Host (($overlaysOut | Out-String).Trim()) -ForegroundColor DarkGray
+if ($overlaysExit -ne 0) {
+  throw "应用私有 overlay 失败（exit=$overlaysExit）"
+}
+
 Push-Location -LiteralPath $project
 $nativeErrorAction = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
@@ -256,6 +269,16 @@ scripts/harmony/local-sign.ps1（Plan B，仅实验）先产出 unsigned HAP 再
 } finally {
   $ErrorActionPreference = $nativeErrorAction
   Pop-Location
+  # 恢复公开占位（overlay 优先，保证公开文件先回到占位状态）。
+  try {
+    $overlaysRestoreOut = & $toolchain.NodeExe $overlaysScript '--restore' 2>&1
+    Write-Host (($overlaysRestoreOut | Out-String).Trim()) -ForegroundColor DarkGray
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warning "恢复 overlay 占位失败（exit=$LASTEXITCODE），请手动执行 node scripts/harmony/set-overlays.mjs --restore"
+    }
+  } catch {
+    Write-Warning ("恢复 overlay 占位失败：" + $_.Exception.Message)
+  }
   # 恢复公开扩展占位并清理构建期生成目录，避免生成物被误提交。
   try {
     $extensionsRestoreOut = & $toolchain.NodeExe $extensionsScript '--restore' 2>&1
