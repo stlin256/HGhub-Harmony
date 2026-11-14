@@ -22,9 +22,29 @@ export class ShareLink {
   /** 分享链接固定使用的规范域名（所有用户的内置固定线路里都有）。 */
   static readonly CANONICAL_HOST: string = UPSTREAM_CANONICAL_HOST;
 
+  /** 规范域名未配置时回退固定线路/当前线路，保证本地构建分享可用。 */
+  private static effectiveHost(): string {
+    if (ShareLink.CANONICAL_HOST.length > 0) {
+      return ShareLink.CANONICAL_HOST;
+    }
+    try {
+      const fixed = Lines.fixed();
+      for (let i = 0; i < fixed.length; i++) {
+        const host: string = Lines.hostOfUrl(fixed[i].url);
+        if (host.length > 0) {
+          return host;
+        }
+      }
+      return Lines.hostOfUrl(Lines.current());
+    } catch (err) {
+      return '';
+    }
+  }
+
   /** 生成规范分享链接（与当前线路无关）。 */
   static canonicalUrl(videoId: number): string {
-    return 'https://' + ShareLink.CANONICAL_HOST + '/video/' + videoId + '/';
+    const host: string = ShareLink.effectiveHost();
+    return host.length > 0 ? 'https://' + host + '/video/' + videoId + '/' : '';
   }
 
   /**
@@ -33,7 +53,7 @@ export class ShareLink {
    */
   static async share(videoId: number, title: string): Promise<boolean> {
     const url: string = ShareLink.canonicalUrl(videoId);
-    if (videoId <= 0) {
+    if (videoId <= 0 || url.length === 0) {
       return false;
     }
     if (ShareLink.canSystemShare()) {
@@ -83,7 +103,7 @@ export class ShareLink {
   /** 当前线路是否就是规范域名（用于提示文案）。 */
   static onCanonicalHost(): boolean {
     try {
-      return Lines.hostOfUrl(Lines.current()) === ShareLink.CANONICAL_HOST;
+      return Lines.hostOfUrl(Lines.current()) === ShareLink.effectiveHost();
     } catch (err) {
       return false;
     }

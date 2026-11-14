@@ -91,6 +91,29 @@ export class ClipboardLink {
     return id > 0 ? id : 0;
   }
 
+  /** 注入白名单为空时回退固定线路/当前线路，保证本地构建剪贴板可用。 */
+  private static effectiveHosts(): string[] {
+    if (ClipboardLink.BUILTIN_HOSTS.length > 0) {
+      return ClipboardLink.BUILTIN_HOSTS;
+    }
+    const hosts: string[] = [];
+    try {
+      const fixed = Lines.fixed();
+      for (let i = 0; i < fixed.length; i++) {
+        const host: string = Lines.hostOfUrl(fixed[i].url);
+        if (host.length > 0) {
+          hosts.push(host);
+        }
+      }
+      const current: string = Lines.hostOfUrl(Lines.current());
+      if (current.length > 0) {
+        hosts.push(current);
+      }
+    } catch (err) {
+    }
+    return hosts;
+  }
+
   private static hostAllowed(url: string): boolean {
     let host: string = '';
     try {
@@ -109,8 +132,9 @@ export class ClipboardLink {
     } catch (err) {
     }
     // 白名单未就绪（启动早期）：退回内置固定域名。
-    for (let i = 0; i < ClipboardLink.BUILTIN_HOSTS.length; i++) {
-      if (host === ClipboardLink.BUILTIN_HOSTS[i]) {
+    const builtin: string[] = ClipboardLink.effectiveHosts();
+    for (let i = 0; i < builtin.length; i++) {
+      if (host === builtin[i]) {
         return true;
       }
     }
