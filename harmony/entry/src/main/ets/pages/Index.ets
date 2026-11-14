@@ -13,7 +13,7 @@ import { Prefs } from '../services/Prefs';
 import { Api } from '../services/Api';
 import { ContinuationState, ContinuePayload } from '../services/ContinuationState';
 import { UpdateChecker } from '../services/UpdateChecker';
-import { runtimeHub } from '../services/runtimeHub';
+import { RuntimeHooksHub } from '../services/RuntimeHooksHub';
 import { ClipboardLink } from '../services/ClipboardLink';
 import { emptyNotice, NoticeData, RemoteNotice } from '../services/RemoteNotice';
 import { UpdateInfo } from '../models/Types';
@@ -184,7 +184,7 @@ struct Index {
         return;
       }
       this.activeIndex = index;
-      runtimeHub.get().countPage(Index.pageNameOf(index));
+      RuntimeHooksHub.get().countPage(Index.pageNameOf(index));
       try {
         this.tabsController.changeIndex(position);
       } catch (err) {
@@ -638,7 +638,7 @@ struct Index {
       // 先更新高亮，再交给 controller 做 240ms 页面切换动画（位置按可见 Tab 列表映射）。
       this.activeIndex = index;
       this.tabsController.changeIndex(position);
-      runtimeHub.get().countPage(Index.pageNameOf(index));
+      RuntimeHooksHub.get().countPage(Index.pageNameOf(index));
     })
   }
 

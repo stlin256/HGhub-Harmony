@@ -7,7 +7,7 @@ import { K_LINE_BASE, Lines } from '../services/Lines';
 import { Ipv6Preference } from '../services/Ipv6Preference';
 import { PowerGuard } from '../services/PowerGuard';
 import { ImageCache } from '../services/ImageCache';
-import { runtimeHub } from '../services/runtimeHub';
+import { RuntimeHooksHub } from '../services/RuntimeHooksHub';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
@@ -110,7 +110,7 @@ export struct SettingsPage {
     this.superResolution = UserPrefs.superResolution();
     this.multiSource = UserPrefs.multiSource();
     this.ipv6Prefer = Ipv6Preference.enabled();
-    this.crashCount = runtimeHub.get().crashRecordCount();
+    this.crashCount = RuntimeHooksHub.get().crashRecordCount();
     this.startupMs = PerfMark.lastStartupMs();
     // 只在进入设置页时统计一次占用空间（内存+磁盘合计），build 期间不再同步扫磁盘。
     this.cacheText = ImageCache.totalText();
@@ -273,10 +273,10 @@ export struct SettingsPage {
     }
     this.exporting = true;
     try {
-      const path: string = await runtimeHub.get().exportDiagnostics();
+      const path: string = await RuntimeHooksHub.get().exportDiagnostics();
       if (path.length > 0) {
         UiBus.toastOk('诊断日志已导出');
-      } else if (runtimeHub.isNoop()) {
+      } else if (RuntimeHooksHub.isNoop()) {
         UiBus.toast('当前构建未启用诊断导出');
       } else {
         UiBus.toast('已取消导出');

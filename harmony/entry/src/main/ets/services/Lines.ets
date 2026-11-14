@@ -2,7 +2,7 @@ import { JSON } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Net, RawText } from './Net';
 import { Prefs } from './Prefs';
-import { runtimeHub } from './runtimeHub';
+import { RuntimeHooksHub } from './RuntimeHooksHub';
 import { Session } from './Session';
 import { LineItem, LineMirrors, LineProbe } from '../models/Types';
 import { parseHttpsUrl } from '../utils/Security';
@@ -306,7 +306,7 @@ export class Lines {
     hilog.info(0x0000, 'HGLine', 'line switched: %{public}s -> %{public}s', previous, next);
     if (previous !== next) {
       // 线路切换事件：只记次数，不记具体域名。
-      runtimeHub.get().recordLineSwitch();
+      RuntimeHooksHub.get().recordLineSwitch();
       Session.clear();
     }
     return next;

@@ -18,12 +18,12 @@
  *
  * 扩展能力（SPEC §12-§15 / C7-C10）：
  * - 变更通知：applyRemote / setLocalOverride / clearLocalOverride 导致值实际变化时，
- *   构造 runtimeConfigApply 交给 runtimeHub 当前实现（公开构建为空实现，直接丢弃）；
+ *   构造 RuntimeConfigApply 交给 RuntimeHooksHub 当前实现（公开构建为空实现，直接丢弃）；
  *   相同值重复runtime不通知；
  * - ui / settings / notices 段原样保留，分别通过 uiColor / uiSize / entryVisible /
  *   settingsSchema / notices 读取，供 P10（通知）/ P11（设置页远程化）/ P12（UI runtime）消费。
  *
- * 隐私边界：本文件是纯内存合并逻辑，不联网、不读设备标识、不runtime任何值；
+ * 隐私边界：本文件是纯内存合并逻辑，不联网、不读设备标识、不外发任何值；
  * 用户偏好层只读本地 Prefs（键名与 UserPrefs 持久化的键一致），不把值发给服务端；
  * 变更通知只在内存中转发给当前实现，不在本地留存。
  *
@@ -33,8 +33,8 @@
  */
 
 import { Prefs } from './Prefs';
-import { runtimeConfigApply } from './runtime';
-import { runtimeHub } from './runtimeHub';
+import { RuntimeConfigApply } from './RuntimeHooks';
+import { RuntimeHooksHub } from './RuntimeHooksHub';
 
 /** 配置值类型：布尔开关 / 数值阈值 / 字符串枚举。 */
 export type ConfigValue = boolean | number | string;
@@ -723,7 +723,7 @@ export class ConfigRegistry {
 
   /** 通知当前实现「某个配置项生效值发生了变化」（公开构建为空实现，直接丢弃）。 */
   private static notifyChange(key: string, oldValue: ConfigValue, newValue: ConfigValue, source: string): void {
-    const change: runtimeConfigApply = {
+    const change: RuntimeConfigApply = {
       configId: ConfigRegistry.runtimeId,
       configVersion: ConfigRegistry.runtimeVersion,
       key: key,
@@ -732,7 +732,7 @@ export class ConfigRegistry {
       source: source,
       appliedAt: Math.floor(Date.now() / 1000)
     };
-    runtimeHub.get().onConfigApplied(change);
+    RuntimeHooksHub.get().onConfigApplied(change);
   }
 
   /** 三层合并：本地覆盖 > 用户偏好 > 远程 > 默认。 */

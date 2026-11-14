@@ -14,7 +14,7 @@
  * - 二级页 link / image 的 URL 只接受 https（走 utils/Security 的系统 URL 解析）；
  * - 无远程 schema 时 merge(null) 与编译期默认完全一致（不改变任何现有行为）。
  *
- * 隐私边界：本文件是纯数据描述与校验逻辑，不联网、不读设备标识、不runtime任何内容。
+ * 隐私边界：本文件是纯数据描述与校验逻辑，不联网、不读设备标识、不外发任何内容。
  */
 
 import { HgSize, HgSpace } from '../design/HgTokens';

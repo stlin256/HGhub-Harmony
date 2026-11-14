@@ -19,8 +19,8 @@ import { PlayerService, SessionMeta } from '../player/PlayerService';
 import { PlayerSeekPolicy } from '../player/PlayerSeekPolicy';
 import { ContinuationState } from '../services/ContinuationState';
 import { PiPController } from '../player/PiPController';
-import { runtimeHub } from '../services/runtimeHub';
-import { runtimeAction } from '../services/runtime';
+import { RuntimeHooksHub } from '../services/RuntimeHooksHub';
+import { RuntimeAction } from '../services/RuntimeHooks';
 import { ShareLink } from '../services/ShareLink';
 import {
   AVCastPicker, AVCastPickerColorMode, AVCastPickerState, AVCastPickerStyle
@@ -49,7 +49,7 @@ import { AppChannel } from '../utils/AppChannel';
 
 const RATES: number[] = [1, 1.25, 1.5, 2];
 const CHROME_HIDE_MS: number = 3000;
-/** 顶部安全区兜底（vp）：topInset runtime 0 时保证标题/返回键不与状态栏/挖孔重叠。 */
+/** 顶部安全区兜底（vp）：topInset 为 0 时保证标题/返回键不与状态栏/挖孔重叠。 */
 const TOP_SAFE_FALLBACK: number = HgSpace.xxl;
 /** 横屏视频「适应」时，视频中心所在屏幕高度比例（略高于正中心，给底部控件留空间）。 */
 // @config-exempt: UI 布局比例（横屏视频中心位置），非业务阈值
@@ -116,7 +116,7 @@ export struct PlayerPage {
   @Consume('hgNavStack') navStack: NavPathStack;
   @StorageProp(K_TOP_INSET) topInset: number = 0;
   @StorageProp(K_BOTTOM_INSET) bottomInset: number = 20;
-  /** 横屏左右安全区（vp，刘海/挖孔/折叠屏，EntryAbility runtime）：竖屏为 0，chrome 在此之上内缩。 */
+  /** 横屏左右安全区（vp，刘海/挖孔/折叠屏，EntryAbility 写入）：竖屏为 0，chrome 在此之上内缩。 */
   @StorageProp(K_LEFT_INSET) leftInset: number = 0;
   @StorageProp(K_RIGHT_INSET) rightInset: number = 0;
   /** 窗口宽高（vp；全屏播放页时两者等于窗口尺寸）：宽屏评论区侧栏的展开判定与面板宽度。 */
@@ -396,7 +396,7 @@ export struct PlayerPage {
 
   aboutToAppear(): void {
     // 页面访问计数（由实现方决定是否采集）。
-    runtimeHub.get().countPage('player');
+    RuntimeHooksHub.get().countPage('player');
     let ids = this.params.videoIds;
     if (ids === undefined || ids === null || ids.length === 0) {
       ids = [0];
@@ -1310,7 +1310,7 @@ export struct PlayerPage {
   }
 
   private switchEpisode(ep: number): void {
-    runtimeHub.get().recordAction(runtimeAction.EP_SWITCH);
+    RuntimeHooksHub.get().recordAction(RuntimeAction.EP_SWITCH);
     this.sheetVisible = false;
     if (ep < 1 || ep === this.ep) {
       return;
@@ -1364,7 +1364,7 @@ export struct PlayerPage {
 
   /* ── 互动 ─────────────────────────────────────────── */
   private toggleLike(): void {
-    runtimeHub.get().recordAction(this.liked ? runtimeAction.UNLIKE : runtimeAction.LIKE);
+    RuntimeHooksHub.get().recordAction(this.liked ? RuntimeAction.UNLIKE : RuntimeAction.LIKE);
     const id = this.currentId();
     if (id <= 0) {
       return;
@@ -1403,7 +1403,7 @@ export struct PlayerPage {
   }
 
   private toggleFav(): void {
-    runtimeHub.get().recordAction(this.faved ? runtimeAction.UNFAV : runtimeAction.FAV);
+    RuntimeHooksHub.get().recordAction(this.faved ? RuntimeAction.UNFAV : RuntimeAction.FAV);
     const id = this.currentId();
     if (id <= 0) {
       return;
@@ -1484,7 +1484,7 @@ export struct PlayerPage {
     if (id <= 0) {
       return;
     }
-    runtimeHub.get().recordAction(runtimeAction.SHARE);
+    RuntimeHooksHub.get().recordAction(RuntimeAction.SHARE);
     // 系统分享总开关（远程 kill switch）：关闭时直接回退「复制链接」，不调起系统分享面板。
     const shareEnabled: boolean = ConfigRegistry.getBool(ConfigKey.SYSTEM_SHARE_ENABLED);
     const shown: boolean = shareEnabled ? await ShareLink.share(id, this.titleText()) : false;
@@ -1607,7 +1607,7 @@ export struct PlayerPage {
     this.castPanelOpen = open;
     if (open) {
       // 投播面板出现即记一次投播动作（不记投到哪台设备）。
-      runtimeHub.get().recordAction(runtimeAction.CAST);
+      RuntimeHooksHub.get().recordAction(RuntimeAction.CAST);
       if (this.hideTimer >= 0) {
         clearTimeout(this.hideTimer);
         this.hideTimer = -1;
@@ -1657,7 +1657,7 @@ export struct PlayerPage {
   }
 
   private changeRate(rate: number): void {
-    runtimeHub.get().recordAction(runtimeAction.RATE);
+    RuntimeHooksHub.get().recordAction(RuntimeAction.RATE);
     this.rate = rate;
     this.speedLocked = false;
     this.speedBoost = false;
@@ -2454,7 +2454,7 @@ export struct PlayerPage {
 
   /** 进入画中画：把当前播放的 XComponent 交给系统 PiP 窗口。 */
   private async enterPiP(): Promise<void> {
-    runtimeHub.get().recordAction(runtimeAction.PIP);
+    RuntimeHooksHub.get().recordAction(RuntimeAction.PIP);
     if (!PiPController.isEnabled()) {
       UiBus.toast('系统未开启画中画');
       return;
@@ -2539,7 +2539,7 @@ export struct PlayerPage {
   }
 
   /**
-   * 顶部安全区：本机 setWindowLayoutFullScreen(true) 下 topInset 可能runtime 0，
+   * 顶部安全区：本机 setWindowLayoutFullScreen(true) 下 topInset 可能记录 0，
    * 用最小内边距兜底，保证标题/返回键不被状态栏或挖孔压住（隐藏状态栏后也留有呼吸空间）。
    */
   private topSafePad(): number {
@@ -2547,7 +2547,7 @@ export struct PlayerPage {
   }
 
   /**
-   * 底部安全区（手势条）：bottomInset runtime 0 时兜底 20vp。
+   * 底部安全区（手势条）：bottomInset 为 0 时兜底 20vp。
    * 底栏、相邻页底部信息、锁定图标、评论侧栏、面板内容统一用它，保证竖屏/横屏都不贴手势条。
    */
   private bottomSafePad(): number {

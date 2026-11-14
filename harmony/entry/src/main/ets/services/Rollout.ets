@@ -7,7 +7,7 @@
  *   abGroup  = bucket % groups                                    → A/B 分组下标
  *
  * 隐私边界：
- * - 只对本地随机生成的 install_id 做 SHA-256，不runtime原始 ID，不读取 OAID / IMEI / SN / MAC；
+ * - 只对本地随机生成的 install_id 做 SHA-256，不外发原始 ID，不读取 OAID / IMEI / SN / MAC；
  * - 分桶结果只在内存里参与判断，不落盘、不打日志；
  * - 服务端只会看到 bucket（0-99），无法反推 install_id。
  *

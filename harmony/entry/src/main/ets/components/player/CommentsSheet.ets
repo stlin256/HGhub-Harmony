@@ -8,8 +8,8 @@ import { HgMotion } from '../../design/HgMotion';
 import { HgPressable } from '../HgPressable';
 import { HgSkeletonBlock } from '../HgSkeletonBlock';
 import { I18n } from '../../utils/I18n';
-import { runtimeHub } from '../../services/runtimeHub';
-import { runtimeAction } from '../../services/runtime';
+import { RuntimeHooksHub } from '../../services/RuntimeHooksHub';
+import { RuntimeAction } from '../../services/RuntimeHooks';
 
 function avatarText(nickname: string): string {
   if (nickname.length === 0) {
@@ -148,7 +148,7 @@ export struct CommentsSheet {
   }
 
   private async send(): Promise<void> {
-    runtimeHub.get().recordAction(runtimeAction.COMMENT);
+    RuntimeHooksHub.get().recordAction(RuntimeAction.COMMENT);
     const text = this.draft.trim();
     if (text.length === 0 || this.sending) {
       return;

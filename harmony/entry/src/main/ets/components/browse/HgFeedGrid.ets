@@ -6,7 +6,7 @@ import { HgMotion } from '../../design/HgMotion';
 import { HgGrid } from '../../design/HgGrid';
 
 /**
- * 主页同款多列瀑布流（Grid）：Refresh + 横跨整行的 Header/Footer + LazyForEach + 曝光runtime + 列数/宽屏留白。
+ * 主页同款多列瀑布流（Grid）：Refresh + 横跨整行的 Header/Footer + LazyForEach + 曝光记录 + 列数/宽屏留白。
  * 从 HomePage 抽出作为所有「多列视频海报流」的复用实现：调用方只传数据源、列数、留白与回调，
  * 卡片统一使用主页 HgPosterCard，页面差异通过列数、padding、Header/Footer、cachedCount 等微调。
  */
@@ -41,7 +41,7 @@ export struct HgFeedGrid {
   /** 滚动索引回调（主页用 last 判断提前加载）。 */
   onScrollLast: (last: number) => void = () => {};
   onRefresh: () => void = () => {};
-  /** 曝光runtime：可见面积 ≥50% 时由宿主决定是否记录。 */
+  /** 曝光记录：可见面积 ≥50% 时由宿主决定是否记录。 */
   onImpression: (videoId: number) => void = () => {};
 
   @Builder
@@ -87,7 +87,7 @@ export struct HgFeedGrid {
             }
             // 触底追加的新条目：appear 时 fast 淡入（只作用于新增项）。
             .transition(HgMotion.appendTransition())
-            // 曝光事件：可见面积 ≥50% 时runtime（去重逻辑由宿主负责，供画像/RDB 事件层使用）。
+            // 曝光事件：可见面积 ≥50% 时记录（去重逻辑由宿主负责，供画像/RDB 事件层使用）。
             .onVisibleAreaChange([0.0, 0.5, 1.0], (isExpanding: boolean, ratio: number) => {
               if (ratio >= 0.5) {
                 this.onImpression(item.id);

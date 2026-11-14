@@ -6,7 +6,7 @@ const KEY_LAST_STARTUP_AT: string = 'perf_last_startup_at';
 /**
  * 轻量性能打点：记录启动耗时等关键节点，结果落本地 preferences。
  *
- * 只做本地观测，不runtime；任何异常静默。
+ * 只做本地观测，不外发；任何异常静默。
  */
 export class PerfMark {
   private static marks: Map<string, number> = new Map<string, number>();

@@ -12,7 +12,7 @@
  * - link 走 Api.openUrl（内部只放行 http/https）；image 的 src 已在校验层限定 https；
  * - 无runtime / pageId 不存在时显示空态，不崩溃、不发起任何网络请求。
  *
- * 隐私边界：本页只展示远程runtime的静态内容，不读设备标识、不runtime任何内容。
+ * 隐私边界：本页只展示远程runtime的静态内容，不读设备标识、不外发任何内容。
  */
 
 import { Api } from '../services/Api';

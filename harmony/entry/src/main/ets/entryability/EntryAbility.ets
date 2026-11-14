@@ -8,7 +8,7 @@ import { Api } from '../services/Api';
 import { UserListPrefetch } from '../services/UserListPrefetch';
 import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { LineAuto } from '../services/LineAuto';
-import { runtimeHub } from '../services/runtimeHub';
+import { RuntimeHooksHub } from '../services/RuntimeHooksHub';
 import { PowerGuard } from '../services/PowerGuard';
 import { PlaybackLog } from '../player/PlaybackLog';
 import { ClipboardLink } from '../services/ClipboardLink';
@@ -150,7 +150,7 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
-    runtimeHub.get().onForeground();
+    RuntimeHooksHub.get().onForeground();
     // 扩展恢复：后台已释放，回到前台重新启动；未注册扩展时为空操作。
     this.resumeExtensions();
     // 剪贴板快捷拉起：延迟读取，避开首帧；内部有 2 分钟节流与同链接去重。
@@ -167,7 +167,7 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, false);
     // 结算本次前台时长与会话结束快照（由实现方决定是否采集）。
-    runtimeHub.get().onBackground();
+    RuntimeHooksHub.get().onBackground();
     // 播放诊断日志落盘（避免频繁写 preferences，只在后台时写一次）。
     PlaybackLog.persist();
     // 兜底：播放页可能为了全屏隐藏了状态栏，退到后台时统一走 WindowChrome 串行队列恢复，避免竞态。
@@ -192,18 +192,18 @@ export default class EntryAbility extends UIAbility {
       WidgetRefresher.requestRefresh(500);
       hilog.info(DOMAIN, TAG, 'services ready, base=%{public}s', Lines.current());
       // 稳定性监听：异常/崩溃事件由实现方决定如何处理（公开构建为空操作）。
-      runtimeHub.get().initStabilityWatch();
+      RuntimeHooksHub.get().initStabilityWatch();
       // 电源守卫：跟踪省电模式与电量，供 AI 超分自动降级。
       PowerGuard.init();
       // 播放诊断日志：恢复上次缓冲（导出诊断包时用）。
       PlaybackLog.restore();
-      // 会话开始：实现方自行决定采集/runtime时机（公开构建为空操作）。
-      runtimeHub.get().onLaunch();
+      // 会话开始：实现方自行决定采集/记录时机（公开构建为空操作）。
+      RuntimeHooksHub.get().onLaunch();
       // 上次会话遗留的异常记录批量送出（公开构建为空操作）。
-      runtimeHub.get().reportPendingCrashes();
+      RuntimeHooksHub.get().reportPendingCrashes();
       // 设备指标采样（实现方负责节流与异步；公开构建为空操作）。
       setTimeout(() => {
-        runtimeHub.get().sampleDeviceMetrics();
+        RuntimeHooksHub.get().sampleDeviceMetrics();
       }, 8000);
       // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
       LineAuto.init();
@@ -301,10 +301,10 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, TAG, 'Main page loaded');
-      // 启动耗时：onCreate → 首帧加载完成（本地记录；是否runtime由实现方决定）。
+      // 启动耗时：onCreate → 首帧加载完成（本地记录；是否记录由实现方决定）。
       const startupMs: number = PerfMark.end('startup');
       PerfMark.recordStartup(startupMs);
-      runtimeHub.get().recordStartup(startupMs);
+      RuntimeHooksHub.get().recordStartup(startupMs);
       this.setupKeyboardAvoidMode(windowStage);
       this.setupWindow(windowStage);
       // 收藏/历史详情预取：延迟约 1.2s 后台预热（内部不阻塞），打开「我的」直接命中共享详情缓存。

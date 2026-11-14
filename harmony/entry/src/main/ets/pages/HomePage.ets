@@ -387,7 +387,7 @@ export struct HomePage {
   private catalogInjectTimer: number = -1;
   /** 注入重试次数上限：RecService 载入失败时不要无限轮询。 */
   private catalogInjectAttempts: number = 0;
-  /** 本次会话已runtime曝光的条目（避免滚动抖动重复计数）。 */
+  /** 本次会话已记录曝光的条目（避免滚动抖动重复计数）。 */
   private impressedIds: Set<number> = new Set<number>();
   /* ── 随机池（仅「全部/为你推荐」feed 模式生效） ──────────────────────
    * pool 是按 id 去重的候选内容池；display（this.items）永远从 pool 里随机抽取。
@@ -919,7 +919,7 @@ export struct HomePage {
     this.prefetchCovers(list, list.length, 0);
   }
 
-  /** 曝光去重runtime（上限 500 条，超出清空重来，避免长会话内存膨胀）。 */
+  /** 曝光去重记录（上限 500 条，超出清空重来，避免长会话内存膨胀）。 */
   private recordImpression(id: number): void {
     if (id <= 0 || this.impressedIds.has(id)) {
       return;

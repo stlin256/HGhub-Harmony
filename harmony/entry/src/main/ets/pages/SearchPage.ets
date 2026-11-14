@@ -14,8 +14,8 @@ import { K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../state/UserPrefs
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
 import { I18n } from '../utils/I18n';
-import { runtimeHub } from '../services/runtimeHub';
-import { runtimeAction } from '../services/runtime';
+import { RuntimeHooksHub } from '../services/RuntimeHooksHub';
+import { RuntimeAction } from '../services/RuntimeHooks';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 
 /** idle 热榜展示条数（前 10 条）。 */
@@ -177,7 +177,7 @@ export struct SearchPage {
   }
 
   private submit(text: string): void {
-    runtimeHub.get().recordAction(runtimeAction.SEARCH);
+    RuntimeHooksHub.get().recordAction(RuntimeAction.SEARCH);
     RecService.recordSearch(text);
     const kw = text.trim();
     if (kw.length === 0) {

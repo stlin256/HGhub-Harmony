@@ -7,7 +7,7 @@ import { parseHttpsUrl, redactSensitive } from '../utils/Security';
 import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Endpoints } from './Endpoints';
 import { Ipv6Preference } from './Ipv6Preference';
-import { runtimeHub } from './runtimeHub';
+import { RuntimeHooksHub } from './RuntimeHooksHub';
 
 /** 与原项目一致的桌面 Chrome UA。 */
 export const USER_AGENT: string =
@@ -483,7 +483,7 @@ export class Net {
       try {
         const result = await Net.edgeOnce(url, headers, method, path, body, attempt);
         // 线路请求结果：只记成败，具体分类由实现方判定，不记录域名。
-        runtimeHub.get().recordLineRequest(base, true);
+        RuntimeHooksHub.get().recordLineRequest(base, true);
         return result;
       } catch (err) {
         const message = Net.errorText(err);
@@ -492,7 +492,7 @@ export class Net {
         lastError = message;
         const final: boolean = !Net.retryable(message) || attempt + 1 >= attempts;
         if (final) {
-          runtimeHub.get().recordLineRequest(base, false);
+          RuntimeHooksHub.get().recordLineRequest(base, false);
           throw new Error(message);
         }
         await delay(350 * (attempt + 1));
@@ -523,13 +523,13 @@ export class Net {
     } catch (err) {
       // 无响应（DNS/连接/超时）：statusCode 记 0，网络层已把错误归一成可读文本。
       const message: string = Net.errorText(err);
-      runtimeHub.get().recordHttpResult(0, Date.now() - startedAt, message.indexOf('超时') >= 0,
+      RuntimeHooksHub.get().recordHttpResult(0, Date.now() - startedAt, message.indexOf('超时') >= 0,
         attempt > 0);
       throw new Error(message);
     }
     const response = raw as RawText;
     // 业务接口 HTTP 结果（含 4xx/5xx）：只记状态码/耗时/是否重试，不含 URL 与域名。
-    runtimeHub.get().recordHttpResult(response.code, Date.now() - startedAt, false, attempt > 0);
+    RuntimeHooksHub.get().recordHttpResult(response.code, Date.now() - startedAt, false, attempt > 0);
     if (response.code === 401 || response.code === 403) {
       throw new Error('401');
     }
