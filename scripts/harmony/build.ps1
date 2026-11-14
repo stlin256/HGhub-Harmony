@@ -47,6 +47,26 @@ if (-not $LogDir) {
 }
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
+# 编译期注入：上游域名/线路列表/分享域名等全部来自本地配置（不入库）。
+$localCfgPath = Join-Path $repoRoot 'scripts\harmony\.local\local-config.json'
+$localGenOut = & $toolchain.NodeExe (Join-Path $PSScriptRoot 'set-local.mjs') 2>&1
+$localGenExit = $LASTEXITCODE
+Write-Host (($localGenOut | Out-String).Trim()) -ForegroundColor DarkGray
+if ($localGenExit -ne 0) {
+  throw "生成本地注入常量失败（exit=$localGenExit）"
+}
+if (Test-Path -LiteralPath $localCfgPath) {
+  try {
+    $localCfg = [IO.File]::ReadAllText($localCfgPath) | ConvertFrom-Json
+    if (-not $ServerIp -and $localCfg.server -and $localCfg.server.ip) { $ServerIp = [string]$localCfg.server.ip }
+    if ($ServerPort -le 0 -and $localCfg.server -and $localCfg.server.port) { $ServerPort = [int]$localCfg.server.port }
+    if (-not $ServerKey -and $localCfg.server -and $localCfg.server.key) { $ServerKey = [string]$localCfg.server.key }
+    Write-Host ('[local] 已读取本地配置：' + $localCfgPath) -ForegroundColor DarkGray
+  } catch {
+    Write-Warning '本地配置解析失败，继续使用参数/已有端点'
+  }
+}
+
 # 编译期注入分发渠道：每次构建写入 BuildChannel.local.ets（不入库）。
 $channelOut = Join-Path $repoRoot 'harmony\entry\src\main\ets\utils\BuildChannel.local.ets'
 if ($Channel) {

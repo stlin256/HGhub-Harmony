@@ -15,6 +15,7 @@ import { EpisodeSheet } from '../components/player/EpisodeSheet';
 import { fmt, fmtTime } from '../utils/Format';
 import { I18n } from '../utils/I18n';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
+import { ShareLink } from '../services/ShareLink';
 
 /** 详情页选集预览条数。 */
 // @config-exempt: 未注册（ConfigRegistry 无 episode_preview_count）
@@ -380,7 +381,7 @@ export struct VideoDetailPage {
   private async copyLink(): Promise<void> {
     try {
       const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN,
-        'https://example.invalid' + this.params.id + '/');
+        ShareLink.canonicalUrl(this.params.id));
       await pasteboard.getSystemPasteboard().setData(data);
       UiBus.toastOk('链接已复制');
     } catch (err) {

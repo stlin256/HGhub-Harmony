@@ -3,6 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Lines } from './Lines';
 import { Prefs } from './Prefs';
+import { UPSTREAM_CLIPBOARD_HOSTS } from './LocalUpstream.local';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGClip';
@@ -21,7 +22,7 @@ const KEY_LAST_LINK: string = 'clip_last_link';
 export class ClipboardLink {
   /** 内置固定域名（白名单未就绪时的兜底）。 */
   // @config-exempt: 安全白名单，远程不可下发（防钓鱼链接借 App 拉起）。
-  private static readonly BUILTIN_HOSTS: string[] = ['example.invalid', 'example.invalid'];
+  private static readonly BUILTIN_HOSTS: string[] = UPSTREAM_CLIPBOARD_HOSTS;
 
   /**
    * 从文本里解析视频 ID。

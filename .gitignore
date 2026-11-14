@@ -49,3 +49,9 @@ harmony/entry/src/main/resources/rawfile/recommend/genre_dict.json
 
 # 本地交接文档（不入库，保留在本机）
 docs/harmony/HANDOVER.md
+
+# 含上游地址的文档（本地保留，不入库）
+docs/harmony/API-CONTRACT.md
+docs/harmony/SPEC.md
+docs/harmony/PORTING-ANALYSIS.md
+docs/harmony/DESIGN.md

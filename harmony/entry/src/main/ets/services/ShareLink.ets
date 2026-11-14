@@ -4,6 +4,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppContext } from './AppContext';
 import { Lines } from './Lines';
+import { UPSTREAM_CANONICAL_HOST } from './LocalUpstream.local';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGShare';
@@ -12,14 +13,14 @@ const LOG_TAG: string = 'HGShare';
  * 分享链接与系统分享面板。
  *
  * 多线路兼容的两个关键点：
- * 1. **分享出去的永远是主站规范链接**（`example.invalid`），不跟随当前线路。
+ * 1. **分享出去的永远是主站规范链接**（由本地配置注入），不跟随当前线路。
  *    镜像域名不保证每个用户都有，用镜像分享会让对方打不开。
  * 2. **接收方只解析视频 ID**，播放时走自己当前线路。
  *    所以链接只是「标识」，不承担「可用性」——发送方和接收方的线路互不影响。
  */
 export class ShareLink {
   /** 分享链接固定使用的规范域名（所有用户的内置固定线路里都有）。 */
-  static readonly CANONICAL_HOST: string = 'example.invalid';
+  static readonly CANONICAL_HOST: string = UPSTREAM_CANONICAL_HOST;
 
   /** 生成规范分享链接（与当前线路无关）。 */
   static canonicalUrl(videoId: number): string {

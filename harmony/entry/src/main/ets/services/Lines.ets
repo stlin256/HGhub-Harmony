@@ -6,15 +6,16 @@ import { LineStats } from './LineStats';
 import { Session } from './Session';
 import { LineItem, LineMirrors, LineProbe } from '../models/Types';
 import { parseHttpsUrl } from '../utils/Security';
+import { UPSTREAM_DEFAULT_BASE, UPSTREAM_FIXED_LINES, UPSTREAM_PUBLISH_PAGE } from './LocalUpstream.local';
 
-/** 默认固定线路 1（与原项目 net.rs 的 DEFAULT_BASE 一致）。 */
-export const DEFAULT_BASE: string = 'https://example.invalid';
+/** 默认固定线路：由本地配置注入，空值表示未配置。 */
+export const DEFAULT_BASE: string = UPSTREAM_DEFAULT_BASE;
 /** AppStorage key：当前线路（供页面响应式刷新；切换线路后内容页重新加载）。 */
 export const K_LINE_BASE = 'hgLineBase';
 /** Prefs：最近一次业务请求成功的线路（启动时优先使用，避免冷启动先撞不可用线路）。 */
 export const PREF_LINE_LAST_GOOD: string = 'line_last_good';
 
-const PUBLISH_PAGE: string = 'https://example.invalid';
+const PUBLISH_PAGE: string = UPSTREAM_PUBLISH_PAGE;
 /** 单次拉取的镜像线路条数上限。 */
 // @config-exempt: 未注册（ConfigRegistry 无 line_mirror_max）
 const MIRROR_MAX: number = 60;
@@ -179,10 +180,12 @@ export class Lines {
 
   static fixed(): LineItem[] {
     const items: LineItem[] = [];
-    const one: LineItem = { name: '固定线路 1', url: 'https://example.invalid' };
-    const two: LineItem = { name: '固定线路 2', url: 'https://example.invalid' };
-    items.push(one);
-    items.push(two);
+    for (let i = 0; i < UPSTREAM_FIXED_LINES.length; i++) {
+      const url: string = UPSTREAM_FIXED_LINES[i];
+      if (url.length > 0) {
+        items.push({ name: i === 0 ? '固定线路 1' : '线路 ' + (i + 1), url: url });
+      }
+    }
     return items;
   }
 
@@ -321,6 +324,9 @@ export class Lines {
 
   /** 从地址发布页拉镜像线路，只在用户打开「线路」面板时调用。 */
   static async mirrors(): Promise<LineMirrors> {
+    if (PUBLISH_PAGE.length === 0) {
+      throw new Error('未配置地址发布页');
+    }
     const page: RawText = await Net.getText(PUBLISH_PAGE, '', PAGE_TIMEOUT);
     if (page.code < 200 || page.code >= 300) {
       throw new Error('HTTP ' + page.code);
@@ -469,7 +475,7 @@ export class Lines {
 
   /**
    * 单线路探测：用 App 真实接口（/api/edge/request + /api/search/hot 信封与结构）判断可用性。
-   * 不再只看站点首页 HTML —— 不少线路首页能开但接口路径/结构已变（例如 example.invalid 首页 200、API 404）。
+   * 不再只看站点首页 HTML —— 不少线路首页能开但接口路径/结构已变（首页 200、API 404）。
    */
   private static async probeOne(url: string): Promise<LineProbe> {
     let target = url.trim();
