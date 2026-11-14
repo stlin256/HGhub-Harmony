@@ -75,15 +75,17 @@ struct Index {
   /** 更新弹窗文案与本次冷启动是否已弹过（保证至多一次）。 */
   private updateCopy: ConfirmCopy = new ConfirmCopy('', '', '打开下载链接', '稍后', false);
   private updateShown: boolean = false;
+  private updateRequired: boolean = false;
   private downloadUrl: string = '';
   private updateController: CustomDialogController = new CustomDialogController({
     builder: ConfirmDialog({
       copyOf: (): ConfirmCopy => this.updateCopy,
       onConfirm: (): void => {
         this.openUpdatePage();
-      }
+      },
+      persistent: (): boolean => this.updateRequired
     }),
-    autoCancel: true,
+    autoCancel: false,
     alignment: DialogAlignment.Center,
     customStyle: true
   });
@@ -394,7 +396,8 @@ struct Index {
       const brief: string = info.notes.length > 120 ? info.notes.substring(0, 120) + '…' : info.notes;
       message = message + '\n\n' + brief;
     }
-    this.updateCopy = new ConfirmCopy(title, message, '打开下载链接', '稍后', false);
+    this.updateRequired = info.required === true;
+    this.updateCopy = new ConfirmCopy(title, message, '打开下载链接', this.updateRequired ? '' : '稍后', false);
     try {
       this.updateController.open();
     } catch (err) {

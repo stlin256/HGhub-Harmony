@@ -347,6 +347,8 @@ export interface UpdateInfo {
   latest: string;
   tag?: string;
   has_update: boolean;
+  /** true=必须更新后继续使用（过期/强制门禁）。 */
+  required?: boolean;
   url: string;
   name?: string;
   published_at?: string;
