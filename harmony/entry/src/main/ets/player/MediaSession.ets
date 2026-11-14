@@ -29,6 +29,7 @@ export interface MediaSessionCallbacks {
 export class MediaSession {
   private static session: avSession.AVSession | undefined = undefined;
   private static creating: boolean = false;
+  private static closing: boolean = false;
   private static callbacks: MediaSessionCallbacks | undefined = undefined;
 
   /** 注入回调（PlayerService 初始化时调用一次）。 */
@@ -38,7 +39,7 @@ export class MediaSession {
 
   /** 创建并激活会话（幂等；失败静默）。 */
   static async ensure(): Promise<void> {
-    if (MediaSession.session !== undefined || MediaSession.creating) {
+    if (MediaSession.session !== undefined || MediaSession.creating || MediaSession.closing) {
       return;
     }
     if (!AppContext.isReady()) {
@@ -49,6 +50,10 @@ export class MediaSession {
       // 短剧是视频内容：用 video 类型会话，投播面板才有视频预览/正确的设备语义。
       const session: avSession.AVSession = await avSession.createAVSession(
         AppContext.abilityContext(), SESSION_TAG, 'video');
+      if (MediaSession.closing) {
+        await session.destroy();
+        return;
+      }
       MediaSession.session = session;
       MediaSession.registerCallbacks(session);
       await session.activate();
@@ -162,14 +167,16 @@ export class MediaSession {
 
   /** 释放会话（应用退出/播放器释放时）。 */
   static async release(): Promise<void> {
+    MediaSession.closing = true;
     const session = MediaSession.session;
     MediaSession.session = undefined;
-    if (session === undefined) {
-      return;
-    }
     try {
-      await session.destroy();
+      if (session !== undefined) {
+        await session.destroy();
+      }
     } catch (err) {
+    } finally {
+      MediaSession.closing = false;
     }
   }
 }

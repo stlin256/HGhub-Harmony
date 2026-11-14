@@ -3261,7 +3261,8 @@ export struct PlayerPage {
     if (!enabled) {
       return '配置关闭（super_resolution=false）';
     }
-    return '已开启（视觉提示；实际超分线路暂屏蔽）';
+    return this.service.isSuperResolutionActive() ? '已开启（系统已确认生效）' :
+      '已开启但未生效（设备/源可能不支持，详见运行诊断）';
   }
 
   private debugLines(): DebugLine[] {
