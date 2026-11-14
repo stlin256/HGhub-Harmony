@@ -15,6 +15,9 @@
   harmony/entry/src/main/ets/services/ServerEndpoint.local.ets（不入库，XOR 混淆）。
   不传时若已有生成物则复用；既没传也没有生成物则直接报错（避免打出连不上服务器的包）。
 
+  编译前由 set-extensions.mjs 按本地扩展目录生成扩展注册文件（无本地扩展时为空占位），
+  构建结束（含失败）恢复公开占位；公开 clone 没有本地扩展时按空实现编译。
+
 .EXAMPLE
   .\scripts\harmony\build.ps1
   .\scripts\harmony\build.ps1 -Product default -BuildMode release
@@ -157,6 +160,16 @@ if ($isTestVariant -and (Test-Path -LiteralPath $appJsonPath)) {
   }
 }
 
+# 编译期扩展 overlay：构建前生成扩展注册文件（无本地扩展时为空占位），构建结束在 finally 恢复。
+$extensionsScript = Join-Path $PSScriptRoot 'set-extensions.mjs'
+Write-Host '[ext] 生成扩展注册（set-extensions.mjs）' -ForegroundColor Yellow
+$extensionsOut = & $toolchain.NodeExe $extensionsScript 2>&1
+$extensionsExit = $LASTEXITCODE
+Write-Host (($extensionsOut | Out-String).Trim()) -ForegroundColor DarkGray
+if ($extensionsExit -ne 0) {
+  throw "生成扩展注册失败（exit=$extensionsExit）"
+}
+
 Push-Location -LiteralPath $project
 $nativeErrorAction = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
@@ -243,6 +256,16 @@ scripts/harmony/local-sign.ps1（Plan B，仅实验）先产出 unsigned HAP 再
 } finally {
   $ErrorActionPreference = $nativeErrorAction
   Pop-Location
+  # 恢复公开扩展占位并清理构建期生成目录，避免生成物被误提交。
+  try {
+    $extensionsRestoreOut = & $toolchain.NodeExe $extensionsScript '--restore' 2>&1
+    Write-Host (($extensionsRestoreOut | Out-String).Trim()) -ForegroundColor DarkGray
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warning "恢复扩展占位失败（exit=$LASTEXITCODE），请手动执行 node scripts/harmony/set-extensions.mjs --restore"
+    }
+  } catch {
+    Write-Warning ("恢复扩展占位失败：" + $_.Exception.Message)
+  }
   if ($null -ne $appJsonOriginal) {
     [IO.File]::WriteAllText($appJsonPath, $appJsonOriginal, [Text.UTF8Encoding]::new($false))
     Write-Host '[test] 已恢复 app.json5 原始版本号' -ForegroundColor DarkGray
