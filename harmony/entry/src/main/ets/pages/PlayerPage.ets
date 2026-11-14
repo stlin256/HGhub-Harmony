@@ -46,7 +46,6 @@ import { PlayerBottomChrome } from '../components/player/PlayerBottomChrome';
 import { PlayerPageHelpers } from '../player/PlayerPageHelpers';
 import { PlayerCommentSidebar, PlayerLockLayer, PlayerPiPHintChip, PlayerPosterOverlay, PlayerSpeedChip } from '../components/player/PlayerOverlays';
 import { AppChannel } from '../utils/AppChannel';
-
 const RATES: number[] = [1, 1.25, 1.5, 2];
 const CHROME_HIDE_MS: number = 3000;
 /** 顶部安全区兜底（vp）：topInset 为 0 时保证标题/返回键不与状态栏/挖孔重叠。 */
@@ -76,19 +75,14 @@ const COMMENT_PANEL_MIN_W: number = 280;
 /** 评论侧栏打开时左侧视频区最小宽度（vp）。 */
 // @config-exempt: UI 布局尺寸（评论侧栏打开时视频区最小宽度 vp）
 const COMMENT_VIDEO_MIN_W: number = 320;
-
 class StartPoint {
   ep: number;
   sec: number;
-
   constructor(ep: number, sec: number) {
     this.ep = ep;
     this.sec = sec;
   }
 }
-
-
-
 /**
  * feed 中单个条目的最小展示信息：当前页/相邻页的标题、作者、集数、互动计数占位。
  * 由 Api.video/Api.post 预取填充，切换 Swiper 页时直接复用，避免标题/计数先空白再跳变。
@@ -104,7 +98,6 @@ class PageMeta {
   commentCount: number = 0;
   hasDetail: boolean = false;
 }
-
 /**
  * 沉浸式播放页（HGhub 原生播放器：单实例 AVPlayer + 垂直 Swiper + 手势层 + Sheet）
  *：垂直 Swiper 切剧 + 单实例 AVPlayer + 手势层 + Chrome + 面板。
@@ -138,7 +131,6 @@ export struct PlayerPage {
   params: PlayerParam = {
     videoIds: [], index: 0, title: '', source: '', feedKind: 'video', startEp: 1, startTime: 0
   };
-
   /* ── 播放数据 ─────────────────────────────────────── */
   @State ids: number[] = [];
   @State currentIndex: number = 0;
@@ -156,7 +148,6 @@ export struct PlayerPage {
   @State commentCount: number = 0;
   @State liked: boolean = false;
   @State faved: boolean = false;
-
   /* ── 播放状态 ─────────────────────────────────────── */
   @State playing: boolean = false;
   @State loading: boolean = true;
@@ -195,7 +186,6 @@ export struct PlayerPage {
   @State favPulse: number = 1;
   /** 画中画状态提示文案（空=不显示）。 */
   @State pipHint: string = '';
-
   /* ── 控制状态 ─────────────────────────────────────── */
   @State chromeVisible: boolean = true;
   @State locked: boolean = false;
@@ -236,11 +226,9 @@ export struct PlayerPage {
   @State videoRectY: number = 0;
   @State videoRectW: number = 360;
   @State videoRectH: number = 780;
-
   private service: PlayerService = new PlayerService();
   private xController: XComponentController = new XComponentController();
   private swiperController: SwiperController = new SwiperController();
-
   private destroyed: boolean = false;
   private pageShown: boolean = true;
   /** 最近一次已记录"播放开始"的条目 id：切集/换剧只记一次，避免重复计数。 */
@@ -264,7 +252,6 @@ export struct PlayerPage {
   private metaPending: Set<number> = new Set<number>();
   /** 详情缓存代际：换线/清空缓存时自增，丢弃在途的旧线路响应。 */
   private metaEpoch: number = 0;
-
   private hideTimer: number = -1;
   private tapTimer: number = -1;
   private longPressTimer: number = -1;
@@ -297,7 +284,6 @@ export struct PlayerPage {
   private lastSeekCommitAt: number = 0;
   /** 播放页不可见时发生线路切换：回到前台再重载，避免后台起播。 */
   private pendingLineReload: boolean = false;
-
   private gestureMode: number = 0;
   private touchStartX: number = 0;
   private touchStartY: number = 0;
@@ -309,7 +295,6 @@ export struct PlayerPage {
   private seekClearTimer: number = -1;
   /** 本次 seek 进入加载态的时间：onState('playing') 兜底清除时判断是否已过宽限期。 */
   private seekStartedAt: number = 0;
-
   /** 当前播放页是否在平行视窗右栏内（非全屏）：左栏列表仍可见时，播放页不应隐藏状态栏/按全屏安全区布局。 */
   private inSplitPane(): boolean {
     return this.windowW > 0 && this.contentW > 0 && this.contentW + 2 < this.windowW;
