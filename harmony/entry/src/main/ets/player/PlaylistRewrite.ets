@@ -602,6 +602,8 @@ export interface PlaylistSummary {
   master: boolean;
   variants: PlaylistVariant[];
   segments: string[];
+  /** 与 segments 对齐的分片时长（秒；未知为 0）。 */
+  segmentDurations: number[];
   keys: string[];
   initSegments: string[];
 }
@@ -658,12 +660,14 @@ export function summarizePlaylist(baseUrl: string, text: string): PlaylistSummar
   const lines: string[] = body.split('\n');
   const variants: PlaylistVariant[] = [];
   const segments: string[] = [];
+  const segmentDurations: number[] = [];
   const keys: string[] = [];
   const initSegments: string[] = [];
   let pendingVariant: boolean = false;
   let pendingBandwidth: number = 0;
   let pendingResolution: string = '';
   let pendingCodecs: string = '';
+  let pendingDuration: number = 0;
   for (let i = 0; i < lines.length; i++) {
     const line: string = trimEnd(lines[i]);
     if (line.length === 0) {
@@ -685,7 +689,15 @@ export function summarizePlaylist(baseUrl: string, text: string): PlaylistSummar
         pendingCodecs = '';
       } else {
         segments.push(uri);
+        segmentDurations.push(pendingDuration);
+        pendingDuration = 0;
       }
+      continue;
+    }
+    if (line.startsWith('#EXTINF:')) {
+      const comma: number = line.indexOf(',');
+      const value: number = comma > 8 ? Number(line.substring(8, comma).trim()) : 0;
+      pendingDuration = isNaN(value) || value < 0 ? 0 : value;
       continue;
     }
     if (line.startsWith('#EXT-X-STREAM-INF:')) {
@@ -726,6 +738,7 @@ export function summarizePlaylist(baseUrl: string, text: string): PlaylistSummar
     master: variants.length > 0,
     variants: variants,
     segments: segments,
+    segmentDurations: segmentDurations,
     keys: keys,
     initSegments: initSegments
   };

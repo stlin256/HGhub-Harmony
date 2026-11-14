@@ -7,7 +7,7 @@
  *
  * 约束：
  * - 同一个视频/集只排队一次；成功后 5 分钟内不重复预热；
- * - 全局并发 2（MediaPrefetch.maxActive），且 MediaCache 内部把预加载的 HTTP 标记为低优先级；
+ * - 全局并发 2（MediaPrefetch.activeLimit()），且 MediaCache 内部把预加载的 HTTP 标记为低优先级；
  * - 每个分片抓取前检查 MediaCache.lastForegroundAt()，播放请求刚发生就等它安静 ~600ms，避免抢带宽；
  * - 单集预算：3 个未缓存分片或 2MB，已在缓存的跳过且不占预算；
  * - 失败静默（只打 HGPlay warn），绝不向上抛；reset() 取消在途任务（代际号），不清 MediaCache 数据。
@@ -107,22 +107,25 @@ function sleep(ms: number): Promise<void> {
 export class MediaPrefetch {
   /** 总开关：false 时所有 warm* 立即返回（对照测试用）。 */
   static enabled: boolean = true;
-  /** 单集预热最多抓几个分片：读 ConfigRegistry（默认 3，与迁移前一致）。 */
+  /** 单集预热最多抓几个分片（上限配置）。 */
   private static maxSegments(): number {
     return ConfigRegistry.getNumber(ConfigKey.HLS_PREFETCH_SEGMENTS);
   }
-  /** 单集预热流量上限（字节，分片数先到先停）。 */
-  // @config-exempt: 未注册（ConfigRegistry 无预取流量上限 key）
-  static maxEpisodeBytes: number = 2 * 1024 * 1024;
-  /** feed 预热最多看几个后续条目（任务要求不超过 2）。 */
-  // @config-exempt: 未注册（ConfigRegistry 无 feed 预取条数 key）
+  /** 单集预加载流量上限（MB 配置）。 */
+  private static maxEpisodeBytes(): number {
+    return ConfigRegistry.getNumber(ConfigKey.PREFETCH_MAX_BYTES_MB) * 1024 * 1024;
+  }
+  /** 预加载目标时长（秒；0=整片）。 */
+  private static durationLimitSec(): number {
+    return ConfigRegistry.getNumber(ConfigKey.PREFETCH_DURATION_SEC);
+  }
+  private static activeLimit(): number {
+    return ConfigRegistry.getNumber(ConfigKey.PREFETCH_MAX_ACTIVE);
+  }
+  private static queueLimit(): number {
+    return ConfigRegistry.getNumber(ConfigKey.PREFETCH_MAX_QUEUE);
+  }
   static maxFeedCount: number = 2;
-  /** 全局并发任务数（每个任务同一时刻只抓一个资源）。 */
-  // @config-exempt: 未注册（ConfigRegistry 无预取并发 key）
-  static maxActive: number = 2;
-  /** 排队任务上限：快速连续滑动时丢弃最旧任务，避免预热已滑过的视频浪费流量。 */
-  // @config-exempt: 未注册（ConfigRegistry 无预取队列上限 key）
-  static maxQueued: number = 8;
 
   private static generation: number = 0;
   private static paused: boolean = false;
@@ -191,6 +194,47 @@ export class MediaPrefetch {
       const id: number = videoIds[index];
       if (id > 0) {
         MediaPrefetch.warmEpisode(id, 1);
+      }
+    }
+  }
+
+  /** 当前集前后集窗口：优先向下，再向上。 */
+  static warmEpisodeWindow(videoId: number, ep: number, totalEpisodes: number,
+    up: number, down: number): void {
+    if (!MediaPrefetch.enabled || videoId <= 0 || ep <= 0) {
+      return;
+    }
+    for (let k = 1; k <= down; k++) {
+      const target: number = ep + k;
+      if (totalEpisodes > 0 && target > totalEpisodes) {
+        break;
+      }
+      MediaPrefetch.warmEpisode(videoId, target);
+    }
+    for (let k = 1; k <= up; k++) {
+      const target: number = ep - k;
+      if (target < 1) {
+        break;
+      }
+      MediaPrefetch.warmEpisode(videoId, target);
+    }
+  }
+
+  /** feed 前后窗口：优先向下（预判用户继续滑），再向上。 */
+  static warmFeedWindow(videoIds: number[], currentIndex: number, up: number, down: number): void {
+    if (!MediaPrefetch.enabled || videoIds === undefined || videoIds === null) {
+      return;
+    }
+    for (let k = 1; k <= down; k++) {
+      const idx: number = currentIndex + k;
+      if (idx >= 0 && idx < videoIds.length && videoIds[idx] > 0) {
+        MediaPrefetch.warmEpisode(videoIds[idx], 1);
+      }
+    }
+    for (let k = 1; k <= up; k++) {
+      const idx: number = currentIndex - k;
+      if (idx >= 0 && idx < videoIds.length && videoIds[idx] > 0) {
+        MediaPrefetch.warmEpisode(videoIds[idx], 1);
       }
     }
   }
@@ -283,7 +327,7 @@ export class MediaPrefetch {
 
   /** 排队超限：丢弃最旧任务（快速连续滑动时，旧视频已不需要预热）。 */
   private static trimQueue(): void {
-    while (MediaPrefetch.queue.length > MediaPrefetch.maxQueued) {
+    while (MediaPrefetch.queue.length > MediaPrefetch.queueLimit()) {
       const dropped: WarmJob | undefined = MediaPrefetch.queue.shift();
       if (dropped === undefined) {
         return;
@@ -329,7 +373,7 @@ export class MediaPrefetch {
     if (!MediaPrefetch.enabled || MediaPrefetch.paused) {
       return;
     }
-    while (MediaPrefetch.active < MediaPrefetch.maxActive && MediaPrefetch.queue.length > 0) {
+    while (MediaPrefetch.active < MediaPrefetch.activeLimit() && MediaPrefetch.queue.length > 0) {
       const job: WarmJob | undefined = MediaPrefetch.queue.shift();
       if (job === undefined) {
         return;
@@ -446,9 +490,12 @@ export class MediaPrefetch {
       }
       await MediaPrefetch.warmSmall(summary.keys[i], headers, generation, result, 'key');
     }
-    // 开头分片：预算 3 个或 2MB，先到先停；已缓存跳过且不占预算
+    // 开头分片：按时长（默认 30s，0=整片）+ 分片数 + 流量三重预算，先到先停。
+    let durationSec: number = 0;
+    const durationLimit: number = MediaPrefetch.durationLimitSec();
     for (let i = 0; i < summary.segments.length; i++) {
-      if (result.segments >= MediaPrefetch.maxSegments() || result.bytes >= MediaPrefetch.maxEpisodeBytes) {
+      if (result.segments >= MediaPrefetch.maxSegments() || result.bytes >= MediaPrefetch.maxEpisodeBytes() ||
+        (durationLimit > 0 && durationSec >= durationLimit)) {
         result.budgetHit = true;
         break;
       }
@@ -471,7 +518,9 @@ export class MediaPrefetch {
       }
       result.segments++;
       result.bytes += bytes.length;
-      PlaybackLog.info('prefetch.seg', 'n=' + result.segments + ' bytes=' + bytes.length +
+      const segDuration: number = i < summary.segmentDurations.length ? summary.segmentDurations[i] : 0;
+      durationSec += segDuration;
+      PlaybackLog.info('prefetch.seg', 'n=' + result.segments + ' bytes=' + bytes.length + ' sec=' + durationSec +
         ' total=' + result.bytes + ' ms=' + (Date.now() - fetchStarted) + ' ' +
         PlaybackLog.safeUrl(segmentUrl));
       if (Date.now() - fetchStarted > SLOW_FETCH_MS) {
@@ -483,7 +532,8 @@ export class MediaPrefetch {
     }
     if (result.budgetHit) {
       PlaybackLog.info('prefetch.budget', 'segs=' + result.segments + ' bytes=' + result.bytes +
-        ' maxSegs=' + MediaPrefetch.maxSegments() + ' maxBytes=' + MediaPrefetch.maxEpisodeBytes);
+        ' maxSegs=' + MediaPrefetch.maxSegments() + ' maxBytes=' + MediaPrefetch.maxEpisodeBytes() +
+        ' limitSec=' + durationLimit);
     }
     return result;
   }

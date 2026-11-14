@@ -1137,30 +1137,45 @@ export struct PlayerPage {
   }
 
   /**
-   * 预加载：当前视频的下一集 + feed 接下来 2 条视频（各自续播集）。
-   * 走本地代理缓存，切集/上滑时首帧直接从缓存起播。失败静默，不阻塞播放。
+   * 预加载：当前集向下/向上窗口 + feed 前后窗口（默认下 3/上 2，可远程配置）。
+   * 优先保证下一集与向下滑动目标，其次向上；走本地代理缓存，失败静默。
    */
   private warmNextUp(): void {
     if (this.destroyed || this.params.feedKind === 'post' || !this.service.useLocalProxy) {
       return;
     }
-    const id = this.currentId();
-    if (id > 0 && (this.episodeCount <= 0 || this.ep < this.episodeCount)) {
-      MediaPrefetch.warmEpisode(id, this.ep + 1);
+    const upEp: number = ConfigRegistry.getNumber(ConfigKey.PREFETCH_UP_EPISODES);
+    const downEp: number = ConfigRegistry.getNumber(ConfigKey.PREFETCH_DOWN_EPISODES);
+    const upFeed: number = ConfigRegistry.getNumber(ConfigKey.PREFETCH_UP_FEED);
+    const downFeed: number = ConfigRegistry.getNumber(ConfigKey.PREFETCH_DOWN_FEED);
+    const id: number = this.currentId();
+    if (id > 0) {
+      MediaPrefetch.warmEpisodeWindow(id, this.ep, this.episodeCount, upEp, downEp);
     }
-    // 收缩 feed 预热窗口：丢弃已滑过视频的排队任务，避免流量浪费。
-    MediaPrefetch.retainFeedWindow(this.ids, this.currentIndex + 1, 2);
-    for (let k = 1; k <= 2; k++) {
-      const idx = this.currentIndex + k;
+    MediaPrefetch.retainFeedWindow(this.ids, this.currentIndex + 1, downFeed);
+    for (let k = 1; k <= downFeed; k++) {
+      const idx: number = this.currentIndex + k;
       if (idx < 0 || idx >= this.ids.length) {
         break;
       }
-      const nextId = this.ids[idx];
+      const nextId: number = this.ids[idx];
       if (nextId <= 0) {
         continue;
       }
       const point = this.startPointFor(nextId, false);
       MediaPrefetch.warmEpisode(nextId, point.ep);
+    }
+    for (let k = 1; k <= upFeed; k++) {
+      const idx: number = this.currentIndex - k;
+      if (idx < 0 || idx >= this.ids.length) {
+        break;
+      }
+      const prevId: number = this.ids[idx];
+      if (prevId <= 0) {
+        continue;
+      }
+      const point = this.startPointFor(prevId, false);
+      MediaPrefetch.warmEpisode(prevId, point.ep);
     }
   }
 

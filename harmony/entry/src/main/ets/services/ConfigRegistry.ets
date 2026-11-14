@@ -133,6 +133,14 @@ export class ConfigKey {
   static readonly LINE_WATCH_INTERVAL_MS: string = 'line_watch_interval_ms';
   static readonly LINE_FAIL_THRESHOLD: string = 'line_fail_threshold';
   static readonly HLS_PREFETCH_SEGMENTS: string = 'hls_prefetch_segments';
+  static readonly PREFETCH_DURATION_SEC: string = 'prefetch_duration_sec';
+  static readonly PREFETCH_UP_EPISODES: string = 'prefetch_up_episodes';
+  static readonly PREFETCH_DOWN_EPISODES: string = 'prefetch_down_episodes';
+  static readonly PREFETCH_UP_FEED: string = 'prefetch_up_feed';
+  static readonly PREFETCH_DOWN_FEED: string = 'prefetch_down_feed';
+  static readonly PREFETCH_MAX_BYTES_MB: string = 'prefetch_max_bytes_mb';
+  static readonly PREFETCH_MAX_ACTIVE: string = 'prefetch_max_active';
+  static readonly PREFETCH_MAX_QUEUE: string = 'prefetch_max_queue';
   static readonly MEDIA_CACHE_MB: string = 'media_cache_mb';
   static readonly UPDATE_DELAY_MS: string = 'update_delay_ms';
   static readonly HOME_PREFETCH_ROWS: string = 'home_prefetch_rows';
@@ -248,7 +256,15 @@ const DEFS: ConfigDef[] = [
   threshold(ConfigKey.LINE_PROBE_TTL_MS, 60000, 5000, 600000, '线路探测结果缓存时长（毫秒）'),
   threshold(ConfigKey.LINE_WATCH_INTERVAL_MS, 300000, 30000, 1800000, '播放中线路巡检间隔（毫秒）'),
   threshold(ConfigKey.LINE_FAIL_THRESHOLD, 2, 1, 10, '连续失败多少次触发自动换线'),
-  threshold(ConfigKey.HLS_PREFETCH_SEGMENTS, 3, 0, 10, 'HLS 预加载开头分片数'),
+  threshold(ConfigKey.HLS_PREFETCH_SEGMENTS, 60, 1, 600, '单次预加载最大分片数'),
+  threshold(ConfigKey.PREFETCH_DURATION_SEC, 30, 0, 86400, '预加载时长（秒，0=整片）'),
+  threshold(ConfigKey.PREFETCH_UP_EPISODES, 2, 0, 20, '向上预加载集数'),
+  threshold(ConfigKey.PREFETCH_DOWN_EPISODES, 3, 0, 20, '向下预加载集数'),
+  threshold(ConfigKey.PREFETCH_UP_FEED, 2, 0, 10, '向上预加载条数'),
+  threshold(ConfigKey.PREFETCH_DOWN_FEED, 3, 0, 10, '向下预加载条数'),
+  threshold(ConfigKey.PREFETCH_MAX_BYTES_MB, 64, 1, 1024, '单目标预加载流量上限（MB）'),
+  threshold(ConfigKey.PREFETCH_MAX_ACTIVE, 3, 1, 8, '预加载并发任务数'),
+  threshold(ConfigKey.PREFETCH_MAX_QUEUE, 24, 4, 100, '预加载排队上限'),
   threshold(ConfigKey.MEDIA_CACHE_MB, 192, 16, 1024, '媒体磁盘缓存上限（MB）'),
   threshold(ConfigKey.UPDATE_DELAY_MS, 3000, 0, 60000, '启动后更新检查延迟（毫秒）'),
   threshold(ConfigKey.HOME_PREFETCH_ROWS, 6, 0, 30, '首页封面预取行数（HomePage.PREFETCH_AHEAD_ROWS）'),
