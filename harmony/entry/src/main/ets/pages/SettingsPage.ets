@@ -2,13 +2,12 @@ import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { UpdateChecker } from '../services/UpdateChecker';
-import { CrashGuard } from '../services/CrashGuard';
 import { PerfMark } from '../utils/PerfMark';
 import { K_LINE_BASE, Lines } from '../services/Lines';
 import { Ipv6Preference } from '../services/Ipv6Preference';
 import { PowerGuard } from '../services/PowerGuard';
-import { DiagExport } from '../services/DiagExport';
 import { ImageCache } from '../services/ImageCache';
+import { runtimeHub } from '../services/runtimeHub';
 import { UiBus } from '../services/UiBus';
 import { UpdateInfo } from '../models/Types';
 import { HgTopBar } from '../components/HgCommon';
@@ -111,7 +110,7 @@ export struct SettingsPage {
     this.superResolution = UserPrefs.superResolution();
     this.multiSource = UserPrefs.multiSource();
     this.ipv6Prefer = Ipv6Preference.enabled();
-    this.crashCount = CrashGuard.count();
+    this.crashCount = runtimeHub.get().crashRecordCount();
     this.startupMs = PerfMark.lastStartupMs();
     // 只在进入设置页时统计一次占用空间（内存+磁盘合计），build 期间不再同步扫磁盘。
     this.cacheText = ImageCache.totalText();
@@ -267,16 +266,18 @@ export struct SettingsPage {
     );
   }
 
-  /** 导出全量诊断日志压缩包（崩溃/播放/统计/设置/线路/性能），供用户上传到 issue。 */
+  /** 导出诊断日志压缩包（内容由实现方决定；公开构建不含实现）。 */
   private async exportDiagLog(): Promise<void> {
     if (this.exporting) {
       return;
     }
     this.exporting = true;
     try {
-      const path: string = await DiagExport.exportZip();
+      const path: string = await runtimeHub.get().exportDiagnostics();
       if (path.length > 0) {
         UiBus.toastOk('诊断日志已导出');
+      } else if (runtimeHub.isNoop()) {
+        UiBus.toast('当前构建未启用诊断导出');
       } else {
         UiBus.toast('已取消导出');
       }
@@ -445,7 +446,7 @@ export struct SettingsPage {
     if (kind === SettingsSubtitle.CRASH_EXPORT) {
       const crashPrefix: string = this.crashCount > 0 ?
         I18n.fmt1($r('app.string.fmt_crash_count_prefix'), this.crashCount) : '';
-      return this.exporting ? '正在打包…' : crashPrefix + '打包播放/统计/设置/线路/性能为 zip';
+      return this.exporting ? '正在打包…' : crashPrefix + '打包播放/设置/线路/性能诊断';
     }
     if (kind === SettingsSubtitle.UPDATE_CHECK) {
       return this.checking ? $r('app.string.fmt_checking_version') :

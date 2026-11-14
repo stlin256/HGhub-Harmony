@@ -10,7 +10,8 @@ import { HgGrid } from '../design/HgGrid';
 import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
 import { ROUTE_PLAYER, ROUTE_TOPIC, TopicParam, PlayerParam } from '../state/Routes';
 import { fmt } from '../utils/Format';
-import { ActionStats, ACT_TOPIC } from '../services/ActionStats';
+import { runtimeHub } from '../services/runtimeHub';
+import { runtimeAction } from '../services/runtime';
 
 // @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 20;
@@ -36,7 +37,7 @@ export struct TopicDetailPage {
   private loadSeq: number = 0;
 
   aboutToAppear(): void {
-    ActionStats.record(ACT_TOPIC);
+    runtimeHub.get().recordAction(runtimeAction.TOPIC);
     this.loadFirst();
   }
 

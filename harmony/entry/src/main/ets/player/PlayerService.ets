@@ -15,7 +15,7 @@ import { MediaPrefetch } from './MediaPrefetch';
 import { PlayerQuality } from './PlayerQuality';
 import { MediaSession } from './MediaSession';
 import { PowerGuard } from '../services/PowerGuard';
-import { Analytics } from '../services/Analytics';
+import { runtimeHub } from '../services/runtimeHub';
 import { redactSensitive } from '../utils/Security';
 
 /** 进度落盘节流：ConfigRegistry 未注册 history_interval_ms，保持迁移前 5s。 */
@@ -139,6 +139,14 @@ export class PlayerService {
   private preferHevcOverride: boolean | null = null;
   /** 当前这条媒体是否已计入一次播放（VV）；切集/切条时重置。 */
   private vvCounted: boolean = false;
+  /** 本次播放是否已有结束事件（避免同一条媒体重复runtime结束）。 */
+  private playbackEnded: boolean = false;
+  /** 本次起播请求时间（毫秒；用于首帧耗时 TTFF）。 */
+  private playStartAt: number = 0;
+  /** 首帧是否已记录（同一条媒体只记一次）。 */
+  private firstFrameReported: boolean = false;
+  /** 本次缓冲开始时间（0 表示当前不在缓冲）。 */
+  private bufferingStartAt: number = 0;
   /** 超分状态变化回调（页面用于展示提示）。 */
   onSuperResolutionChanged: (enabled: boolean, supported: boolean) => void = () => {};
   private lastHistoryAt: number = 0;
@@ -370,8 +378,8 @@ export class PlayerService {
     if (url.length === 0) {
       throw new Error('暂无播放地址');
     }
-    // 匿名统计：本次实际取的是高清还是标准（只记计数，不记内容）。
-    Analytics.countQuality(preferHevc && PlayerQuality.hasHevc(info));
+    // 本次实际取的是高清还是标准（只记计数，不记内容）。
+    runtimeHub.get().countQuality(preferHevc && PlayerQuality.hasHevc(info));
     this.cache.set(key, new PlayCacheEntry(info, Date.now()));
     return info;
   }
@@ -490,6 +498,10 @@ export class PlayerService {
     this.positionMs = 0;
     this.durationMs = 0;
     this.bufferedMs = 0;
+    this.playStartAt = Date.now();
+    this.firstFrameReported = false;
+    this.playbackEnded = false;
+    this.bufferingStartAt = 0;
     if (!sameMedia) {
       // 换视频/换集才重置编码回退；画质回退同一集内部重载必须保留覆盖值，否则会无限回退。
       this.preferHevcOverride = null;
@@ -538,6 +550,8 @@ export class PlayerService {
     const positionSec: number = Math.max(0, this.positionMs / 1000);
     // 失败回退时 state 已是 error，不能只看 state 判断是否续播；autoPlay 供回退路径显式指定。
     const wasPlaying: boolean = autoPlay || this.state === 'playing';
+    // 画质切换事件：切换前后档位（不含具体码流/地址）。
+    runtimeHub.get().onPlaybackQualitySwitch(this.preferHevc, preferHevc);
     if (persist) {
       UserPrefs.setPreferHevc(preferHevc);
     }
@@ -577,7 +591,7 @@ export class PlayerService {
       if (await this.retryOrFail(videoId, ep, startSec, autoPlay, serial, attempt, code, text, true)) {
         return;
       }
-      this.fail(text, -1);
+      this.fail(text, -1, 'resolve');
       return;
     }
     if (serial !== this.serial || this.released) {
@@ -605,7 +619,7 @@ export class PlayerService {
       if (await this.retryOrFail(videoId, ep, startSec, autoPlay, serial, attempt, code, text, false)) {
         return;
       }
-      this.fail(PlayerService.friendlyError(code, text), code);
+      this.fail(PlayerService.friendlyError(code, text), code, 'load');
     }
   }
 
@@ -621,6 +635,8 @@ export class PlayerService {
     const delay: number = PlayerQuality.retryDelay(attempt);
     PlaybackLog.warn('load.retry', 'attempt=' + (attempt + 1) + ' delay=' + delay +
       ' code=' + code + ' from=' + (fromResolve ? 'resolve' : 'open'));
+    // 已触发自动重试：本次错误按「已恢复」记录（错误码/阶段只用于聚合）。
+    runtimeHub.get().onPlaybackError(fromResolve ? 'resolve' : 'load', code, true);
     this.onRetry(attempt + 1, PlayerQuality.maxAttempts() - 1);
     if (delay > 0) {
       await PlayerService.sleep(delay);
@@ -658,6 +674,10 @@ export class PlayerService {
     this.positionMs = 0;
     this.durationMs = 0;
     this.bufferedMs = 0;
+    this.playStartAt = Date.now();
+    this.firstFrameReported = false;
+    this.playbackEnded = false;
+    this.bufferingStartAt = 0;
     // 直链播放没有 streams 响应：清掉上一条视频的播放信息，避免画质徽章残留/误切端点。
     this.currentInfo = undefined;
     this.preferHevc = UserPrefs.preferHevc();
@@ -674,17 +694,19 @@ export class PlayerService {
           return;
         }
         this.fail(PlayerService.friendlyError(PlayerService.errCode(err), PlayerService.errText(err)),
-          PlayerService.errCode(err));
+          PlayerService.errCode(err), 'load');
       }
     });
   }
 
-  private fail(message: string, code: number): void {
+  private fail(message: string, code: number, stage: string): void {
     this.state = 'error';
     this.onState('error');
     PlaybackLog.warn('play.error', message + ' code=' + code);
-    // 匿名统计：播放失败按错误码分桶（不含任何内容信息）。
-    Analytics.countPlayFail(code, message);
+    // 播放失败按错误码分桶 + 阶段（不含任何内容信息）。
+    runtimeHub.get().countPlayFail(code, message);
+    runtimeHub.get().onPlaybackError(stage, code, false);
+    this.playbackEnded = true;
     this.onError(message, code);
   }
 
@@ -887,10 +909,10 @@ export class PlayerService {
         this.buffering = false;
         this.onState('playing');
         this.syncSessionState(true);
-        // 匿名统计：同一条媒体只计一次播放（VV），恢复播放不重复计。
+        // 同一条媒体只计一次播放开始（VV），恢复播放不重复计。
         if (!this.vvCounted) {
           this.vvCounted = true;
-          Analytics.countVideoView();
+          runtimeHub.get().onPlaybackStart();
         }
       } else if (state === 'paused') {
         this.onState('paused');
@@ -901,7 +923,8 @@ export class PlayerService {
       } else if (state === 'completed') {
         this.saveHistory(true, true);
         this.onState('completed');
-        Analytics.countPlayComplete();
+        this.playbackEnded = true;
+        runtimeHub.get().onPlaybackEnd(true);
         this.onCompleted();
       } else if (state === 'stopped') {
         this.onState('stopped');
@@ -913,8 +936,8 @@ export class PlayerService {
     player.on('superResolutionChanged', (enabled: boolean) => {
       this.srActive = enabled;
       PlaybackLog.info('sr.changed', enabled ? 'on' : 'off');
-      // 匿名统计：记录设备是否支持超分、本次是否开启（每次状态变化记一次）。
-      Analytics.setSuperResolution(enabled, this.srCapable);
+      // 记录设备是否支持超分、本次是否开启（每次状态变化记一次）。
+      runtimeHub.get().setSuperResolution(enabled, this.srCapable);
       this.onSuperResolutionChanged(enabled, this.srCapable);
     });
 
@@ -942,9 +965,15 @@ export class PlayerService {
     player.on('bufferingUpdate', (infoType: media.BufferingInfoType, value: number) => {
       if (infoType === media.BufferingInfoType.BUFFERING_START) {
         this.buffering = true;
+        this.bufferingStartAt = Date.now();
+        runtimeHub.get().onPlaybackBuffering(true, 0);
         this.onBuffering(true, 0);
       } else if (infoType === media.BufferingInfoType.BUFFERING_END) {
         this.buffering = false;
+        const bufferDurationMs: number =
+          this.bufferingStartAt > 0 ? Math.max(0, Date.now() - this.bufferingStartAt) : 0;
+        this.bufferingStartAt = 0;
+        runtimeHub.get().onPlaybackBuffering(false, bufferDurationMs);
         this.onBuffering(false, 100);
       } else if (infoType === media.BufferingInfoType.BUFFERING_PERCENT) {
         this.onBuffering(this.buffering, value);
@@ -969,6 +998,8 @@ export class PlayerService {
         PlaybackLog.info('video.size', width + 'x' + height);
         this.videoWidth = width;
         this.videoHeight = height;
+        // 播放元信息：AVPlayer 不暴露码率，未知时传 0（不伪造）。
+        runtimeHub.get().onPlaybackMeta(width, height, 0);
         this.onVideoSize(width, height);
         this.applyScale(player);
         // 视频尺寸变化后重算超分目标并重试一次（目标比例错误是「已开启但未生效」的常见原因）。
@@ -983,6 +1014,11 @@ export class PlayerService {
     }
     player.on('startRenderFrame', () => {
       PlaybackLog.info('firstFrame', '');
+      if (!this.firstFrameReported) {
+        this.firstFrameReported = true;
+        const ttffMs: number = this.playStartAt > 0 ? Math.max(0, Date.now() - this.playStartAt) : 0;
+        runtimeHub.get().onPlaybackFirstFrame(ttffMs);
+      }
       this.onFirstFrame();
       // 首帧后再尝试一次超分：部分设备在 prepared 阶段 setSuperResolution 会返回成功但不出效果。
       if (!this.srActive && PowerGuard.superResolutionAllowed()) {
@@ -1007,6 +1043,7 @@ export class PlayerService {
       this.state = 'error';
       this.onState('error');
       PlaybackLog.warn('player.error', 'code=' + code + ' ' + redactSensitive(raw));
+      runtimeHub.get().onPlaybackError('play', code, false);
       this.onError(message, code);
     });
   }
@@ -1450,6 +1487,11 @@ export class PlayerService {
   release(): void {
     if (this.released) {
       return;
+    }
+    // 用户中途退出：本次播放若有开始无自然结束，按「未完成」runtime一次结束事件。
+    if (this.vvCounted && !this.playbackEnded) {
+      this.playbackEnded = true;
+      runtimeHub.get().onPlaybackEnd(false);
     }
     this.saveHistory(true, false);
     this.released = true;

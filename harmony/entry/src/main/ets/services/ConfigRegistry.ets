@@ -13,19 +13,19 @@
  * - 所有开关/阈值都必须先在这里注册，业务代码只允许通过 ConfigKey 常量读写，
  *   禁止在业务代码里写死常量（见 docs/harmony/REMOTE-CONFIG-SPEC.md §4、§9）；
  * - number 类型在写入（远程/本地覆盖）和读取（getNumber）时都会按 min/max 裁剪；
- * - 安全相关项（匿名统计 / 崩溃runtime）标记 remoteTightenOnly：远程只能关、不能开；
+ * - 安全相关项（分析 / 崩溃相关开关）标记 remoteTightenOnly：远程只能关、不能开；
  * - 未知 key 一律忽略/返回 undefined，不抛异常。
  *
- * 扩展能力（SPEC §12-§16 / C7-C11）：
- * - 变更记录：applyRemote / setLocalOverride / clearLocalOverride 导致值实际变化时，
- *   记录 ConfigChange（含 config_id / 版本 / 旧值 / 新值 / 来源 / 生效时间），
- *   takeChanges() 取走供 P13 配置应用回报；队列上限 50，相同值不记；
+ * 扩展能力（SPEC §12-§15 / C7-C10）：
+ * - 变更通知：applyRemote / setLocalOverride / clearLocalOverride 导致值实际变化时，
+ *   构造 runtimeConfigApply 交给 runtimeHub 当前实现（公开构建为空实现，直接丢弃）；
+ *   相同值重复runtime不通知；
  * - ui / settings / notices 段原样保留，分别通过 uiColor / uiSize / entryVisible /
  *   settingsSchema / notices 读取，供 P10（通知）/ P11（设置页远程化）/ P12（UI runtime）消费。
  *
  * 隐私边界：本文件是纯内存合并逻辑，不联网、不读设备标识、不runtime任何值；
  * 用户偏好层只读本地 Prefs（键名与 UserPrefs 持久化的键一致），不把值发给服务端；
- * 变更记录只存在内存里，由 P13 决定runtime时机与脱敏方式。
+ * 变更通知只在内存中转发给当前实现，不在本地留存。
  *
  * 为什么用户偏好层直接读 Prefs 而不是 UserPrefs：
  * - P3 会让 UserPrefs 改为从本注册表读，若这里反向 import UserPrefs 会形成循环依赖；
@@ -33,6 +33,8 @@
  */
 
 import { Prefs } from './Prefs';
+import { runtimeConfigApply } from './runtime';
+import { runtimeHub } from './runtimeHub';
 
 /** 配置值类型：布尔开关 / 数值阈值 / 字符串枚举。 */
 export type ConfigValue = boolean | number | string;
@@ -61,27 +63,6 @@ export interface ConfigDef {
   options?: string[];
 }
 
-/**
- * 一次配置值变化记录（供 P13 配置应用回报使用）。
- * 只在值**真的变化**时产生；相同值重复runtime不记录。
- */
-export interface ConfigChange {
-  /** runtime配置唯一 ID（config_id；非远程变化时为空串）。 */
-  configId: string;
-  /** runtime配置版本（非远程变化时为 0）。 */
-  configVersion: number;
-  /** 配置键。 */
-  key: string;
-  /** 字符串化的旧值（true/false/数字/字符串）。 */
-  oldValue: string;
-  /** 字符串化的新值。 */
-  newValue: string;
-  /** 变化来源：'remote' | 'local_override' | 'default'。 */
-  source: string;
-  /** 生效时间（epoch 秒）。 */
-  appliedAt: number;
-}
-
 /** UI runtime覆盖段（SPEC §14）：颜色 / 尺寸 / 入口显隐。 */
 export interface RemoteUiOverrides {
   colors?: Record<string, string> | null;
@@ -89,9 +70,9 @@ export interface RemoteUiOverrides {
   entries?: Record<string, boolean> | null;
 }
 
-/** 远程配置包中非 key/value 的段（SPEC §12-§16）：config_id / ui / settings / notices。 */
+/** 远程配置包中非 key/value 的段（SPEC §12-§15）：config_id / ui / settings / notices。 */
 export interface runtimeMeta {
-  /** 全局唯一配置 ID（P14 起服务端runtime；旧版服务端可能为空串）。 */
+  /** 全局唯一配置 ID（服务端runtime；旧版服务端可能为空串）。 */
   configId: string;
   /** 配置版本。 */
   configVersion: number;
@@ -137,8 +118,6 @@ export class ConfigKey {
   static readonly SYSTEM_SHARE_ENABLED: string = 'system_share_enabled';
   static readonly COMMENTS_ENABLED: string = 'comments_enabled';
   static readonly RECOMMEND_ENABLED: string = 'recommend_enabled';
-  static readonly CRASH_REPORT_ENABLED: string = 'crash_report_enabled';
-  static readonly ANALYTICS_ENABLED: string = 'analytics_enabled';
 
   /* ── 阈值（27 项）────────────────────────────────── */
   static readonly RETRY_MAX: string = 'retry_max';
@@ -158,10 +137,6 @@ export class ConfigKey {
   static readonly HLS_PREFETCH_SEGMENTS: string = 'hls_prefetch_segments';
   static readonly MEDIA_CACHE_MB: string = 'media_cache_mb';
   static readonly COVER_CACHE_MB: string = 'cover_cache_mb';
-  static readonly STARTUP_SAMPLE_MAX: string = 'startup_sample_max';
-  static readonly DEVICE_SAMPLE_INTERVAL_MS: string = 'device_sample_interval_ms';
-  static readonly CRASH_MAX_RECORDS: string = 'crash_max_records';
-  static readonly CRASH_BATCH: string = 'crash_batch';
   static readonly UPDATE_DELAY_MS: string = 'update_delay_ms';
   static readonly HOME_PREFETCH_ROWS: string = 'home_prefetch_rows';
   static readonly SEARCH_PAGE_SIZE: string = 'search_page_size';
@@ -170,7 +145,6 @@ export class ConfigKey {
   static readonly RECOMMEND_POOL_SIZE: string = 'recommend_pool_size';
 
   /* ── 补充阈值（10 项，P3-D 覆盖率收口）────────────── */
-  static readonly ANALYTICS_INTERVAL_MS: string = 'analytics_interval_ms';
   static readonly REMOTE_ASSETS_DELAY_MS: string = 'remote_assets_delay_ms';
   static readonly CLIPBOARD_CHECK_INTERVAL_MS: string = 'clipboard_check_interval_ms';
   static readonly REMOTE_CONFIG_DELAY_MS: string = 'remote_config_delay_ms';
@@ -186,8 +160,6 @@ export class ConfigKey {
 /** 本地覆盖持久化键（测试变体调试菜单写入）。 */
 const KEY_LOCAL_OVERRIDES: string = 'config_local_overrides';
 
-/** 变更记录队列上限：超出丢最旧（P13 单次runtime最多 20 条，留足余量）。 */
-const MAX_CHANGES: number = 50;
 /** UI 尺寸覆盖的合法范围（SPEC §14.1：尺寸 0-64）。 */
 const UI_SIZE_MIN: number = 0;
 const UI_SIZE_MAX: number = 64;
@@ -229,13 +201,6 @@ function flag(key: string, defaultValue: boolean, desc: string): ConfigDef {
   return baseDef(key, defaultValue, 'boolean', 0, 0, desc, true, false);
 }
 
-/** 安全相关开关：远程只能收紧（只能关不能开）。 */
-function safetyFlag(key: string, defaultValue: boolean, desc: string): ConfigDef {
-  const def: ConfigDef = flag(key, defaultValue, desc);
-  def.remoteTightenOnly = true;
-  return def;
-}
-
 /** 数值阈值：只允许远程/本地覆盖。 */
 function threshold(key: string, defaultValue: number, min: number, max: number, desc: string): ConfigDef {
   return baseDef(key, defaultValue, 'number', min, max, desc, true, false);
@@ -275,8 +240,6 @@ const DEFS: ConfigDef[] = [
   flag(ConfigKey.SYSTEM_SHARE_ENABLED, true, '系统分享'),
   flag(ConfigKey.COMMENTS_ENABLED, true, '评论'),
   flag(ConfigKey.RECOMMEND_ENABLED, true, '个性化推荐'),
-  safetyFlag(ConfigKey.CRASH_REPORT_ENABLED, true, '崩溃runtime（远程只能关，不能强制开）'),
-  safetyFlag(ConfigKey.ANALYTICS_ENABLED, true, '匿名统计（远程只能关，不能强制开）'),
 
   /* ── 阈值（27 项）：默认值对齐当前代码里的常量 ── */
   threshold(ConfigKey.RETRY_MAX, 4, 1, 10, '播放失败最大重试次数（PlayerQuality.MAX_ATTEMPTS）'),
@@ -296,10 +259,6 @@ const DEFS: ConfigDef[] = [
   threshold(ConfigKey.HLS_PREFETCH_SEGMENTS, 3, 0, 10, 'HLS 预加载开头分片数'),
   threshold(ConfigKey.MEDIA_CACHE_MB, 192, 16, 1024, '媒体磁盘缓存上限（MB）'),
   threshold(ConfigKey.COVER_CACHE_MB, 128, 16, 1024, '封面磁盘缓存上限（MB）'),
-  threshold(ConfigKey.STARTUP_SAMPLE_MAX, 20, 5, 100, '启动耗时样本保留数（Analytics.STARTUP_SAMPLES）'),
-  threshold(ConfigKey.DEVICE_SAMPLE_INTERVAL_MS, 1800000, 60000, 86400000, '设备指标采样间隔（毫秒）'),
-  threshold(ConfigKey.CRASH_MAX_RECORDS, 10, 1, 100, '崩溃记录保留条数（CrashGuard.MAX_RECORDS）'),
-  threshold(ConfigKey.CRASH_BATCH, 5, 1, 50, '崩溃runtime批量大小（CrashReporter.BATCH）'),
   threshold(ConfigKey.UPDATE_DELAY_MS, 3000, 0, 60000, '启动后更新检查延迟（毫秒）'),
   threshold(ConfigKey.HOME_PREFETCH_ROWS, 6, 0, 30, '首页封面预取行数（HomePage.PREFETCH_AHEAD_ROWS）'),
   threshold(ConfigKey.SEARCH_PAGE_SIZE, 18, 5, 50, '搜索结果分页大小（SearchPage.PAGE_SIZE）'),
@@ -308,8 +267,6 @@ const DEFS: ConfigDef[] = [
   threshold(ConfigKey.RECOMMEND_POOL_SIZE, 200, 20, 1000, '推荐候选池大小'),
 
   /* ── 补充阈值（10 项，P3-D 覆盖率收口）：默认值对齐原硬编码常量 ── */
-  threshold(ConfigKey.ANALYTICS_INTERVAL_MS, 3600000, 60000, 86400000,
-    '统计runtime最小间隔（毫秒，Analytics.REPORT_INTERVAL_MS）'),
   threshold(ConfigKey.REMOTE_ASSETS_DELAY_MS, 8000, 1000, 60000,
     '远程资源拉取启动延迟（毫秒，RemoteAssets.INIT_DELAY_MS）'),
   threshold(ConfigKey.CLIPBOARD_CHECK_INTERVAL_MS, 120000, 10000, 3600000,
@@ -425,8 +382,6 @@ export class ConfigRegistry {
   private static noticeList: Object[] = [];
   /** 关于页远程内容（原样保留，由 AboutContent 校验/合并）。 */
   private static aboutValue: Object | null = null;
-  /** 待runtime的配置变化记录（FIFO，上限 MAX_CHANGES）。 */
-  private static changes: ConfigChange[] = [];
 
   /** 全部注册项（返回副本，调用方可安全遍历/排序）。 */
   static allDefs(): ConfigDef[] {
@@ -488,7 +443,7 @@ export class ConfigRegistry {
   /**
    * 写本地覆盖（调试菜单/测试变体用）。
    * 值会按 ConfigDef 校验：未知 key、类型不符、超出范围/枚举都返回 false 且不写入；
-   * 实际生效值发生变化时记一条 ConfigChange（source='local_override'）。
+   * 实际生效值发生变化时通知一次配置应用事件（source='local_override'）。
    */
   static setLocalOverride(key: string, value: ConfigValue): boolean {
     const def: ConfigDef | undefined = DEF_MAP.get(key);
@@ -504,7 +459,7 @@ export class ConfigRegistry {
     ConfigRegistry.persistLocal();
     const newValue: ConfigValue = ConfigRegistry.effective(def);
     if (oldValue !== newValue) {
-      ConfigRegistry.pushChange(key, oldValue, newValue, 'local_override');
+      ConfigRegistry.notifyChange(key, oldValue, newValue, 'local_override');
     }
     return true;
   }
@@ -541,7 +496,7 @@ export class ConfigRegistry {
       }
       const newValue: ConfigValue = ConfigRegistry.effective(def);
       if (oldValue !== newValue) {
-        ConfigRegistry.pushChange(affected[i], oldValue, newValue, 'local_override');
+        ConfigRegistry.notifyChange(affected[i], oldValue, newValue, 'local_override');
       }
     }
   }
@@ -554,9 +509,9 @@ export class ConfigRegistry {
   /**
    * 写远程层（整包替换：先清空再写入，避免上一版残留）。返回真正生效的项数。
    * meta 携带 config_id / 版本 / ui / settings / notices；缺省时清空这些扩展段。
-   * 生效值实际变化的 key 会记一条 ConfigChange（source='remote'）；
+   * 生效值实际变化的 key 会通知一次配置应用事件（source='remote'）；
    * recordChanges=false 用于启动回放缓存——同一份配置每次启动都会「从默认值变为缓存值」，
-   * 若记录会导致 P13 重复runtime（SPEC §15.4：不是每次启动都记）。
+   * 若通知会导致重复计数（不是每次启动都算一次「配置应用」）。
    */
   static applyRemote(values: Record<string, ConfigValue>, meta?: runtimeMeta | null,
     recordChanges: boolean = true): number {
@@ -616,7 +571,7 @@ export class ConfigRegistry {
         }
         const newValue: ConfigValue = ConfigRegistry.effective(def);
         if (oldValue !== newValue) {
-          ConfigRegistry.pushChange(affectedKey, oldValue, newValue, 'remote');
+          ConfigRegistry.notifyChange(affectedKey, oldValue, newValue, 'remote');
         }
       });
     }
@@ -637,13 +592,6 @@ export class ConfigRegistry {
     ConfigRegistry.settingsValue = null;
     ConfigRegistry.noticeList = [];
     ConfigRegistry.aboutValue = null;
-  }
-
-  /** 取走待runtime的配置变化记录（取走即清空，供 P13 runtime）。 */
-  static takeChanges(): ConfigChange[] {
-    const out: ConfigChange[] = ConfigRegistry.changes.slice(0);
-    ConfigRegistry.changes = [];
-    return out;
   }
 
   /* ── UI / 设置页 / 通知 读取接口（P10/P11/P12 消费）── */
@@ -773,9 +721,9 @@ export class ConfigRegistry {
     }
   }
 
-  /** 追加一条变更记录（FIFO，超过上限丢最旧）。 */
-  private static pushChange(key: string, oldValue: ConfigValue, newValue: ConfigValue, source: string): void {
-    const change: ConfigChange = {
+  /** 通知当前实现「某个配置项生效值发生了变化」（公开构建为空实现，直接丢弃）。 */
+  private static notifyChange(key: string, oldValue: ConfigValue, newValue: ConfigValue, source: string): void {
+    const change: runtimeConfigApply = {
       configId: ConfigRegistry.runtimeId,
       configVersion: ConfigRegistry.runtimeVersion,
       key: key,
@@ -784,10 +732,7 @@ export class ConfigRegistry {
       source: source,
       appliedAt: Math.floor(Date.now() / 1000)
     };
-    ConfigRegistry.changes.push(change);
-    while (ConfigRegistry.changes.length > MAX_CHANGES) {
-      ConfigRegistry.changes.shift();
-    }
+    runtimeHub.get().onConfigApplied(change);
   }
 
   /** 三层合并：本地覆盖 > 用户偏好 > 远程 > 默认。 */

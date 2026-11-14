@@ -8,13 +8,10 @@ import { Api } from '../services/Api';
 import { UserListPrefetch } from '../services/UserListPrefetch';
 import { ScreenPrefetch } from '../services/ScreenPrefetch';
 import { LineAuto } from '../services/LineAuto';
-import { CrashGuard } from '../services/CrashGuard';
+import { runtimeHub } from '../services/runtimeHub';
 import { PowerGuard } from '../services/PowerGuard';
-import { Analytics } from '../services/Analytics';
 import { PlaybackLog } from '../player/PlaybackLog';
 import { ClipboardLink } from '../services/ClipboardLink';
-import { CrashReporter } from '../services/CrashReporter';
-import { DeviceMetrics } from '../services/DeviceMetrics';
 import { UiBus } from '../services/UiBus';
 import { Net } from '../services/Net';
 import { PerfMark } from '../utils/PerfMark';
@@ -145,7 +142,7 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, true);
-    Analytics.onForeground();
+    runtimeHub.get().onForeground();
     // 剪贴板快捷拉起：延迟读取，避开首帧；内部有 2 分钟节流与同链接去重。
     setTimeout(() => {
       ClipboardLink.detect().then((videoId: number) => {
@@ -159,12 +156,10 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     AppStorage.setOrCreate<boolean>(K_APP_ACTIVE, false);
-    // 结算本次前台时长（匿名统计，设置页可关）。
-    Analytics.onBackground();
+    // 结算本次前台时长与会话结束快照（由实现方决定是否采集）。
+    runtimeHub.get().onBackground();
     // 播放诊断日志落盘（避免频繁写 preferences，只在后台时写一次）。
     PlaybackLog.persist();
-    // 设备指标：结算本次会话的结束电量与温度峰值。
-    DeviceMetrics.onSessionEnd();
     // 兜底：播放页可能为了全屏隐藏了状态栏，退到后台时统一走 WindowChrome 串行队列恢复，避免竞态。
     WindowChrome.showStatusBar();
   }
@@ -172,7 +167,7 @@ export default class EntryAbility extends UIAbility {
   private async initServices(systemDark: boolean): Promise<void> {
     try {
       await Prefs.init(this.context);
-      // runtime/runtime：把内置自签 CA 复制到沙箱（供 Net 的 caPath 校验），必须先于任何runtime请求。
+      // 自建服务端：把内置自签 CA 复制到沙箱（供 Net 的 caPath 校验），必须先于任何服务端请求。
       await Endpoints.init();
       Lines.load();
       Session.load();
@@ -184,20 +179,19 @@ export default class EntryAbility extends UIAbility {
       // 冷启动：立即刷新一次所有已添加卡片；封面快照生成后 UserListPrefetch 再补一次。
       WidgetRefresher.requestRefresh(500);
       hilog.info(DOMAIN, TAG, 'services ready, base=%{public}s', Lines.current());
-      // 崩溃监控：监听系统 fault 事件并落本地（不runtime）。
-      CrashGuard.init();
+      // 稳定性监听：异常/崩溃事件由实现方决定如何处理（公开构建为空操作）。
+      runtimeHub.get().initStabilityWatch();
       // 电源守卫：跟踪省电模式与电量，供 AI 超分自动降级。
       PowerGuard.init();
       // 播放诊断日志：恢复上次缓冲（导出诊断包时用）。
       PlaybackLog.restore();
-      // 匿名使用统计：随机 UUID + 版本/型号 + 当日聚合。
-      Analytics.onLaunch();
-      // 崩溃堆栈自动runtime：把上次会话遗留的崩溃记录（已脱敏）批量上传。
-      CrashReporter.reportPending();
-      // 设备指标：记录会话起始电量，延迟采样内存/磁盘（30 分钟节流）。
-      DeviceMetrics.onSessionStart();
+      // 会话开始：实现方自行决定采集/runtime时机（公开构建为空操作）。
+      runtimeHub.get().onLaunch();
+      // 上次会话遗留的异常记录批量送出（公开构建为空操作）。
+      runtimeHub.get().reportPendingCrashes();
+      // 设备指标采样（实现方负责节流与异步；公开构建为空操作）。
       setTimeout(() => {
-        DeviceMetrics.sampleAsync();
+        runtimeHub.get().sampleDeviceMetrics();
       }, 8000);
       // 线路智能切换：启动后台探测，必要时静默换到可用线路（换线会通过 AppStorage 触发页面重载）。
       LineAuto.init();
@@ -250,10 +244,10 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, TAG, 'Main page loaded');
-      // 启动耗时：onCreate → 首帧加载完成（本地记录；匿名统计只runtime p50/p90）。
+      // 启动耗时：onCreate → 首帧加载完成（本地记录；是否runtime由实现方决定）。
       const startupMs: number = PerfMark.end('startup');
       PerfMark.recordStartup(startupMs);
-      Analytics.recordStartup(startupMs);
+      runtimeHub.get().recordStartup(startupMs);
       this.setupKeyboardAvoidMode(windowStage);
       this.setupWindow(windowStage);
       // 收藏/历史详情预取：延迟约 1.2s 后台预热（内部不阻塞），打开「我的」直接命中共享详情缓存。

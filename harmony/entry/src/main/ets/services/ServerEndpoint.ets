@@ -60,7 +60,7 @@ export class ServerEndpoint {
     return ServerEndpoint.key;
   }
 
-  /** host:port（网络层据此识别runtime请求并附加接入密钥/CA）。 */
+  /** host:port（网络层据此识别自建服务端请求并附加接入密钥/CA）。 */
   static host(): string {
     ServerEndpoint.ensure();
     return ServerEndpoint.hostValue;

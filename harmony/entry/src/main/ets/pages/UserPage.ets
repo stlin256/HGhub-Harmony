@@ -11,7 +11,8 @@ import { K_BOTTOM_INSET, K_CONTENT_W, K_DARK } from '../state/UserPrefs';
 import { ROUTE_PLAYER, UserParam, PlayerParam } from '../state/Routes';
 import { UiBus } from '../services/UiBus';
 import { fmt } from '../utils/Format';
-import { ActionStats, ACT_FOLLOW, ACT_USER } from '../services/ActionStats';
+import { runtimeHub } from '../services/runtimeHub';
+import { runtimeAction } from '../services/runtime';
 
 // @config-exempt: 未注册（ConfigRegistry 无对应 page_size_* key）
 const PAGE_SIZE: number = 20;
@@ -39,7 +40,7 @@ export struct UserPage {
   private loadSeq: number = 0;
 
   aboutToAppear(): void {
-    ActionStats.record(ACT_USER);
+    runtimeHub.get().recordAction(runtimeAction.USER);
     this.loadFirst();
   }
 
@@ -118,7 +119,7 @@ export struct UserPage {
   }
 
   private async toggleFollow(): Promise<void> {
-    ActionStats.record(ACT_FOLLOW);
+    runtimeHub.get().recordAction(runtimeAction.FOLLOW);
     if (this.followBusy) {
       return;
     }

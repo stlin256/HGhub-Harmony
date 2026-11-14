@@ -4,7 +4,7 @@ import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Lines, PREF_LINE_LAST_GOOD } from './Lines';
 import { Net } from './Net';
 import { Prefs } from './Prefs';
-import { LineStats } from './LineStats';
+import { runtimeHub } from './runtimeHub';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGLine';
@@ -270,8 +270,8 @@ export class LineAuto {
         latencies.push(r.ms);
       }
     }
-    // 线路统计：记录本批探测延迟（只记数值，不记域名）。
-    LineStats.recordLatencies(latencies);
+    // 线路探测延迟：只记数值，不记域名。
+    runtimeHub.get().recordLineLatencies(latencies);
     return out;
   }
 

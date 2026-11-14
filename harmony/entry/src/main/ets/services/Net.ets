@@ -7,7 +7,7 @@ import { parseHttpsUrl, redactSensitive } from '../utils/Security';
 import { ConfigKey, ConfigRegistry } from './ConfigRegistry';
 import { Endpoints } from './Endpoints';
 import { Ipv6Preference } from './Ipv6Preference';
-import { LineStats } from './LineStats';
+import { runtimeHub } from './runtimeHub';
 
 /** 与原项目一致的桌面 Chrome UA。 */
 export const USER_AGENT: string =
@@ -110,7 +110,7 @@ function hostOfUrl(raw: string): string {
  * 安全基线（不要在这里改）：
  * - TLS 证书校验使用系统 http 栈默认实现，不设置 remoteValidation / certificatePinning，
  *   也不关闭校验（pin 不可行：CDN 证书轮换会直接导致全站不可用）；
- *   唯一例外：自建runtime服务器使用内置自签 CA（caPath），仅作用于该 host；
+ *   唯一例外：自建服务端使用内置自签 CA（caPath），仅作用于该 host；
  * - 只允许 https URL（系统 URL 解析器判定 scheme），明文 http 在进入请求栈前就被拒绝；
  * - 响应体有明确大小上限（HttpRequestOptions.maxLimit + 收到后再校验）；
  * - 日志/错误只出现 method/opPath/host 与脱敏后的文本，不出现 token/auth_key/完整签名 URL。
@@ -331,11 +331,11 @@ export class Net {
     method: http.RequestMethod, headers: Record<string, string>,
     body: string, timeoutMs: number, asBytes: boolean): Promise<RawText | RawBytes> {
     const request: http.HttpRequest = Net.httpFor(host);
-    // 自建runtime服务器：附加 128 位接入密钥（x-hgub-key）与内置 CA 校验；
+    // 自建服务端：附加 128 位接入密钥（x-hgub-key）与内置 CA 校验；
     // 其他 host（业务线路/GitHub 等）完全不受影响。
-    const runtimeHost: string = Endpoints.host();
-    const isruntime: boolean = runtimeHost.length > 0 && host === runtimeHost;
-    if (isruntime && headers['x-hgub-key'] === undefined) {
+    const serverHost: string = Endpoints.host();
+    const isServerHost: boolean = serverHost.length > 0 && host === serverHost;
+    if (isServerHost && headers['x-hgub-key'] === undefined) {
       headers['x-hgub-key'] = Endpoints.clientKey();
     }
     const options: http.HttpRequestOptions = {
@@ -349,8 +349,8 @@ export class Net {
       // 地址族：DEFAULT 由系统决定；ONLY_V6 用于 IPv6 优先。
       addressFamily: family
     };
-    if (isruntime && Endpoints.caPath().length > 0) {
-      // 自签服务器证书：只对runtime host 使用内置 CA，其余 host 仍走系统默认校验。
+    if (isServerHost && Endpoints.caPath().length > 0) {
+      // 自签服务器证书：只对该 host 使用内置 CA，其余 host 仍走系统默认校验。
       options.caPath = Endpoints.caPath();
     }
     if (body.length > 0) {
@@ -385,7 +385,7 @@ export class Net {
     return new RawText(code, text, contentType);
   }
 
-  /** 直连 POST JSON（runtimeruntime等非业务接口；不走多源聚合）。 */
+  /** 直连 POST JSON（runtime等非业务接口；不走多源聚合）。 */
   static async postJson(url: string, body: string, timeoutMs: number): Promise<RawText> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json; charset=utf-8',
@@ -481,9 +481,9 @@ export class Net {
     let lastError = 'network error';
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
-        const result = await Net.edgeOnce(url, headers, method, path, body);
-        // 线路统计：只记「主站 / 镜像」成败，不记具体域名。
-        LineStats.recordRequest(base, true);
+        const result = await Net.edgeOnce(url, headers, method, path, body, attempt);
+        // 线路请求结果：只记成败，具体分类由实现方判定，不记录域名。
+        runtimeHub.get().recordLineRequest(base, true);
         return result;
       } catch (err) {
         const message = Net.errorText(err);
@@ -492,7 +492,7 @@ export class Net {
         lastError = message;
         const final: boolean = !Net.retryable(message) || attempt + 1 >= attempts;
         if (final) {
-          LineStats.recordRequest(base, false);
+          runtimeHub.get().recordLineRequest(base, false);
           throw new Error(message);
         }
         await delay(350 * (attempt + 1));
@@ -502,7 +502,7 @@ export class Net {
   }
 
   private static async edgeOnce(url: string, headers: Record<string, string>, method: string,
-    path: string, body: Object | null): Promise<Object | null> {
+    path: string, body: Object | null, attempt: number): Promise<Object | null> {
     let encodedBody = '';
     let contentType = '';
     if (body !== null) {
@@ -515,9 +515,21 @@ export class Net {
       body: encodedBody,
       content_type: contentType
     };
-    const raw = await Net.request(url, http.RequestMethod.POST, headers,
-      JSON.stringify(envelope), Net.defaultTimeoutMs(), false);
+    const startedAt: number = Date.now();
+    let raw: RawText | RawBytes;
+    try {
+      raw = await Net.request(url, http.RequestMethod.POST, headers,
+        JSON.stringify(envelope), Net.defaultTimeoutMs(), false);
+    } catch (err) {
+      // 无响应（DNS/连接/超时）：statusCode 记 0，网络层已把错误归一成可读文本。
+      const message: string = Net.errorText(err);
+      runtimeHub.get().recordHttpResult(0, Date.now() - startedAt, message.indexOf('超时') >= 0,
+        attempt > 0);
+      throw new Error(message);
+    }
     const response = raw as RawText;
+    // 业务接口 HTTP 结果（含 4xx/5xx）：只记状态码/耗时/是否重试，不含 URL 与域名。
+    runtimeHub.get().recordHttpResult(response.code, Date.now() - startedAt, false, attempt > 0);
     if (response.code === 401 || response.code === 403) {
       throw new Error('401');
     }

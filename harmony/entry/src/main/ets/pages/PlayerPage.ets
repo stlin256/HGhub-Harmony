@@ -19,7 +19,8 @@ import { PlayerService, SessionMeta } from '../player/PlayerService';
 import { PlayerSeekPolicy } from '../player/PlayerSeekPolicy';
 import { ContinuationState } from '../services/ContinuationState';
 import { PiPController } from '../player/PiPController';
-import { Analytics } from '../services/Analytics';
+import { runtimeHub } from '../services/runtimeHub';
+import { runtimeAction } from '../services/runtime';
 import { ShareLink } from '../services/ShareLink';
 import {
   AVCastPicker, AVCastPickerColorMode, AVCastPickerState, AVCastPickerStyle
@@ -34,9 +35,6 @@ import { LineSheet } from '../components/LineSheet';
 import { HgAsyncCover } from '../components/HgAsyncCover';
 import { fmt, fmtTime, hostOf } from '../utils/Format';
 import { I18n } from '../utils/I18n';
-import {
-  ActionStats, ACT_CAST, ACT_EP_SWITCH, ACT_FAV, ACT_LIKE, ACT_PIP, ACT_RATE, ACT_SHARE, ACT_UNFAV, ACT_UNLIKE
-} from '../services/ActionStats';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
 import { runtime } from '../services/runtime';
 import { IS_TEST_VARIANT } from '../utils/BuildVariant';
@@ -397,8 +395,8 @@ export struct PlayerPage {
   }
 
   aboutToAppear(): void {
-    // 匿名统计：播放页访问计数。
-    Analytics.countPage('player');
+    // 页面访问计数（由实现方决定是否采集）。
+    runtimeHub.get().countPage('player');
     let ids = this.params.videoIds;
     if (ids === undefined || ids === null || ids.length === 0) {
       ids = [0];
@@ -1312,7 +1310,7 @@ export struct PlayerPage {
   }
 
   private switchEpisode(ep: number): void {
-    ActionStats.record(ACT_EP_SWITCH);
+    runtimeHub.get().recordAction(runtimeAction.EP_SWITCH);
     this.sheetVisible = false;
     if (ep < 1 || ep === this.ep) {
       return;
@@ -1366,7 +1364,7 @@ export struct PlayerPage {
 
   /* ── 互动 ─────────────────────────────────────────── */
   private toggleLike(): void {
-    ActionStats.record(this.liked ? ACT_UNLIKE : ACT_LIKE);
+    runtimeHub.get().recordAction(this.liked ? runtimeAction.UNLIKE : runtimeAction.LIKE);
     const id = this.currentId();
     if (id <= 0) {
       return;
@@ -1405,7 +1403,7 @@ export struct PlayerPage {
   }
 
   private toggleFav(): void {
-    ActionStats.record(this.faved ? ACT_UNFAV : ACT_FAV);
+    runtimeHub.get().recordAction(this.faved ? runtimeAction.UNFAV : runtimeAction.FAV);
     const id = this.currentId();
     if (id <= 0) {
       return;
@@ -1486,7 +1484,7 @@ export struct PlayerPage {
     if (id <= 0) {
       return;
     }
-    ActionStats.record(ACT_SHARE);
+    runtimeHub.get().recordAction(runtimeAction.SHARE);
     // 系统分享总开关（远程 kill switch）：关闭时直接回退「复制链接」，不调起系统分享面板。
     const shareEnabled: boolean = ConfigRegistry.getBool(ConfigKey.SYSTEM_SHARE_ENABLED);
     const shown: boolean = shareEnabled ? await ShareLink.share(id, this.titleText()) : false;
@@ -1608,8 +1606,8 @@ export struct PlayerPage {
     const open: boolean = state === AVCastPickerState.STATE_APPEARING;
     this.castPanelOpen = open;
     if (open) {
-      // 匿名行为统计：投播面板出现即记一次投播动作（不记投到哪台设备）。
-      ActionStats.record(ACT_CAST);
+      // 投播面板出现即记一次投播动作（不记投到哪台设备）。
+      runtimeHub.get().recordAction(runtimeAction.CAST);
       if (this.hideTimer >= 0) {
         clearTimeout(this.hideTimer);
         this.hideTimer = -1;
@@ -1659,7 +1657,7 @@ export struct PlayerPage {
   }
 
   private changeRate(rate: number): void {
-    ActionStats.record(ACT_RATE);
+    runtimeHub.get().recordAction(runtimeAction.RATE);
     this.rate = rate;
     this.speedLocked = false;
     this.speedBoost = false;
@@ -2456,7 +2454,7 @@ export struct PlayerPage {
 
   /** 进入画中画：把当前播放的 XComponent 交给系统 PiP 窗口。 */
   private async enterPiP(): Promise<void> {
-    ActionStats.record(ACT_PIP);
+    runtimeHub.get().recordAction(runtimeAction.PIP);
     if (!PiPController.isEnabled()) {
       UiBus.toast('系统未开启画中画');
       return;
