@@ -1,7 +1,7 @@
 /**
  * 灰度分桶与 A/B 分组。
  *
- * 规则（docs/harmony/REMOTE-CONFIG-SPEC.md §6）：
+ * 规则：
  *   bucket   = parseInt(sha256(install_id).slice(0, 8), 16) % 100   → 0-99，稳定且均匀
  *   rollout  = bucket < pct                                       → 该设备进入灰度
  *   abGroup  = bucket % groups                                    → A/B 分组下标

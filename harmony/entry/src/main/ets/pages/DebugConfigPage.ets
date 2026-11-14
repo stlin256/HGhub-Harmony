@@ -1,15 +1,15 @@
 /**
  * 调试配置菜单（仅测试变体可达）。
  *
- * 用途（docs/harmony/REMOTE-CONFIG-SPEC.md §8.3）：
+ * 用途：
  * - 首页摇一摇进入（Index 里 IS_TEST_VARIANT 门禁），分组展示全部可runtime项并支持逐项修改；
  * - 改动一律写 ConfigRegistry 本地覆盖层（setLocalOverride），可逐项/整体重置；
  * - 附带灰度/A-B 模拟、资源缓存查看、更新闸门模拟、线路切换、配置 JSON 导出等联调工具。
  *
  * 安全边界：
  * - 页面入口只在 test 变体注册（release 变体摇不出来），页面内部再做一次 IS_TEST_VARIANT 门禁；
- * - 只读写本地配置与本地缓存，不新增网络请求（「立即拉取」复用 runtime.fetch，
- *   「触发更新检查」复用 UpdateChecker.checkNow，均为既有链路）；
+ * - 只读写本地配置与本地缓存，不新增网络请求（「立即拉取」复用 RuntimeConfig.fetch，
+ *   「触发更新检查」复用 RuntimeUpdater.checkNow，均为既有链路）；
  * - 所有异常静默降级为 Toast，不崩溃、不影响启动。
  *
  * 隐私边界：
@@ -33,11 +33,11 @@ import { ConfigDef, ConfigKey, ConfigRegistry, ConfigValue } from '../services/C
 import { Endpoints } from '../services/Endpoints';
 import { Lines } from '../services/Lines';
 import { Prefs } from '../services/Prefs';
-import { runtime } from '../services/runtime';
+import { RuntimeConfig } from '../services/RuntimeConfig';
 import { WindowChrome } from '../services/WindowChrome';
 import { abGroup, bucket } from '../services/Rollout';
 import { UiBus } from '../services/UiBus';
-import { UpdateChecker } from '../services/UpdateChecker';
+import { RuntimeUpdater } from '../services/RuntimeUpdater';
 import { IS_TEST_VARIANT, VARIANT_NAME } from '../utils/BuildVariant';
 import { AppChannel } from '../utils/AppChannel';
 import { DebugOverlay, DebugOverlayLine } from '../components/DebugOverlay';
@@ -51,9 +51,9 @@ const DEBUG_AB_KEY: string = 'debug_ab_group_override';
 const DEBUG_SIM_CURRENT_KEY: string = 'debug_sim_current_version';
 /** 调试用 Prefs 键：模拟 min_version。 */
 const DEBUG_SIM_MIN_KEY: string = 'debug_sim_min_version';
-/** 资源热更新缓存目录（与 P5 RemoteAssets 约定一致）。 */
+/** 资源热更新缓存目录（与 P5 RuntimeAssets 约定一致）。 */
 const REMOTE_ASSETS_DIR: string = 'remote-assets';
-/** 资源清单缓存键（与 P5 RemoteAssets 约定一致）。 */
+/** 资源清单缓存键（与 P5 RuntimeAssets 约定一致）。 */
 const REMOTE_ASSETS_MANIFEST_KEY: string = 'remote_assets_manifest';
 /** A/B 分组数。 */
 const AB_GROUPS: number = 2;
@@ -254,7 +254,7 @@ export struct DebugEditDialog {
 
 /**
  * 调试配置菜单页。
- * 数据全部来自 ConfigRegistry / runtime / Prefs / Lines，本页只做展示与本地覆盖写入。
+ * 数据全部来自 ConfigRegistry / RuntimeConfig / Prefs / Lines，本页只做展示与本地覆盖写入。
  */
 @Component
 export struct DebugConfigPage {
@@ -351,11 +351,11 @@ export struct DebugConfigPage {
     this.flagDefs = flags;
     this.prefDefs = prefs;
     this.numberDefs = numbers;
-    this.infoVersion = runtime.currentVersion();
-    this.infoConfigId = runtime.configId();
-    this.infoSource = sourceText(runtime.source());
-    this.infoFetchAt = formatTime(runtime.lastFetchAt());
-    this.infoSig = runtime.source() === 'default' ?
+    this.infoVersion = RuntimeConfig.currentVersion();
+    this.infoConfigId = RuntimeConfig.configId();
+    this.infoSource = sourceText(RuntimeConfig.source());
+    this.infoFetchAt = formatTime(RuntimeConfig.lastFetchAt());
+    this.infoSig = RuntimeConfig.source() === 'default' ?
       '未拉取或校验失败（整包丢弃）' : '通过（失败整包丢弃）';
     const installId: string = Prefs.getString('install_id', '');
     this.realBucket = bucket(installId);
@@ -564,7 +564,7 @@ export struct DebugConfigPage {
   private async fetchConfig(): Promise<void> {
     UiBus.toast('正在拉取远程配置…');
     try {
-      await runtime.fetch();
+      await RuntimeConfig.fetch();
     } catch (err) {
     }
     this.refresh();
@@ -574,7 +574,7 @@ export struct DebugConfigPage {
 
   private clearConfigCache(): void {
     try {
-      runtime.clearCache();
+      RuntimeConfig.clearCache();
     } catch (err) {
     }
     this.refresh();
@@ -611,7 +611,7 @@ export struct DebugConfigPage {
 
   /* ── 资源缓存 ─────────────────────────────────────── */
 
-  /** 资源缓存目录（P5 RemoteAssets 落盘位置）。 */
+  /** 资源缓存目录（P5 RuntimeAssets 落盘位置）。 */
   private assetsDir(): string {
     try {
       if (!AppContext.isReady()) {
@@ -690,7 +690,7 @@ export struct DebugConfigPage {
   private async triggerUpdateCheck(): Promise<void> {
     UiBus.toast('正在检查更新…');
     try {
-      const info: UpdateInfo = await UpdateChecker.checkNow();
+      const info: UpdateInfo = await RuntimeUpdater.checkNow();
       if (info.has_update) {
         UiBus.showUpdate(info);
         UiBus.toastOk('发现新版本 v' + info.latest);
@@ -756,10 +756,10 @@ export struct DebugConfigPage {
     try {
       const payload: DebugExport = {
         variant: VARIANT_NAME,
-        config_version: runtime.currentVersion(),
-        config_id: runtime.configId(),
-        source: runtime.source(),
-        last_fetch_at: runtime.lastFetchAt(),
+        config_version: RuntimeConfig.currentVersion(),
+        config_id: RuntimeConfig.configId(),
+        source: RuntimeConfig.source(),
+        last_fetch_at: RuntimeConfig.lastFetchAt(),
         values: ConfigRegistry.snapshot()
       };
       this.copyText(JSON.stringify(payload), '当前生效配置 JSON 已复制');
@@ -1108,8 +1108,6 @@ export struct DebugConfigPage {
     this.InfoRow('Host', this.serverHost.length > 0 ? this.serverHost : '—')
     this.InfoRow('接入密钥', this.serverKeyReady ? '已注入（32 hex，已混淆）' : '未注入')
     this.InfoRow('内置 CA', this.caReady ? '已复制到沙箱' : '未初始化/复制失败')
-    this.InfoRow('更新接口', Endpoints.updateUrl())
-    this.InfoRow('配置接口', Endpoints.configUrl())
     this.InfoRow('App 版本', 'v' + this.appVersion + ' (' + this.appVersionCode + ')')
     this.InfoRow('变体', VARIANT_NAME + (IS_TEST_VARIANT ? '（测试）' : '（发布）'))
     this.InfoRow('分发渠道', AppChannel.id())
@@ -1126,8 +1124,8 @@ export struct DebugConfigPage {
     this.InfoRow('来源', this.infoSource)
     this.InfoRow('拉取时间', this.infoFetchAt)
     this.InfoRow('签名校验', this.infoSig)
-    this.ActionRow('立即拉取远程配置', 'GET /v1/config；验签失败整包丢弃', '拉取', 'accent', 'fetch')
-    this.ActionRow('刷新本页', '重新读取 ConfigRegistry / runtime 状态', '刷新', 'accent', 'refresh')
+    this.ActionRow('刷新运行时配置', '调用 RuntimeConfig.fetch()；公开构建为空操作', '拉取', 'accent', 'fetch')
+    this.ActionRow('刷新本页', '重新读取 ConfigRegistry / RuntimeConfig 状态', '刷新', 'accent', 'refresh')
   }
 
   @Builder
@@ -1198,7 +1196,7 @@ export struct DebugConfigPage {
     this.InfoRow('模拟 min_version', this.simMin.length > 0 ? this.simMin : '未设置')
     this.ActionRow('模拟当前版本', '仅本地记录，用于构造更新弹窗', '设置', 'accent', 'set_sim_current')
     this.ActionRow('模拟 min_version', '仅本地记录，用于构造强制更新弹窗', '设置', 'accent', 'set_sim_min')
-    this.ActionRow('触发更新检查', '调用 UpdateChecker.checkNow()，有新版本则弹窗', '检查', 'accent',
+    this.ActionRow('触发更新检查', '调用 RuntimeUpdater.checkNow()，有新版本则弹窗', '检查', 'accent',
       'check_update')
     this.ActionRow('用模拟值弹更新窗', '不联网，直接构造 UpdateInfo 弹窗', '弹窗', 'accent', 'sim_update')
     this.ActionRow('清除模拟值', '删除模拟版本本地记录', '清除', 'danger', 'clear_sim')
@@ -1210,7 +1208,7 @@ export struct DebugConfigPage {
     ForEach(this.lines, (line: LineItem) => {
       this.LineRow(line)
     }, (line: LineItem) => 'line-' + line.url + '-' + this.revision)
-    this.ActionRow('清空配置缓存', 'runtime.clearCache()：回落编译期默认值', '清空', 'danger',
+    this.ActionRow('清空配置缓存', 'RuntimeConfig.clearCache()：回落编译期默认值', '清空', 'danger',
       'clear_config_cache')
   }
 

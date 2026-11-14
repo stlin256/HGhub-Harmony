@@ -36,7 +36,7 @@ import { HgAsyncCover } from '../components/HgAsyncCover';
 import { fmt, fmtTime, hostOf } from '../utils/Format';
 import { I18n } from '../utils/I18n';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
-import { runtime } from '../services/runtime';
+import { RuntimeConfig } from '../services/RuntimeConfig';
 import { IS_TEST_VARIANT } from '../utils/BuildVariant';
 import { DebugLine, PlayerDiagnostics } from '../components/player/PlayerDiagnostics';
 import { PlayerSheetContent } from '../components/player/PlayerSheetContent';
@@ -3274,8 +3274,8 @@ export struct PlayerPage {
     out.push(new DebugLine('超分诊断', this.service.superResolutionDebug()));
     out.push(new DebugLine('超分电源', this.service.superResolutionPowerDebug()));
     out.push(new DebugLine('分发渠道', AppChannel.id()));
-    out.push(new DebugLine('配置来源', runtime.source() + ' · v' + runtime.currentVersion()));
-    out.push(new DebugLine('config_id', runtime.configId().length > 0 ? runtime.configId() : '—'));
+    out.push(new DebugLine('配置来源', RuntimeConfig.source() + ' · v' + RuntimeConfig.currentVersion()));
+    out.push(new DebugLine('config_id', RuntimeConfig.configId().length > 0 ? RuntimeConfig.configId() : '—'));
     out.push(new DebugLine('窗口', Math.round(this.screenW) + '×' + Math.round(this.screenH) + ' vp'));
     return out;
   }

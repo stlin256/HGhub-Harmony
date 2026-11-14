@@ -12,10 +12,10 @@ import { WindowChrome } from '../services/WindowChrome';
 import { Prefs } from '../services/Prefs';
 import { Api } from '../services/Api';
 import { ContinuationState, ContinuePayload } from '../services/ContinuationState';
-import { UpdateChecker } from '../services/UpdateChecker';
+import { RuntimeUpdater } from '../services/RuntimeUpdater';
 import { RuntimeHooksHub } from '../services/RuntimeHooksHub';
 import { ClipboardLink } from '../services/ClipboardLink';
-import { emptyNotice, NoticeData, RemoteNotice } from '../services/RemoteNotice';
+import { emptyNotice, NoticeData, RuntimeNotice } from '../services/RuntimeNotice';
 import { UpdateInfo } from '../models/Types';
 import { ConfirmCopy, ConfirmDialog } from '../components/HgConfirmDialog';
 import { HgColor, HgFont, HgSize, UiEntryKey } from '../design/HgTokens';
@@ -44,7 +44,7 @@ import { DebugConfigPage } from './DebugConfigPage';
 import { LoginSheet } from '../components/LoginSheet';
 import { LineSheet } from '../components/LineSheet';
 import { TabletNoticeDialog } from '../components/TabletNoticeDialog';
-import { RemoteNoticeDialog } from '../components/RemoteNoticeDialog';
+import { NoticeDialog } from '../components/NoticeDialog';
 import { ShakeDetector } from '../services/ShakeDetector';
 import {
   ROUTE_PLAYER, ROUTE_CHANNEL, ROUTE_RANKS, ROUTE_SETTINGS, ROUTE_POSTS, ROUTE_POST, ROUTE_VIDEO,
@@ -75,7 +75,7 @@ struct Index {
   /** 更新弹窗文案与本次冷启动是否已弹过（保证至多一次）。 */
   private updateCopy: ConfirmCopy = new ConfirmCopy('', '', '打开下载链接', '稍后', false);
   private updateShown: boolean = false;
-  private updateUrl: string = '';
+  private downloadUrl: string = '';
   private updateController: CustomDialogController = new CustomDialogController({
     builder: ConfirmDialog({
       copyOf: (): ConfirmCopy => this.updateCopy,
@@ -212,10 +212,10 @@ struct Index {
     UiBus.onClipboardLink = (videoId: number) => {
       this.presentClipLink(videoId);
     };
-    UpdateChecker.scheduleOnLaunch();
+    RuntimeUpdater.scheduleOnLaunch();
     // 兜底：检查可能在 Index 挂载前就完成，这里补一次消费，保证「至少弹一次」。
     setTimeout(() => {
-      const pending: UpdateInfo | undefined = UpdateChecker.takePending();
+      const pending: UpdateInfo | undefined = RuntimeUpdater.takePending();
       if (pending !== undefined) {
         this.presentUpdate(pending);
       }
@@ -242,18 +242,18 @@ struct Index {
     this.maybeShowTabletNotice();
     // 摇一摇入口（仅 test 变体；release 下空操作）。
     this.startShakeEntry();
-    // 远程通知：延迟可远程设定（默认 2s，不阻塞首屏；无 notices 时 pick() 立即返回 undefined）。
+    // 通知：延迟可配置（默认 2s，不阻塞首屏；无通知时 pick() 立即返回 undefined）。
     const noticeDelay: number = Math.max(0, ConfigRegistry.getNumber(ConfigKey.NOTICE_DELAY_MS));
     setTimeout(() => {
-      this.presentRemoteNotice();
+      this.presentNotice();
     }, noticeDelay);
   }
 
   /**
-   * 远程通知：仅在首页 Tab、无其他弹窗/二级页时展示；无命中则什么都不做。
-   * 每次冷启动最多 1 条（RemoteNotice.pick() 内部保证），展示后立即写频率记录。
+   * 通知：仅在首页 Tab、无其他弹窗/二级页时展示；无命中则什么都不做。
+   * 每次冷启动最多 1 条（RuntimeNotice.pick() 内部保证），展示后立即写频率记录。
    */
-  private presentRemoteNotice(): void {
+  private presentNotice(): void {
     try {
       if (this.currentIndex !== 0 || this.loginVisible || this.lineVisible) {
         return;
@@ -261,11 +261,11 @@ struct Index {
       if (this.navStack.size() > 0) {
         return;
       }
-      const notice: NoticeData | undefined = RemoteNotice.pick();
+      const notice: NoticeData | undefined = RuntimeNotice.pick();
       if (notice === undefined) {
         return;
       }
-      RemoteNotice.markShown(notice.id);
+      RuntimeNotice.markShown(notice.id);
       this.noticeData = notice;
       // 只有 dialog / fullscreen 是模态的，需要拦截返回键；banner / toast 不阻断页面。
       this.noticeModal = notice.mode === 'dialog' || notice.mode === 'fullscreen';
@@ -387,7 +387,7 @@ struct Index {
       return;
     }
     this.updateShown = true;
-    this.updateUrl = info.url;
+    this.downloadUrl = info.url;
     const title: string = I18n.fmt1($r('app.string.fmt_new_version'), info.latest);
     let message: string = I18n.fmt2($r('app.string.fmt_version_pair'), info.current, info.latest);
     if (info.notes !== undefined && info.notes !== null && info.notes.length > 0) {
@@ -403,7 +403,7 @@ struct Index {
 
   /** 打开下载页并把链接复制到剪贴板。 */
   private openUpdatePage(): void {
-    const url: string = this.updateUrl.length > 0 ? this.updateUrl :
+    const url: string = this.downloadUrl.length > 0 ? this.downloadUrl :
       'https://github.com/stlin256/HGhub-Harmony/releases';
     Api.openUrl(url);
     try {
@@ -796,9 +796,9 @@ struct Index {
           .hitTestBehavior(HitTestMode.None)
       }
 
-      // 远程通知：无runtime时 noticeVisible 恒为 false，不渲染任何节点（零行为）。
+      // 通知：无通知时 noticeVisible 恒为 false，不渲染任何节点（零行为）。
       if (this.noticeVisible) {
-        RemoteNoticeDialog({
+        NoticeDialog({
           notice: this.noticeData,
           onClosed: (): void => {
             this.noticeVisible = false;

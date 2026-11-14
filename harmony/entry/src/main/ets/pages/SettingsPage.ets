@@ -1,7 +1,7 @@
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { Api } from '../services/Api';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
-import { UpdateChecker } from '../services/UpdateChecker';
+import { RuntimeUpdater } from '../services/RuntimeUpdater';
 import { PerfMark } from '../utils/PerfMark';
 import { K_LINE_BASE, Lines } from '../services/Lines';
 import { Ipv6Preference } from '../services/Ipv6Preference';
@@ -324,7 +324,7 @@ export struct SettingsPage {
     }
     this.checking = true;
     try {
-      const info: UpdateInfo = await UpdateChecker.checkNow();
+      const info: UpdateInfo = await RuntimeUpdater.checkNow();
       if (info.has_update) {
         const message: string = 'v' + info.current + ' → v' + info.latest +
           (info.notes !== undefined && info.notes.length > 0 ? '\n\n' + info.notes : '');

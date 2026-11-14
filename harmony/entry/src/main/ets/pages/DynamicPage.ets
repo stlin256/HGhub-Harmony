@@ -1,7 +1,7 @@
 /**
  * 远程二级页（声明式 blocks 渲染，无代码执行）。
  *
- * 用途（docs/harmony/REMOTE-CONFIG-SPEC.md §13.2 / §13.3）：
+ * 用途：
  * - 渲染远程 settings.pages[] 声明的二级页，参数为 pageId（ROUTE_DYNAMIC_PAGE）；
  * - 只支持 text / link / divider / image 四种 block，未知类型忽略；
  * - 页面定义与 block 白名单 / 文本上限 / https 校验都在 state/SettingsSchema 里完成，

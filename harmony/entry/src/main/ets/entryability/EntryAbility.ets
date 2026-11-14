@@ -19,8 +19,8 @@ import { ContinuationState } from '../services/ContinuationState';
 import { WidgetRefresher } from '../services/WidgetRefresher';
 import { RecService } from '../recommend/RecService';
 import { Prefs } from '../services/Prefs';
-import { runtime } from '../services/runtime';
-import { RemoteAssets } from '../services/RemoteAssets';
+import { RuntimeConfig } from '../services/RuntimeConfig';
+import { RuntimeAssets } from '../services/RuntimeAssets';
 import { Endpoints } from '../services/Endpoints';
 import { Session } from '../services/Session';
 import { Lines } from '../services/Lines';
@@ -184,10 +184,10 @@ export default class EntryAbility extends UIAbility {
       Lines.load();
       Session.load();
       UserPrefs.init(systemDark);
-      // 远程配置：先同步应用本地缓存（首屏即可读到上次配置），再延迟 5s 后台拉取；失败静默。
-      runtime.init();
-      // 远程资源：先加载本地 manifest 缓存，再延迟 8s 后台拉取/校验/落盘；失败静默回退默认资源。
-      RemoteAssets.init();
+      // 运行时配置：公开构建为空操作；私有构建由 overlay 注入真实实现。
+      RuntimeConfig.init();
+      // 运行时资源：公开构建为空操作；私有构建由 overlay 注入真实实现。
+      RuntimeAssets.init();
       // 冷启动：立即刷新一次所有已添加卡片；封面快照生成后 UserListPrefetch 再补一次。
       WidgetRefresher.requestRefresh(500);
       hilog.info(DOMAIN, TAG, 'services ready, base=%{public}s', Lines.current());

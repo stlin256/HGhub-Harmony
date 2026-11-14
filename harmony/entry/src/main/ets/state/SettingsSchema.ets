@@ -1,7 +1,7 @@
 /**
  * 设置页 schema（数据驱动 + 远程增量覆盖）。
  *
- * 用途（docs/harmony/REMOTE-CONFIG-SPEC.md §13）：
+ * 用途：
  * - 把设置页的分组 / 行 / 二级页全部描述成数据，SettingsPage 只按 item.type 选 builder 渲染；
  * - 编译期默认值由 default() 提供，远程 settings 段只做增量覆盖（merge）；
  * - 远程可改标题 / 副标题、显隐、顺序，可新增 switch / link / text / slider 行，可新增二级页；

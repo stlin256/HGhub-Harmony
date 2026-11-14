@@ -21,7 +21,7 @@ import { K_APP_ACTIVE, K_BOTTOM_INSET, K_DARK, K_TOP_INSET, K_NAV_W } from '../s
 import { PlayerParam, ROUTE_PLAYER, ROUTE_RANKS } from '../state/Routes';
 import { fmt } from '../utils/Format';
 import { ConfigKey, ConfigRegistry } from '../services/ConfigRegistry';
-import { RemoteAssets } from '../services/RemoteAssets';
+import { RuntimeAssets } from '../services/RuntimeAssets';
 
 /** 首屏 / 每次滚动加载的条数（分页大小）。 */
 // @config-exempt: 未注册（ConfigRegistry 无 home_page_size）
@@ -353,7 +353,7 @@ export struct HomePage {
   @StorageProp(K_NAV_W) windowW: number = 400;
   @State items: VideoCard[] = [];
   @State hero: VideoCard[] = [];
-  /** 远程 banner 本地 URI（RemoteAssets 缓存命中才有值；空串 = 无runtime，Hero 保持原有视觉）。 */
+  /** 远程 banner 本地 URI（RuntimeAssets 缓存命中才有值；空串 = 无runtime，Hero 保持原有视觉）。 */
   @State bannerPath: string = '';
   @State loading: boolean = true;
   @State refreshing: boolean = false;
@@ -437,10 +437,10 @@ export struct HomePage {
     this.loadChannels();
   }
 
-  /** 远程 banner 的 Image URI：RemoteAssets 有缓存文件时返回 file:// 路径，否则空串（回退现有视觉）。 */
+  /** 远程 banner 的 Image URI：RuntimeAssets 有缓存文件时返回 file:// 路径，否则空串（回退现有视觉）。 */
   private static remoteBannerUri(): string {
     try {
-      const path: string | undefined = RemoteAssets.path('home_banner');
+      const path: string | undefined = RuntimeAssets.path('home_banner');
       if (path === undefined || path.length === 0) {
         return '';
       }
