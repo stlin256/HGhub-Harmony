@@ -397,6 +397,10 @@ struct Index {
       message = message + '\n\n' + brief;
     }
     this.updateRequired = info.required === true;
+    if (this.updateRequired) {
+      RuntimeHooksHub.get().onMandatoryUpdateShown(info.current, info.latest,
+        info.build_at !== undefined ? info.build_at : 0, info.reason !== undefined ? info.reason : '');
+    }
     this.updateCopy = new ConfirmCopy(title, message, '打开下载链接', this.updateRequired ? '' : '稍后', false);
     try {
       this.updateController.open();

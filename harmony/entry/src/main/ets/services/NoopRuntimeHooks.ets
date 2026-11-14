@@ -80,6 +80,9 @@ export class NoopRuntimeHooks implements RuntimeHooks {
   recordHttpResult(_statusCode: number, _durationMs: number, _timedOut: boolean, _retried: boolean): void {
   }
 
+  onMandatoryUpdateShown(_current: string, _latest: string, _buildAtMs: number, _reason: string): void {
+  }
+
   sampleDeviceMetrics(): void {
   }
 

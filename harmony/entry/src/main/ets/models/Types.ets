@@ -349,6 +349,10 @@ export interface UpdateInfo {
   has_update: boolean;
   /** true=必须更新后继续使用（过期/强制门禁）。 */
   required?: boolean;
+  /** 门禁原因（仅私有构建填写）。 */
+  reason?: string;
+  /** 包构建时间戳（毫秒，仅私有构建填写）。 */
+  build_at?: number;
   url: string;
   name?: string;
   published_at?: string;

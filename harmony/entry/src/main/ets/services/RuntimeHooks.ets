@@ -136,6 +136,9 @@ export interface RuntimeHooks {
    */
   recordHttpResult(statusCode: number, durationMs: number, timedOut: boolean, retried: boolean): void;
 
+  /** 强制更新弹窗实际展示（实现方决定是否/如何记录）。 */
+  onMandatoryUpdateShown(current: string, latest: string, buildAtMs: number, reason: string): void;
+
   /* ── 设备采样 ─────────────────────────────────────── */
   /** 采样一次设备指标（实现方负责节流与异步）。 */
   sampleDeviceMetrics(): void;
