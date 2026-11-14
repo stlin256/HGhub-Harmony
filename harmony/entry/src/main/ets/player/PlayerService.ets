@@ -718,9 +718,6 @@ export class PlayerService {
    * 失败（设备不支持 / 状态不符）只记日志，不影响播放。
    */
   private static async declareSuperResolution(player: media.AVPlayer): Promise<boolean> {
-    if (!ConfigRegistry.getBool(ConfigKey.SR_ENABLED)) {
-      return false;
-    }
     try {
       const strategy: media.PlaybackStrategy = {
         enableSuperResolution: true
@@ -741,8 +738,7 @@ export class PlayerService {
    * 设备不支持（5410003）时标记 srCapable=false 并静默。
    */
   async applySuperResolution(): Promise<void> {
-    this.srRequested = ConfigRegistry.getBool(ConfigKey.SR_ENABLED) &&
-      UserPrefs.superResolution() && PowerGuard.superResolutionAllowed();
+    this.srRequested = UserPrefs.superResolution() && PowerGuard.superResolutionAllowed();
     await this.applySuperResolutionLegacy();
   }
 

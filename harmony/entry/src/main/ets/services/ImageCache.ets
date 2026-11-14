@@ -33,9 +33,8 @@ const DEFAULT_DECODE_H: number = 760;
 
 /**
  * 磁盘缓存上限（文件数）：封面体积小，尽量"无限缓存"，让已看过的内容永远秒开。
- * ConfigRegistry 只有字节上限 COVER_CACHE_MB，与文件数上限无法等价换算（默认值会变），故保留。
  */
-// @config-exempt: 未注册（ConfigRegistry 仅有字节上限 COVER_CACHE_MB，无文件数 key）
+// @config-exempt: 封面缓存文件数上限，按设备实测固定
 const DISK_MAX_FILES: number = 4000;
 
 /**

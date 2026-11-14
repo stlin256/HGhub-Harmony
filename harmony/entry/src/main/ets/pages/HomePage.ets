@@ -43,7 +43,7 @@ const LOAD_MORE_AHEAD: number = 9;
 // @config-exempt: 未注册（ConfigRegistry 无 home_prefetch_per_page）
 const PREFETCH_PER_PAGE: number = 10;
 /** 随机池上限：约 8~9 页，控制内存与请求量；达到上限后停止后台补池。 */
-// @config-exempt: 未注册（ConfigRegistry 无 home_pool_max；recommend_pool_size 默认 200 与本项 120 不同）
+// @config-exempt: 首页随机池上限，按设备内存固定
 const POOL_MAX: number = 120;
 /** 启动时先拉 3 页写池（42 条），够拼出 2 页随机展示而不重复。 */
 // @config-exempt: 未注册（ConfigRegistry 无 home_pool_init_pages）

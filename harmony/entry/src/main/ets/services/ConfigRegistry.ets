@@ -103,13 +103,11 @@ export class ConfigKey {
   static readonly REDUCE_MOTION: string = 'reduce_motion';
 
   /* ── 功能开关（17 项）────────────────────────────── */
-  static readonly SR_ENABLED: string = 'sr_enabled';
-  static readonly MULTI_SOURCE_ENABLED: string = 'multi_source_enabled';
+
   static readonly IPV6_ENABLED: string = 'ipv6_enabled';
   static readonly PIP_ENABLED: string = 'pip_enabled';
   static readonly CAST_ENABLED: string = 'cast_enabled';
-  static readonly CONTINUATION_ENABLED: string = 'continuation_enabled';
-  static readonly WIDGET_ENABLED: string = 'widget_enabled';
+
   static readonly TOPICS_ENABLED: string = 'topics_enabled';
   static readonly HOT_SEARCH_ENABLED: string = 'hot_search_enabled';
   static readonly FOLLOW_ENABLED: string = 'follow_enabled';
@@ -136,13 +134,11 @@ export class ConfigKey {
   static readonly LINE_FAIL_THRESHOLD: string = 'line_fail_threshold';
   static readonly HLS_PREFETCH_SEGMENTS: string = 'hls_prefetch_segments';
   static readonly MEDIA_CACHE_MB: string = 'media_cache_mb';
-  static readonly COVER_CACHE_MB: string = 'cover_cache_mb';
   static readonly UPDATE_DELAY_MS: string = 'update_delay_ms';
   static readonly HOME_PREFETCH_ROWS: string = 'home_prefetch_rows';
   static readonly SEARCH_PAGE_SIZE: string = 'search_page_size';
   static readonly COMMENT_PAGE_SIZE: string = 'comment_page_size';
   static readonly RECOMMEND_EXPLORE_PCT: string = 'recommend_explore_pct';
-  static readonly RECOMMEND_POOL_SIZE: string = 'recommend_pool_size';
 
   /* ── 补充阈值（10 项，P3-D 覆盖率收口）────────────── */
   static readonly REMOTE_ASSETS_DELAY_MS: string = 'remote_assets_delay_ms';
@@ -225,13 +221,9 @@ const DEFS: ConfigDef[] = [
   userBool(ConfigKey.REDUCE_MOTION, false, '减少动态效果'),
 
   /* ── 功能开关（17 项）：远程 kill switch，关掉后入口隐藏/功能停用 ── */
-  flag(ConfigKey.SR_ENABLED, true, 'AI 超分功能总开关'),
-  flag(ConfigKey.MULTI_SOURCE_ENABLED, true, '多源聚合功能总开关'),
   flag(ConfigKey.IPV6_ENABLED, true, 'IPv6 优先功能总开关'),
   flag(ConfigKey.PIP_ENABLED, true, '画中画'),
   flag(ConfigKey.CAST_ENABLED, true, '投播'),
-  flag(ConfigKey.CONTINUATION_ENABLED, true, '应用接续'),
-  flag(ConfigKey.WIDGET_ENABLED, true, '服务卡片'),
   flag(ConfigKey.TOPICS_ENABLED, true, '专题'),
   flag(ConfigKey.HOT_SEARCH_ENABLED, true, '热搜'),
   flag(ConfigKey.FOLLOW_ENABLED, true, '关注流'),
@@ -258,13 +250,11 @@ const DEFS: ConfigDef[] = [
   threshold(ConfigKey.LINE_FAIL_THRESHOLD, 2, 1, 10, '连续失败多少次触发自动换线'),
   threshold(ConfigKey.HLS_PREFETCH_SEGMENTS, 3, 0, 10, 'HLS 预加载开头分片数'),
   threshold(ConfigKey.MEDIA_CACHE_MB, 192, 16, 1024, '媒体磁盘缓存上限（MB）'),
-  threshold(ConfigKey.COVER_CACHE_MB, 128, 16, 1024, '封面磁盘缓存上限（MB）'),
   threshold(ConfigKey.UPDATE_DELAY_MS, 3000, 0, 60000, '启动后更新检查延迟（毫秒）'),
   threshold(ConfigKey.HOME_PREFETCH_ROWS, 6, 0, 30, '首页封面预取行数（HomePage.PREFETCH_AHEAD_ROWS）'),
   threshold(ConfigKey.SEARCH_PAGE_SIZE, 18, 5, 50, '搜索结果分页大小（SearchPage.PAGE_SIZE）'),
   threshold(ConfigKey.COMMENT_PAGE_SIZE, 20, 5, 50, '评论分页大小（CommentsSheet.PAGE_SIZE）'),
   threshold(ConfigKey.RECOMMEND_EXPLORE_PCT, 10, 0, 100, '推荐探索比例（%）'),
-  threshold(ConfigKey.RECOMMEND_POOL_SIZE, 200, 20, 1000, '推荐候选池大小'),
 
   /* ── 补充阈值（10 项，P3-D 覆盖率收口）：默认值对齐原硬编码常量 ── */
   threshold(ConfigKey.REMOTE_ASSETS_DELAY_MS, 8000, 1000, 60000,

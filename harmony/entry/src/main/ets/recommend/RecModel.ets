@@ -17,6 +17,7 @@ const USER_DIM: number = FEAT_DIM;
 const ITEM_DIM: number = FEAT_DIM;
 /** 文本特征在向量中的起始偏移（user 在同一位置，训练/推理口径一致）。 */
 const TEXT_OFF: number = BUCKETS + ITEM_EXTRA;
+// @config-exempt: 端侧模型固定 batch，非业务阈值
 const BATCH: number = 128;
 const CATES: number = 4;
 
