@@ -145,7 +145,8 @@ export class MediaSession {
   }
 
   /** 同步播放状态与进度。 */
-  static async setState(playing: boolean, positionMs: number, speed: number): Promise<void> {
+  static async setState(playing: boolean, positionMs: number, speed: number,
+    durationMs: number = 0, bufferedMs: number = 0): Promise<void> {
     const session = MediaSession.session;
     if (session === undefined) {
       return;
@@ -160,6 +161,12 @@ export class MediaSession {
         },
         speed: speed
       };
+      if (durationMs > 0) {
+        state.duration = Math.round(durationMs);
+      }
+      if (bufferedMs > 0) {
+        state.bufferedTime = Math.round(bufferedMs);
+      }
       await session.setAVPlaybackState(state);
     } catch (err) {
     }

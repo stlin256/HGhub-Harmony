@@ -222,7 +222,7 @@ export class PlayerService {
       // 投播面板第二行展示 artist：带上集数信息，避免只显示「HGhub」。
       const artist: string = subtitle.length > 0 ? ('HGhub · ' + subtitle) : 'HGhub';
       await MediaSession.setMetadata(title, artist, String(this.videoId) + ':' + this.ep,
-        cover, subtitle, 0);
+        cover, subtitle, this.durationMs);
       this.onSessionReady();
     } catch (err) {
     }
@@ -235,7 +235,8 @@ export class PlayerService {
       return;
     }
     this.lastSessionAt = now;
-    MediaSession.setState(this.state === 'playing', this.positionMs, this.rate).catch(() => {
+    MediaSession.setState(this.state === 'playing', this.positionMs, this.rate,
+      this.durationMs, this.bufferedMs).catch(() => {
     });
   }
 
@@ -969,6 +970,9 @@ export class PlayerService {
       if (ms > 0) {
         this.durationMs = ms;
         this.onDuration(ms);
+        // 时长到位后刷新系统会话元数据/状态；通知栏/锁屏进度条依赖 duration。
+        this.refreshSessionMeta();
+        this.syncSessionState(true);
       }
     });
 
