@@ -55,3 +55,6 @@ docs/harmony/API-CONTRACT.md
 docs/harmony/SPEC.md
 docs/harmony/PORTING-ANALYSIS.md
 docs/harmony/DESIGN.md
+
+# 本地交接包（不入库）
+hghub-handover-*.tar.gz
