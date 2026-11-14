@@ -6,6 +6,7 @@ import { JSON, util } from '@kit.ArkTS';
 import { http } from '@kit.NetworkKit';
 import { image } from '@kit.ImageKit';
 import { decodeCover } from '../services/Crypto';
+import { UPSTREAM_COVER_REFERER } from '../services/LocalUpstream.local';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HGForm';
@@ -16,7 +17,7 @@ const KEY_FAV_META: string = 'fav_meta';
 /** 应用侧预生成的封面小图快照 key 前缀（WatchCoverCache，data:image/jpeg;base64）。 */
 const KEY_COVER_PREFIX: string = 'wcc4_';
 /** 封面下载 Referer/UA：与站点一致的防盗链头。 */
-const COVER_REFERER: string = 'https://example.invalid';
+const COVER_REFERER: string = UPSTREAM_COVER_REFERER;
 const COVER_UA: string =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 /** 卡片缩略图解码尺寸：站点封面实测 1086x1448 / 960x1280，宽高比全部 0.75（3:4），按同比例小图解码。 */
