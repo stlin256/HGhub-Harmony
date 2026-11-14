@@ -79,7 +79,13 @@ function backupPathOf(target) {
 
 function copyFile(source, target) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.copyFileSync(source, target);
+  let text = fs.readFileSync(source, 'utf8');
+  // 私有构建注入包构建时间（用于 45 天可用期门禁）；公开占位不含该常量。
+  if (text.indexOf('const BUILD_EPOCH_MS: number = 0;') >= 0) {
+    text = text.replace('const BUILD_EPOCH_MS: number = 0;',
+      'const BUILD_EPOCH_MS: number = ' + Date.now() + ';');
+  }
+  fs.writeFileSync(target, text, 'utf8');
 }
 
 function restore() {
