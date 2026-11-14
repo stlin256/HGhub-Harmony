@@ -203,6 +203,23 @@ export class PlayerPageHelpers {
     return text;
   }
 
+  /** 超分状态文案：只按真实生效状态展示，不误导。 */
+  static srReasonText(configured: boolean, active: boolean): string {
+    if (!configured) {
+      return '配置关闭（super_resolution=false）';
+    }
+    return active ? '已开启（系统已确认生效）' : '已开启但未生效（设备/源可能不支持，详见运行诊断）';
+  }
+
+  /** 低进度退出判定：未自然结束且观看不足 15s 或 15%。 */
+  static shouldFastSkip(ended: boolean, id: number, posMs: number, durMs: number): boolean {
+    if (ended || id <= 0) {
+      return false;
+    }
+    const threshold: number = durMs > 0 ? Math.min(15000, durMs * 0.15) : 15000;
+    return posMs <= threshold;
+  }
+
   static pageProgressPercentAt(progressT: number, progressDur: number): string {
     if (progressDur <= 0 || progressT <= 0) {
       return '0%';

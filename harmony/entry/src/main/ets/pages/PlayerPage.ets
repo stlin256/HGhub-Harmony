@@ -447,7 +447,11 @@ export struct PlayerPage {
 
   aboutToDisappear(): void {
     // 快划判定必须在 destroyed 置位前完成。
-    this.maybeRecordFastSkip();
+    const fastId: number = this.currentId();
+    if (PlayerPageHelpers.shouldFastSkip(this.ended, fastId,
+      this.service.currentPositionMs(), this.service.currentDurationMs())) {
+      RecService.recordFastSkip(fastId);
+    }
     this.destroyed = true;
     // 离开播放页：仅复位自己设置的全屏标记，并恢复非播放页的系统栏配色。
     if (this.forceFullscreen) {
@@ -472,22 +476,7 @@ export struct PlayerPage {
     this.service.release();
   }
 
-  /** 低进度主动退出 → 快划负反馈（只写本地画像与事件，不含内容标识）。 */
-  private maybeRecordFastSkip(): void {
-    if (this.ended) {
-      return;
-    }
-    const id: number = this.currentId();
-    if (id <= 0) {
-      return;
-    }
-    const pos: number = this.service.currentPositionMs();
-    const dur: number = this.service.currentDurationMs();
-    const threshold: number = dur > 0 ? Math.min(15000, dur * 0.15) : 15000;
-    if (pos <= threshold) {
-      RecService.recordFastSkip(id);
-    }
-  }
+
 
   /** 窗口/分栏宽度变化（旋转、进出分栏、全屏切换）：重新对齐状态栏显隐与系统栏配色。 */
   onPaneSizeChanged(): void {
@@ -3256,14 +3245,7 @@ export struct PlayerPage {
 
   /* ── 测试变体播放诊断浮窗（媒体信息 / AI 超分 / runtime） ── */
 
-  private srReasonText(): string {
-    const enabled: boolean = ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION);
-    if (!enabled) {
-      return '配置关闭（super_resolution=false）';
-    }
-    return this.service.isSuperResolutionActive() ? '已开启（系统已确认生效）' :
-      '已开启但未生效（设备/源可能不支持，详见运行诊断）';
-  }
+
 
   private debugLines(): DebugLine[] {
     const out: DebugLine[] = [];
@@ -3285,7 +3267,7 @@ export struct PlayerPage {
       String(info.duration) + 's' : '—'));
     out.push(new DebugLine('音量/静音', this.service.currentVolume().toFixed(2) +
       (this.service.currentMuted() ? ' · 静音' : '')));
-    out.push(new DebugLine('AI 超分', this.srReasonText()));
+    out.push(new DebugLine('AI 超分', PlayerPageHelpers.srReasonText(ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION), this.service.isSuperResolutionActive())));
     out.push(new DebugLine('超分配置', '开关=' + ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION) +
       ' · 目标=' + ConfigRegistry.getNumber(ConfigKey.SR_TARGET_WIDTH) + '×' +
       ConfigRegistry.getNumber(ConfigKey.SR_TARGET_HEIGHT)));
