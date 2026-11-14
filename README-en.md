@@ -156,7 +156,6 @@ To see how it works, open **Settings → Recommendations**: "Recommendation data
 
 Issues and PRs are welcome. Before you start, please read:
 
-- [Implementation SPEC](docs/harmony/SPEC.md) and [Design guidelines](docs/harmony/DESIGN.md)
 - [Environment, signing and on-device debugging](docs/harmony/ENVIRONMENT.md)
 
 This is a personal learning project, so Issue / PR responses will be infrequent.
