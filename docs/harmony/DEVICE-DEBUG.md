@@ -1,6 +1,6 @@
 # HGhub Harmony 真机调试 Runbook（P0 验收清单 + 证据采集）
 
-> 适用：`harmony/` 原生工程（ArkTS/ArkUI）。前置文档：[ENVIRONMENT.md](ENVIRONMENT.md)（工具链/签名）、[SPEC.md](SPEC.md) §12（验收标准）、[HARMONY-GUIDE.md](HARMONY-GUIDE.md) §12（待真机验证项）。
+> 适用：`harmony/` 原生工程（ArkTS/ArkUI）。前置文档：ENVIRONMENT.md（工具链/签名）、SPEC.md §12（验收标准，本地保留）、HARMONY-GUIDE.md §12（待真机验证项）。
 > 本文件是「插入真机之后」的可执行清单：每一步都写清命令、期望结果、证据与失败处置。
 
 ---

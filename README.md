@@ -156,7 +156,6 @@ HGhub的 HarmonyOS 原生客户端：用 **ArkTS / ArkUI** 直接开发，基于
 
 欢迎提交 Issue / PR。开始开发前请先阅读：
 
-- [实施 SPEC](docs/harmony/SPEC.md) 与 [设计规范](docs/harmony/DESIGN.md)
 - [环境、签名与真机调试](docs/harmony/ENVIRONMENT.md)
 
 本项目为个人学习项目，Issue / PR 的响应将保持低频率。
