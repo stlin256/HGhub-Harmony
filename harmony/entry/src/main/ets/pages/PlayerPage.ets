@@ -446,6 +446,8 @@ export struct PlayerPage {
   }
 
   aboutToDisappear(): void {
+    // 快划判定必须在 destroyed 置位前完成。
+    this.maybeRecordFastSkip();
     this.destroyed = true;
     // 离开播放页：仅复位自己设置的全屏标记，并恢复非播放页的系统栏配色。
     if (this.forceFullscreen) {
@@ -468,6 +470,23 @@ export struct PlayerPage {
     this.metaPending.clear();
     MediaPrefetch.reset();
     this.service.release();
+  }
+
+  /** 低进度主动退出 → 快划负反馈（只写本地画像与事件，不含内容标识）。 */
+  private maybeRecordFastSkip(): void {
+    if (this.ended) {
+      return;
+    }
+    const id: number = this.currentId();
+    if (id <= 0) {
+      return;
+    }
+    const pos: number = this.service.currentPositionMs();
+    const dur: number = this.service.currentDurationMs();
+    const threshold: number = dur > 0 ? Math.min(15000, dur * 0.15) : 15000;
+    if (pos <= threshold) {
+      RecService.recordFastSkip(id);
+    }
   }
 
   /** 窗口/分栏宽度变化（旋转、进出分栏、全屏切换）：重新对齐状态栏显隐与系统栏配色。 */
@@ -578,8 +597,8 @@ export struct PlayerPage {
       if (!this.swipeAnimating && this.videoDragY !== 0) {
         this.settleVideoDragAfterSwitch();
       }
-      // 实际超分线路暂时屏蔽，但保留“已开启 AI 超分”的视觉提示作为心理安慰。
-      if (UserPrefs.superResolution()) {
+      // 仅在系统确认超分实际生效后提示，避免「开关开着但未生效」的误导。
+      if (this.service.isSuperResolutionActive()) {
         this.showSrHint();
       }
     };

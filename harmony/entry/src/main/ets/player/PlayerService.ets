@@ -14,6 +14,7 @@ import { LocalProxy } from './LocalProxy';
 import { MediaPrefetch } from './MediaPrefetch';
 import { PlayerQuality } from './PlayerQuality';
 import { MediaSession } from './MediaSession';
+import { BackgroundPlayback } from './BackgroundPlayback';
 import { PowerGuard } from '../services/PowerGuard';
 import { RuntimeHooksHub } from '../services/RuntimeHooksHub';
 import { redactSensitive } from '../utils/Security';
@@ -717,9 +718,19 @@ export class PlayerService {
    * 失败（设备不支持 / 状态不符）只记日志，不影响播放。
    */
   private static async declareSuperResolution(player: media.AVPlayer): Promise<boolean> {
-    // 实际超分线路暂时屏蔽：系统 AVPlayer 超分在上述机型会出现画面崩坏。
-    // 只保留设置项与播放页的“已开启 AI 超分”视觉提示，不再向系统申请超分。
-    return false;
+    if (!ConfigRegistry.getBool(ConfigKey.SR_ENABLED)) {
+      return false;
+    }
+    try {
+      const strategy: media.PlaybackStrategy = {
+        enableSuperResolution: true
+      };
+      await player.setPlaybackStrategy(strategy);
+      return true;
+    } catch (err) {
+      PlaybackLog.warn('sr.strategy.fail', PlayerService.errText(err));
+      return false;
+    }
   }
 
   /**
@@ -730,13 +741,9 @@ export class PlayerService {
    * 设备不支持（5410003）时标记 srCapable=false 并静默。
    */
   async applySuperResolution(): Promise<void> {
-    // 实际超分线路暂时屏蔽：不再调用 setPlaybackStrategy/setSuperResolution/setVideoWindowSize，
-    // 避免部分机型出现画面崩坏；设置项保留，播放页继续显示视觉提示。
-    this.srRequested = PowerGuard.superResolutionAllowed();
-    this.srActive = false;
-    this.srLastErrorCode = 0;
-    this.srLastErrorText = '实际超分线路已暂时屏蔽（视觉提示）';
-    return;
+    this.srRequested = ConfigRegistry.getBool(ConfigKey.SR_ENABLED) &&
+      UserPrefs.superResolution() && PowerGuard.superResolutionAllowed();
+    await this.applySuperResolutionLegacy();
   }
 
   private async applySuperResolutionLegacy(): Promise<void> {
@@ -744,8 +751,7 @@ export class PlayerService {
     if (player === undefined || this.released) {
       return;
     }
-    const want: boolean = PowerGuard.superResolutionAllowed();
-    this.srRequested = want;
+    const want: boolean = this.srRequested;
     if (!want && !this.srActive) {
       return;
     }
@@ -854,7 +860,7 @@ export class PlayerService {
 
   /** 超分细粒度诊断（悬浮窗展示）。 */
   superResolutionDebug(): string {
-    return '实际线路=已屏蔽（仅视觉提示） · 策略=' + (this.srStrategyDeclared ? '已声明' : '未声明') +
+    return '实际线路=' + (this.srActive ? '已开启' : '未开启') + ' · 策略=' + (this.srStrategyDeclared ? '已声明' : '未声明') +
       ' · 请求=' + (this.srRequested ? '开' : '关') +
       ' · 能力=' + (this.srCapable ? '支持' : '不支持') +
       ' · 生效=' + (this.srActive ? '是' : '否') +
@@ -908,6 +914,8 @@ export class PlayerService {
       if (state === 'playing') {
         this.buffering = false;
         this.onState('playing');
+        BackgroundPlayback.start().catch(() => {
+        });
         this.syncSessionState(true);
         // 同一条媒体只计一次播放开始（VV），恢复播放不重复计。
         if (!this.vvCounted) {
@@ -916,6 +924,8 @@ export class PlayerService {
         }
       } else if (state === 'paused') {
         this.onState('paused');
+        BackgroundPlayback.stop().catch(() => {
+        });
         this.syncSessionState(true);
       } else if (state === 'prepared') {
         this.buffering = false;
@@ -923,11 +933,15 @@ export class PlayerService {
       } else if (state === 'completed') {
         this.saveHistory(true, true);
         this.onState('completed');
+        BackgroundPlayback.stop().catch(() => {
+        });
         this.playbackEnded = true;
         RuntimeHooksHub.get().onPlaybackEnd(true);
         this.onCompleted();
       } else if (state === 'stopped') {
         this.onState('stopped');
+        BackgroundPlayback.stop().catch(() => {
+        });
       } else if (state === 'error') {
         this.onState('error');
       }
@@ -1499,6 +1513,10 @@ export class PlayerService {
     this.videoWidth = 0;
     this.videoHeight = 0;
     this.stopProxy();
+    BackgroundPlayback.stop().catch(() => {
+    });
+    MediaSession.release().catch(() => {
+    });
     const player = this.player;
     this.player = undefined;
     if (player === undefined) {
