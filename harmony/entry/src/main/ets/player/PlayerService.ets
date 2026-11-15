@@ -158,6 +158,8 @@ export class PlayerService {
   private currentInfo: PlaybackInfo | undefined = undefined;
   private prefetching: Set<string> = new Set<string>();
   private cache: Map<string, PlayCacheEntry> = new Map<string, PlayCacheEntry>();
+  /** 本次加载是否期望自动续播；用于内部重载（编码回退等）保持播放意图。 */
+  private autoPlayIntent: boolean = false;
 
   constructor() {
     // 电源状态变化（省电/低电量）时重新应用超分；最后一个创建的实例生效。
@@ -494,6 +496,7 @@ export class PlayerService {
     const sameMedia: boolean = this.videoId === videoId && this.ep === ep;
     this.videoId = videoId;
     this.ep = ep;
+    this.autoPlayIntent = autoPlay;
     this.loadedBase = Lines.current();
     this.playUrl = '';
     this.state = 'resolving';
@@ -551,7 +554,7 @@ export class PlayerService {
     }
     const positionSec: number = Math.max(0, this.positionMs / 1000);
     // 失败回退时 state 已是 error，不能只看 state 判断是否续播；autoPlay 供回退路径显式指定。
-    const wasPlaying: boolean = autoPlay || this.state === 'playing';
+    const wasPlaying: boolean = autoPlay || this.autoPlayIntent || this.state === 'playing';
     // 画质切换事件：切换前后档位（不含具体码流/地址）。
     RuntimeHooksHub.get().onPlaybackQualitySwitch(this.preferHevc, preferHevc);
     if (persist) {
@@ -803,7 +806,7 @@ export class PlayerService {
         if (!this.srCodecFallbackTried && this.preferHevc && mainUrl.length > 0) {
           this.srCodecFallbackTried = true;
           PlaybackLog.info('sr.codec.fallback', 'hevc->main');
-          this.switchQuality(false, this.state === 'playing', false);
+          this.switchQuality(false, this.autoPlayIntent, false);
           return;
         }
         // 设备不支持超分：持久化标记，设置页据此灰置 AI 超分项并提示不支持。
@@ -1336,6 +1339,7 @@ export class PlayerService {
     if (player === undefined) {
       return;
     }
+    this.autoPlayIntent = true;
     const state: string = player.state;
     if (state === 'prepared' || state === 'paused' || state === 'completed') {
       try {
@@ -1356,6 +1360,7 @@ export class PlayerService {
     if (player === undefined) {
       return;
     }
+    this.autoPlayIntent = false;
     if (player.state === 'playing') {
       try {
         player.pause().catch((err: Object) => {
