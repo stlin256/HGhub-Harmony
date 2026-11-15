@@ -1141,15 +1141,6 @@ export class PlayerService {
           });
           return;
         }
-        // 无 surface 也先 prepare：把解码器初始化/清单首段解析移出切换关键路径。
-        try {
-          await p.prepare();
-        } catch (err) {
-          PlaybackLog.warn('prewarm.prepare.fail', PlayerService.errText(err));
-          p.release().catch(() => {
-          });
-          return;
-        }
         this.replacePrewarmed(new PrewarmedPlayer(p, videoId, ep, preferHevc));
         PlaybackLog.info('prewarm.ready', 'id=' + videoId + ' ep=' + ep + ' ms=' + waited);
       } catch (err) {
@@ -1270,22 +1261,9 @@ export class PlayerService {
       }
       PlaybackLog.info('surface.wait', 'ms=' + waited);
     }
-    let warmed: PrewarmedPlayer | undefined =
+    const warmed: PrewarmedPlayer | undefined =
       this.takePrewarmed(this.videoId, this.ep, this.preferHevc);
     let player: media.AVPlayer;
-    if (warmed !== undefined) {
-      // prepare 阶段无 surface；接管前尝试把当前 surface 交给预热实例。
-      try {
-        if (this.surfaceId.length > 0) {
-          warmed.player.surfaceId = this.surfaceId;
-        }
-      } catch (err) {
-        PlaybackLog.warn('prewarm.surface.fail', PlayerService.errText(err));
-        warmed.player.release().catch(() => {
-        });
-        warmed = undefined;
-      }
-    }
     if (warmed !== undefined) {
       player = warmed.player;
       this.adoptPrewarmed(warmed);
@@ -1340,9 +1318,7 @@ export class PlayerService {
     // 超分能力必须在 prepare 之前通过 PlaybackStrategy 声明（否则 setSuperResolution 报 5410004）。
     this.srStrategyDeclared = await PlayerService.declareSuperResolution(player);
     try {
-      if (player.state !== 'prepared' && player.state !== 'playing') {
-        await player.prepare();
-      }
+      await player.prepare();
     } catch (err) {
       // reset → setMediaSource 与 prepare 之间存在极小概率的状态竞态：等一拍重试一次。
       await new Promise<void>((resolve: () => void) => {
