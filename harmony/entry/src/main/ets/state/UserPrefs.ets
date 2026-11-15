@@ -237,6 +237,10 @@ export class UserPrefs {
 
   /** AI 超分用户偏好：用户显式设置 > 远程runtime > 默认开启。 */
   static superResolution(): boolean {
+    // 设备已确认不支持超分后不再反复尝试，避免每次起播都触发编码回退/重载。
+    if (Prefs.getBool('sr_unsupported', false)) {
+      return false;
+    }
     return ConfigRegistry.getBool(ConfigKey.SUPER_RESOLUTION);
   }
 

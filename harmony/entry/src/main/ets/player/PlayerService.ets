@@ -755,6 +755,9 @@ export class PlayerService {
    * 失败（设备不支持 / 状态不符）只记日志，不影响播放。
    */
   private static async declareSuperResolution(player: media.AVPlayer): Promise<boolean> {
+    if (!UserPrefs.superResolution() || Prefs.getBool('sr_unsupported', false)) {
+      return false;
+    }
     try {
       const strategy: media.PlaybackStrategy = {
         enableSuperResolution: true
@@ -832,17 +835,8 @@ export class PlayerService {
       this.srLastErrorCode = code;
       this.srLastErrorText = PlayerService.errText(err);
       if (code === 5410003) {
-        // 部分设备只对 H.264 开放超分：先强制 HEVC→主流一次，再判断是否真的不支持。
-        const info: PlaybackInfo | undefined = this.currentInfo;
-        const mainUrl: string = info !== undefined && info.streams !== undefined &&
-          info.streams.main !== undefined && info.streams.main !== null ? info.streams.main : '';
-        if (!this.srCodecFallbackTried && this.preferHevc && mainUrl.length > 0) {
-          this.srCodecFallbackTried = true;
-          PlaybackLog.info('sr.codec.fallback', 'hevc->main');
-          this.switchQuality(false, this.autoPlayIntent, false);
-          return;
-        }
         // 设备不支持超分：持久化标记，设置页据此灰置 AI 超分项并提示不支持。
+        // 不再自动切 HEVC→H.264 重载：重载会清空 surface/重新 prepare，造成首帧前拉伸和卡顿。
         this.srCapable = false;
         Prefs.putBool('sr_unsupported', true);
         AppStorage.setOrCreate<boolean>('hgSrUnsupported', true);
@@ -1104,7 +1098,7 @@ export class PlayerService {
       return;
     }
     if (this.prewarmed !== undefined && this.prewarmed.videoId === videoId &&
-      this.prewarmed.ep === ep && this.prewarmed.preferHevc === this.preferHevc) {
+      this.prewarmed.ep === ep) {
       return;
     }
     if (this.prewarming) {
@@ -1178,8 +1172,7 @@ export class PlayerService {
 
   private takePrewarmed(videoId: number, ep: number, preferHevc: boolean): PrewarmedPlayer | undefined {
     const warm: PrewarmedPlayer | undefined = this.prewarmed;
-    if (warm === undefined || warm.videoId !== videoId || warm.ep !== ep ||
-      warm.preferHevc !== preferHevc) {
+    if (warm === undefined || warm.videoId !== videoId || warm.ep !== ep) {
       return undefined;
     }
     this.prewarmed = undefined;
