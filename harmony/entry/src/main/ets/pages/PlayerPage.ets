@@ -299,7 +299,6 @@ export struct PlayerPage {
   private inSplitPane(): boolean {
     return this.windowW > 0 && this.contentW > 0 && this.contentW + 2 < this.windowW;
   }
-
   /** 播放页返回统一入口：全屏态先退全屏（与系统返回键一致）；分栏态走与系统返回相同的淡出后出栈。 */
   private handlePlayerBack(): void {
     if (this.forceFullscreen) {
@@ -312,7 +311,6 @@ export struct PlayerPage {
     }
     this.navStack.pop();
   }
-
   /**
    * 平行视窗退出播放页：先做 opacity+offset 退场（exitStandard 200ms），动画结束后再真正 pop。
    * 返回按钮与系统返回键共用同一路径，避免一处瞬跳、一处淡出。
@@ -332,12 +330,10 @@ export struct PlayerPage {
       }
     }, HgMotion.ms(HgMotion.exitStandard) + PANE_POP_BUFFER_MS);
   }
-
   /** 平行视窗下显示「全屏/退出全屏」；全屏时按钮用于回到分栏。 */
   private canToggleFullscreen(): boolean {
     return this.inSplitPane() || this.forceFullscreen;
   }
-
   /**
    * 平行视窗/全屏切换：只改 AppStorage 标记，由 Index 监听后切换 Navigation 模式
    * （Split ↔ Stack），并配合系统栏显隐；离开播放页自动复位为分栏。
@@ -352,7 +348,6 @@ export struct PlayerPage {
     }
     PlaybackLog.info('ui.fullscreen', next ? 'enter' : 'exit');
   }
-
   /* ── 生命周期 ─────────────────────────────────────── */
   /** 应用退到后台时立即暂停（页面仍在前台也要停），回前台不自动续播。 */
   onAppActiveChanged(): void {
@@ -378,7 +373,6 @@ export struct PlayerPage {
     }
     this.syncKeepScreenOn();
   }
-
   aboutToAppear(): void {
     // 页面访问计数（由实现方决定是否采集）。
     RuntimeHooksHub.get().countPage('player');
@@ -405,7 +399,6 @@ export struct PlayerPage {
     this.coverList = covers;
     this.pageMeta = metas;
     this.params.startEp = this.params.startEp > 0 ? this.params.startEp : 1;
-
     this.service.setVolume(UserPrefs.volume());
     this.muted = UserPrefs.muteOnStartup() ? true : UserPrefs.muted();
     this.service.setMuted(this.muted);
@@ -429,7 +422,6 @@ export struct PlayerPage {
     // 播放中线路巡检（仅播放中运行，暂停/离开自动停止）。
     LineAuto.startWatch();
   }
-
   aboutToDisappear(): void {
     // 快划判定必须在 destroyed 置位前完成。
     const fastId: number = this.currentId();
@@ -460,9 +452,6 @@ export struct PlayerPage {
     MediaPrefetch.reset();
     this.service.release();
   }
-
-
-
   /** 窗口/分栏宽度变化（旋转、进出分栏、全屏切换）：重新对齐状态栏显隐与系统栏配色。 */
   onPaneSizeChanged(): void {
     if (this.destroyed || !this.pageShown) {
@@ -470,7 +459,6 @@ export struct PlayerPage {
     }
     this.syncPaneBars();
   }
-
   /** 播放页系统栏策略：分栏且非全屏 → 显示状态栏（可读）；全窗/全屏 → 隐藏状态栏 + 纯黑导航栏。 */
   private syncPaneBars(): void {
     if (this.forceFullscreen || !this.inSplitPane()) {
@@ -481,7 +469,6 @@ export struct PlayerPage {
       WindowChrome.syncSystemBarColors(UserPrefs.dark(), false);
     }
   }
-
   /** 设置页/播放页面板切换「视频比例」：立即重设 AVPlayer 缩放模式并重算展示矩形（动画过渡）。 */
   onVideoScaleChanged(): void {
     if (this.destroyed) {
@@ -490,7 +477,6 @@ export struct PlayerPage {
     this.service.refreshVideoScale();
     this.recomputeVideoRect(true);
   }
-
   /** 线路切换：立即清空旧线路的播放地址缓存，并按新线路重新解析当前播放地址。 */
   onLineBaseChanged(): void {
     if (this.destroyed || this.lineBase.length === 0 || this.lineBase === this.loadedBase) {
@@ -502,7 +488,6 @@ export struct PlayerPage {
     }
     this.applyLineSwitch(this.lineBase);
   }
-
   /** 换线重载：关闭线路面板、丢弃旧线路缓存、重新 resolve 当前视频/帖子的播放地址。 */
   private applyLineSwitch(base: string): void {
     this.pendingLineReload = false;
@@ -517,7 +502,6 @@ export struct PlayerPage {
     this.retryPlayback();
     this.prefetchMeta();
   }
-
   private bindService(): void {
     this.service.onLoading = () => {
       this.loading = true;
@@ -680,7 +664,6 @@ export struct PlayerPage {
       this.recomputeVideoRect(!first && width > 0 && height > 0);
     };
   }
-
   /** 把当前播放上下文写入应用接续状态（5s 节流，供跨设备接续使用）。 */
   private syncContinuationState(): void {
     const now: number = Date.now();
@@ -695,7 +678,6 @@ export struct PlayerPage {
     ContinuationState.update(id, this.ep, this.positionMs, this.titleText(),
       this.ids, this.currentIndex, this.params.feedKind, this.params.source);
   }
-
   /** 根据当前播放响应刷新画质徽章：无高清源不显示，高清中显示 HD，标准中显示 SD。 */
   private syncQualityBadge(): void {
     if (!this.service.currentHasHevc()) {
@@ -704,7 +686,6 @@ export struct PlayerPage {
     }
     this.qualityBadge = this.service.preferHevcEnabled() ? 'HD' : 'SD';
   }
-
   /** 点击画质徽章：在 HEVC 高清与标准之间切换（保留进度，失败自动回退）。 */
   private toggleQuality(): void {
     if (this.destroyed || this.errorText.length > 0) {
