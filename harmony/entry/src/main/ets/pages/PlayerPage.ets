@@ -672,9 +672,12 @@ export struct PlayerPage {
     // 视频原始尺寸 → 重算 XComponent 展示矩形（横屏垂直位置 42%、竖屏 contain/cover 切换）。
     // 尺寸归零（切换视频/集数瞬间）直接复位不播动画，拿到真实尺寸后再平滑过渡。
     this.service.onVideoSize = (width: number, height: number) => {
+      const first: boolean = this.videoW <= 0 || this.videoH <= 0;
       this.videoW = width;
       this.videoH = height;
-      this.recomputeVideoRect(width > 0 && height > 0);
+      // 首次拿到尺寸必须立即定位，禁止从全屏拉伸态做 260ms 动画；
+      // 只有播放中尺寸真正变化（如切清晰度）才做过渡。
+      this.recomputeVideoRect(!first && width > 0 && height > 0);
     };
   }
 
@@ -1135,7 +1138,20 @@ export struct PlayerPage {
     const downFeed: number = ConfigRegistry.getNumber(ConfigKey.PREFETCH_DOWN_FEED);
     const id: number = this.currentId();
     if (id > 0) {
-      MediaPrefetch.warmEpisodeWindow(id, this.ep, this.episodeCount, upEp, downEp);
+      // 下一集优先，再向下、向上；service.prefetch 会缓存播放地址并预热 HLS，
+      // 切集时 resolvePlay 直接命中，不再等 /playback 接口。
+      for (let k = 1; k <= downEp; k++) {
+        if (this.episodeCount > 0 && this.ep + k > this.episodeCount) {
+          break;
+        }
+        this.service.prefetch(id, this.ep + k);
+      }
+      for (let k = 1; k <= upEp; k++) {
+        if (this.ep - k < 1) {
+          break;
+        }
+        this.service.prefetch(id, this.ep - k);
+      }
     }
     MediaPrefetch.retainFeedWindow(this.ids, this.currentIndex + 1, downFeed);
     for (let k = 1; k <= downFeed; k++) {
@@ -1148,7 +1164,7 @@ export struct PlayerPage {
         continue;
       }
       const point = this.startPointFor(nextId, false);
-      MediaPrefetch.warmEpisode(nextId, point.ep);
+      this.service.prefetch(nextId, point.ep);
     }
     for (let k = 1; k <= upFeed; k++) {
       const idx: number = this.currentIndex - k;
@@ -1160,7 +1176,7 @@ export struct PlayerPage {
         continue;
       }
       const point = this.startPointFor(prevId, false);
-      MediaPrefetch.warmEpisode(prevId, point.ep);
+      this.service.prefetch(prevId, point.ep);
     }
   }
 
@@ -3325,6 +3341,9 @@ export struct PlayerPage {
             .width(this.videoRectW)
             .height(this.videoRectH)
             .position({ x: this.videoRectX, y: this.videoRectY })
+            // 尺寸未知时隐藏 surface，避免 AVPlayer 在铺满窗口的 surface 上先拉伸一帧；
+            // onVideoSize 会同步算出正确矩形并立即显示。
+            .opacity(this.videoW > 0 && this.videoH > 0 ? 1 : 0)
             .onLoad(() => {
               try {
                 this.service.attachSurface(this.xController.getXComponentSurfaceId());
