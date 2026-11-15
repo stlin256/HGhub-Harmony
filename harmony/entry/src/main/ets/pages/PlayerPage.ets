@@ -293,6 +293,8 @@ export struct PlayerPage {
   private seekBaseMs: number = 0;
   private boostLock: boolean = false;
   private seekWasPlaying: boolean = false;
+  /** seek 提交后等待 seekDone 再恢复播放，避免 pause/seek/play 状态竞态导致 seek 后变暂停。 */
+  private seekResumePending: boolean = false;
   /** seek 加载态兜底定时器（seekDone 未回调时 2s 后自动清除，避免一直卡加载圈）。 */
   private seekClearTimer: number = -1;
   /** 本次 seek 进入加载态的时间：onState('playing') 兜底清除时判断是否已过宽限期。 */
@@ -654,6 +656,12 @@ export struct PlayerPage {
       this.positionMs = ms;
       // seek 完成（手势/进度条共用结束点）：恢复中央浮层与底部按钮的播放/暂停图标。
       this.stopSeeking();
+      // pause 与 seek 是异步的，若用户本来在播放，必须等 seekDone 后再恢复，
+      // 否则 pause 晚到会把 seek 后的播放态吞掉。
+      if (this.seekResumePending) {
+        this.seekResumePending = false;
+        this.service.play();
+      }
     };
     // 视频原始尺寸 → 重算 XComponent 展示矩形（横屏垂直位置 42%、竖屏 contain/cover 切换）。
     // 尺寸归零（切换视频/集数瞬间）直接复位不播动画，拿到真实尺寸后再平滑过渡。
@@ -872,7 +880,6 @@ export struct PlayerPage {
     // 切集/换条后元数据里集数副标题也要跟着变。
     this.service.refreshSessionMeta();
   }
-
   private async fetchDetail(id: number, serial: number): Promise<void> {
     const epoch: number = this.metaEpoch;
     try {
@@ -888,7 +895,6 @@ export struct PlayerPage {
     } catch (err) {
     }
   }
-
   /** 当前播放内容的真实元数据（投播面板/锁屏卡片用）；videoId 与当前播放不一致时返回 null。 */
   private sessionMetaFor(videoId: number): SessionMeta | null {
     const id: number = this.playVideoId > 0 ? this.playVideoId : this.currentId();
@@ -903,7 +909,6 @@ export struct PlayerPage {
     }
     return { title: this.title, cover: this.coverUrl, subtitle: subtitle };
   }
-
   private applyDetail(detail: Detail): void {
     if (detail.title !== undefined && detail.title !== null && detail.title.length > 0) {
       this.title = detail.title;
@@ -948,7 +953,6 @@ export struct PlayerPage {
     // 详情/封面就绪后刷新系统会话元数据（此前只有「视频 id」占位，投播面板无海报）。
     this.service.refreshSessionMeta();
   }
-
   /** 把详情写入缓存，并同步对应页的最小展示信息（切页/相邻页占位直接复用）。 */
   private cacheDetail(detail: Detail, id: number): void {
     const key: number = detail.id > 0 ? detail.id : id;
@@ -989,7 +993,6 @@ export struct PlayerPage {
       this.setCoverAt(index, meta.cover);
     }
   }
-
   /** 帖子 feed 的最小元数据缓存（标题/作者/封面/计数），供相邻页占位与切页秒开。 */
   private cachePostMeta(post: Post, index: number): void {
     if (index < 0 || index >= this.pageMeta.length) {
@@ -1016,7 +1019,6 @@ export struct PlayerPage {
       this.setCoverAt(index, meta.cover);
     }
   }
-
   /** 切到某条时先用缓存详情填充标题/计数，避免先空白再跳变（随后仍会静默刷新）。 */
   private applyCachedMeta(id: number): void {
     const cached: Detail | undefined = this.detailCache.get(id);
@@ -1050,7 +1052,6 @@ export struct PlayerPage {
     this.collectCount = meta.collectCount;
     this.commentCount = meta.commentCount;
   }
-
   /**
    * 预取当前 index 之后 2 个条目的详情（标题/封面/点赞/收藏/评论数/集数）。
    * 失败静默；已有缓存或请求在途时跳过；切页后相邻页占位与切页首屏都受益。
@@ -1087,7 +1088,6 @@ export struct PlayerPage {
       }
     }
   }
-
   /** 换线/离开时清空详情缓存与相邻页占位信息（旧线路数据不复用）。 */
   private clearMetaCache(): void {
     this.metaEpoch++;
@@ -1099,7 +1099,6 @@ export struct PlayerPage {
     }
     this.pageMeta = next;
   }
-
   /**
    * 预加载：当前集向下/向上窗口 + feed 前后窗口（默认下 3/上 2，可远程配置）。
    * 优先保证下一集与向下滑动目标，其次向上；走本地代理缓存，失败静默。
@@ -1159,7 +1158,6 @@ export struct PlayerPage {
       this.service.prefetch(prevId, point.ep);
     }
   }
-
   private async loadPost(id: number, serial: number, point: StartPoint, force: boolean): Promise<void> {
     try {
       const post: Post = await Api.post(id);
@@ -1766,9 +1764,7 @@ export struct PlayerPage {
         this.startSeeking();
         this.service.seekTo(this.dragMs);
         this.positionMs = this.dragMs;
-        if (this.seekWasPlaying) {
-          this.service.play();
-        }
+        this.seekResumePending = this.seekWasPlaying;
         this.showChrome();
       } else if (this.gestureMode === 2) {
         if (this.boostLock) {
@@ -1970,6 +1966,7 @@ export struct PlayerPage {
     this.dragMs = this.positionMs;
     this.dragging = true;
     this.seekWasPlaying = this.playing;
+    this.seekResumePending = this.seekWasPlaying;
     if (this.seekWasPlaying) {
       this.service.pause();
     }
@@ -1994,6 +1991,10 @@ export struct PlayerPage {
         return;
       }
       this.seeking = false;
+      if (this.seekResumePending) {
+        this.seekResumePending = false;
+        this.service.play();
+      }
     }, SEEK_LOADING_MS);
   }
 
@@ -3046,15 +3047,14 @@ export struct PlayerPage {
             this.startSeeking();
             this.service.seekTo(ms);
             this.positionMs = ms;
-            if (this.seekWasPlaying) {
-              this.service.play();
-            }
+            this.seekResumePending = this.seekWasPlaying;
             this.showChrome();
           },
           onSeekCancel: () => {
             this.dragging = false;
             this.stopSeeking();
-            if (this.seekWasPlaying) {
+            if (this.seekResumePending) {
+              this.seekResumePending = false;
               this.service.play();
             }
             this.showChrome();
