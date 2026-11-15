@@ -219,6 +219,8 @@ export struct PlayerPage {
   @State commentRefreshKey: number = 0;
   /** feed 相邻条目的预取元数据（与 ids 下标对齐）。 */
   @State pageMeta: PageMeta[] = [];
+  /** 当前视频是否已经收到过尺寸（用于首帧立即定位，不跨条目误判）。 */
+  private videoSizedCurrent: boolean = false;
   /** 视频展示矩形：XComponent 按视频宽高比缩放定位，避免拉伸/裁切错误（单位 vp）。 */
   @State videoW: number = 0;
   @State videoH: number = 0;
@@ -656,10 +658,11 @@ export struct PlayerPage {
     // 视频原始尺寸 → 重算 XComponent 展示矩形（横屏垂直位置 42%、竖屏 contain/cover 切换）。
     // 尺寸归零（切换视频/集数瞬间）直接复位不播动画，拿到真实尺寸后再平滑过渡。
     this.service.onVideoSize = (width: number, height: number) => {
-      const first: boolean = this.videoW <= 0 || this.videoH <= 0;
+      const first: boolean = !this.videoSizedCurrent;
       this.videoW = width;
       this.videoH = height;
-      // 首次拿到尺寸必须立即定位，禁止从全屏拉伸态做 260ms 动画；
+      this.videoSizedCurrent = true;
+      // 每条视频首次拿到尺寸必须立即定位，禁止从旧画幅做 260ms 动画；
       // 只有播放中尺寸真正变化（如切清晰度）才做过渡。
       this.recomputeVideoRect(!first && width > 0 && height > 0);
     };
@@ -700,7 +703,6 @@ export struct PlayerPage {
     this.qualityBadge = next ? 'HD' : 'SD';
     this.service.switchQuality(next);
   }
-
   private clearAllTimers(): void {
     if (this.srHintTimer >= 0) {
       clearTimeout(this.srHintTimer);
@@ -748,7 +750,6 @@ export struct PlayerPage {
     }
     this.clearSwipeClamp();
   }
-
   /* ── 数据 ─────────────────────────────────────────── */
   private currentId(): number {
     if (this.currentIndex < 0 || this.currentIndex >= this.ids.length) {
@@ -756,14 +757,12 @@ export struct PlayerPage {
     }
     return this.ids[this.currentIndex];
   }
-
   private coverAt(index: number): string {
     if (index < 0 || index >= this.coverList.length) {
       return '';
     }
     return this.coverList[index];
   }
-
   private setCoverAt(index: number, url: string): void {
     if (index < 0 || index >= this.coverList.length || url.length === 0) {
       return;
@@ -772,7 +771,6 @@ export struct PlayerPage {
     next[index] = url;
     this.coverList = next;
   }
-
   private startPointFor(id: number, initial: boolean): StartPoint {
     let ep = 1;
     let sec = 0;
@@ -794,7 +792,6 @@ export struct PlayerPage {
     }
     return new StartPoint(ep, sec);
   }
-
   /** 切到指定下标（系统媒体会话的上一首/下一首用）：同步 Swiper 与播放器，越界忽略。 */
   private goToIndex(target: number): void {
     if (this.destroyed || target < 0 || target >= this.ids.length || target === this.currentIndex) {
@@ -809,7 +806,6 @@ export struct PlayerPage {
     } catch (err) {
     }
   }
-
   private openVideo(index: number, force: boolean): void {
     if (this.destroyed) {
       return;
@@ -847,9 +843,9 @@ export struct PlayerPage {
     this.prefetchDone = false;
     this.playVideoId = id;
     // 切条：先把展示矩形按「尺寸未知」复位，等 onVideoSize 回调后再动画到正确比例。
-    this.videoW = 0;
-    this.videoH = 0;
-    this.recomputeVideoRect(false);
+    // 不重置宽高：下滑切换时保留上一条的画幅，避免全屏拉伸一帧；
+    // 新视频尺寸到达后立即按新比例校正。
+    this.videoSizedCurrent = false;
     // 命中预取的详情时直接填充标题/计数，避免切页后空白再跳变。
     this.applyCachedMeta(id);
     this.metaSerial++;
@@ -868,7 +864,6 @@ export struct PlayerPage {
     this.showChrome();
     this.syncKeepScreenOn();
   }
-
   private playNow(id: number, ep: number, sec: number, force: boolean): void {
     this.ep = ep;
     this.pendingQuality = null;
@@ -1146,6 +1141,10 @@ export struct PlayerPage {
       }
       const point = this.startPointFor(nextId, false);
       this.service.prefetch(nextId, point.ep);
+      if (k === 1) {
+        // 滑到正下方那一条时直接接管预热实例。
+        this.service.prewarm(nextId, point.ep);
+      }
     }
     for (let k = 1; k <= upFeed; k++) {
       const idx: number = this.currentIndex - k;

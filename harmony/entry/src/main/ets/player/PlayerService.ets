@@ -49,6 +49,29 @@ class PlayCacheEntry {
   }
 }
 
+/** 一个已经 setMediaSource 并进入 initialized 的备用播放器实例。 */
+class PrewarmedPlayer {
+  videoId: number = 0;
+  ep: number = 0;
+  preferHevc: boolean = false;
+  at: number = 0;
+  player: media.AVPlayer;
+
+  constructor(player: media.AVPlayer, videoId: number, ep: number, preferHevc: boolean) {
+    this.player = player;
+    this.videoId = videoId;
+    this.ep = ep;
+    this.preferHevc = preferHevc;
+    this.at = Date.now();
+  }
+}
+
+/** 地址 + 请求头（代理包装后的最终播放地址）。 */
+class PlaybackSource {
+  url: string = '';
+  headers: Record<string, string> = {};
+}
+
 /**
  * AVPlayer 封装：创建/复用播放器实例、MediaSource headers、状态机、
  * 播放地址缓存（含过期重取）、进度落盘、失活门禁。
@@ -158,6 +181,11 @@ export class PlayerService {
   private currentInfo: PlaybackInfo | undefined = undefined;
   private prefetching: Set<string> = new Set<string>();
   private cache: Map<string, PlayCacheEntry> = new Map<string, PlayCacheEntry>();
+  /** 预热的备用播放器（最多一个），切集直接接管。 */
+  private prewarmed: PrewarmedPlayer | undefined = undefined;
+  private prewarming: boolean = false;
+  /** 当前播放器是否已被预热实例接管，避免旧实例事件串台。 */
+  private adoptedWarm: boolean = false;
   /** 本次加载是否期望自动续播；用于内部重载（编码回退等）保持播放意图。 */
   private autoPlayIntent: boolean = false;
 
@@ -493,6 +521,11 @@ export class PlayerService {
     this.serial++;
     const serial = this.serial;
     this.snapshot();
+    // 目标不是当前预热实例时丢弃旧预热，避免占用解码器。
+    if (this.prewarmed !== undefined &&
+      (this.prewarmed.videoId !== videoId || this.prewarmed.ep !== ep)) {
+      this.releasePrewarmed();
+    }
     const sameMedia: boolean = this.videoId === videoId && this.ep === ep;
     this.videoId = videoId;
     this.ep = ep;
@@ -1065,6 +1098,154 @@ export class PlayerService {
     });
   }
 
+  /** 预热下一条/下一集：创建独立 AVPlayer 并推到 initialized，切换时直接接管。 */
+  prewarm(videoId: number, ep: number): void {
+    if (this.released || videoId <= 0 || ep <= 0) {
+      return;
+    }
+    if (this.prewarmed !== undefined && this.prewarmed.videoId === videoId &&
+      this.prewarmed.ep === ep && this.prewarmed.preferHevc === this.preferHevc) {
+      return;
+    }
+    if (this.prewarming) {
+      return;
+    }
+    this.prewarming = true;
+    const preferHevc: boolean = this.preferHevc;
+    const task = async (): Promise<void> => {
+      try {
+        const info: PlaybackInfo = await this.resolvePlay(videoId, ep, false, preferHevc);
+        if (this.released || this.serial > 0 && this.videoId === videoId && this.ep === ep) {
+          return;
+        }
+        const url: string = PlayerService.streamUrl(info, preferHevc);
+        if (url.length === 0) {
+          return;
+        }
+        const extra: Record<string, string> = PlayerService.cdnHeaders(info);
+        try {
+          this.proxy.setUpstreamHeaders(extra);
+        } catch (err) {
+        }
+        const built: PlaybackSource = await this.buildSource(url, extra);
+        if (this.released) {
+          return;
+        }
+        const p: media.AVPlayer = await media.createAVPlayer();
+        await p.setMediaSource(media.createMediaSourceWithUrl(built.url, built.headers));
+        let waited: number = 0;
+        while (p.state !== 'initialized' && waited < 1200 && !this.released) {
+          await new Promise<void>((resolve: () => void): void => {
+            setTimeout((): void => {
+              resolve();
+            }, 30);
+          });
+          waited += 30;
+        }
+        if (p.state !== 'initialized' || this.released) {
+          p.release().catch(() => {
+          });
+          return;
+        }
+        this.replacePrewarmed(new PrewarmedPlayer(p, videoId, ep, preferHevc));
+        PlaybackLog.info('prewarm.ready', 'id=' + videoId + ' ep=' + ep + ' ms=' + waited);
+      } catch (err) {
+        PlaybackLog.warn('prewarm.fail', PlayerService.errText(err));
+      } finally {
+        this.prewarming = false;
+      }
+    };
+    task();
+  }
+
+  private replacePrewarmed(next: PrewarmedPlayer): void {
+    const old: PrewarmedPlayer | undefined = this.prewarmed;
+    this.prewarmed = next;
+    if (old !== undefined) {
+      old.player.release().catch(() => {
+      });
+    }
+  }
+
+  private releasePrewarmed(): void {
+    const warm: PrewarmedPlayer | undefined = this.prewarmed;
+    this.prewarmed = undefined;
+    if (warm !== undefined) {
+      warm.player.release().catch(() => {
+      });
+    }
+  }
+
+  private takePrewarmed(videoId: number, ep: number, preferHevc: boolean): PrewarmedPlayer | undefined {
+    const warm: PrewarmedPlayer | undefined = this.prewarmed;
+    if (warm === undefined || warm.videoId !== videoId || warm.ep !== ep ||
+      warm.preferHevc !== preferHevc) {
+      return undefined;
+    }
+    this.prewarmed = undefined;
+    return warm;
+  }
+
+  private adoptPrewarmed(warm: PrewarmedPlayer): void {
+    this.releaseCurrentPlayer();
+    this.player = warm.player;
+    this.adoptedWarm = true;
+    this.bindEvents(warm.player);
+    PlaybackLog.info('prewarm.adopt', 'id=' + warm.videoId + ' ep=' + warm.ep);
+  }
+
+  private releaseCurrentPlayer(): void {
+    const old: media.AVPlayer | undefined = this.player;
+    this.player = undefined;
+    if (old === undefined) {
+      return;
+    }
+    try {
+      old.off('stateChange');
+      old.off('timeUpdate');
+      old.off('durationUpdate');
+      old.off('bufferingUpdate');
+      old.off('seekDone');
+      old.off('startRenderFrame');
+      old.off('error');
+    } catch (err) {
+    }
+    try {
+      old.release().catch(() => {
+      });
+    } catch (err) {
+    }
+  }
+
+  /** 构造最终交给 AVPlayer 的地址与请求头（含本地代理/直连回退）。 */
+  private async buildSource(url: string, extraHeaders: Record<string, string>): Promise<PlaybackSource> {
+    let sourceUrl: string = url;
+    let headers: Record<string, string> = {};
+    const extraKeys: string[] = Object.keys(extraHeaders);
+    for (let i = 0; i < extraKeys.length; i++) {
+      headers[extraKeys[i]] = extraHeaders[extraKeys[i]];
+    }
+    headers['Referer'] = Lines.current() + '/';
+    headers['User-Agent'] = USER_AGENT;
+    headers['Accept'] = '*/*';
+    if (this.useLocalProxy && PlayerService.looksHls(url)) {
+      const port: number = await this.ensureProxy();
+      if (port > 0) {
+        sourceUrl = this.proxy.wrapUrl(url);
+        PlaybackLog.info('source.proxy', PlaybackLog.safeUrl(sourceUrl));
+        headers = { 'Accept': '*/*' };
+      } else {
+        PlaybackLog.warn('source.proxy.fallback', 'proxy unavailable, direct');
+      }
+    } else if (this.useLocalProxy) {
+      PlaybackLog.warn('source.proxy.skip', 'not an HLS url');
+    }
+    const built: PlaybackSource = new PlaybackSource();
+    built.url = sourceUrl;
+    built.headers = headers;
+    return built;
+  }
+
   private async openUrl(url: string, startSec: number, autoPlay: boolean, serial: number,
     extraHeaders: Record<string, string>): Promise<void> {
     if (serial !== this.serial || this.released) {
@@ -1087,59 +1268,39 @@ export class PlayerService {
       }
       PlaybackLog.info('surface.wait', 'ms=' + waited);
     }
-    const player = await this.ensurePlayer();
-    if (serial !== this.serial || this.released) {
-      return;
-    }
-    const currentState: string = player.state;
-    if (currentState !== 'idle' && currentState !== 'released') {
-      try {
-        await player.reset();
-      } catch (err) {
-        PlaybackLog.warn('player.reset.fail', PlayerService.errText(err));
+    const warmed: PrewarmedPlayer | undefined =
+      this.takePrewarmed(this.videoId, this.ep, this.preferHevc);
+    let player: media.AVPlayer;
+    if (warmed !== undefined) {
+      player = warmed.player;
+      this.adoptPrewarmed(warmed);
+      PlaybackLog.info('source.adopt', 'id=' + this.videoId + ' ep=' + this.ep);
+    } else {
+      player = await this.ensurePlayer();
+      if (serial !== this.serial || this.released) {
+        return;
       }
+      const currentState: string = player.state;
+      if (currentState !== 'idle' && currentState !== 'released') {
+        try {
+          await player.reset();
+        } catch (err) {
+          PlaybackLog.warn('player.reset.fail', PlayerService.errText(err));
+        }
+        if (serial !== this.serial || this.released) {
+          return;
+        }
+      }
+      PlaybackLog.info('source.open', PlaybackLog.safeUrl(url));
+      const built: PlaybackSource = await this.buildSource(url, extraHeaders);
+      const source: media.MediaSource = media.createMediaSourceWithUrl(built.url, built.headers);
+      this.vvCounted = false;
+      await player.setMediaSource(source);
       if (serial !== this.serial || this.released) {
         return;
       }
     }
-    PlaybackLog.info('source.open', PlaybackLog.safeUrl(url));
-    let sourceUrl: string = url;
-    let viaProxy: boolean = false;
-    if (this.useLocalProxy && PlayerService.looksHls(url)) {
-      // 兜底方案 C：先起本地代理（固定端口），把上游 m3u8 包装成 /hls?u= 交给 AVPlayer。
-      const port: number = await this.ensureProxy();
-      if (serial !== this.serial || this.released) {
-        return;
-      }
-      if (port > 0) {
-        sourceUrl = this.proxy.wrapUrl(url);
-        viaProxy = true;
-        PlaybackLog.info('source.proxy', PlaybackLog.safeUrl(sourceUrl));
-      } else {
-        // 代理启动失败不阻塞播放：自动回退直连（headers 照旧）。
-        PlaybackLog.warn('source.proxy.fallback', 'proxy unavailable, direct');
-      }
-    } else if (this.useLocalProxy) {
-      PlaybackLog.warn('source.proxy.skip', 'not an HLS url');
-    }
-    let headers: Record<string, string> = {};
-    const extraKeys: string[] = Object.keys(extraHeaders);
-    for (let i = 0; i < extraKeys.length; i++) {
-      headers[extraKeys[i]] = extraHeaders[extraKeys[i]];
-    }
-    headers['Referer'] = Lines.current() + '/';
-    headers['User-Agent'] = USER_AGENT;
-    headers['Accept'] = '*/*';
-    if (viaProxy) {
-      // 本地代理自己注入 Referer/UA/CDN 鉴权头，播放器侧只需最小请求头。
-      headers = { 'Accept': '*/*' };
-    }
-    const source: media.MediaSource = media.createMediaSourceWithUrl(sourceUrl, headers);
     this.vvCounted = false;
-    await player.setMediaSource(source);
-    if (serial !== this.serial || this.released) {
-      return;
-    }
     // setMediaSource 后状态机异步进入 initialized；在其间绑定 surfaceId（官方允许的唯一状态）。
     let initWaited: number = 0;
     while (player.state !== 'initialized' && initWaited < 1000 &&
@@ -1522,6 +1683,7 @@ export class PlayerService {
     });
     MediaSession.release().catch(() => {
     });
+    this.releasePrewarmed();
     const player = this.player;
     this.player = undefined;
     if (player === undefined) {
