@@ -3354,9 +3354,9 @@ export struct PlayerPage {
             }
           }, (id: number, index: number) => index + ':' + id)
         }
-        // 关键：Swiper 必须从点击的那一条开始，否则进入时停在 0 号 PosterPage，
-        // 而实际视频在别的页里播放（黑屏 +「第一条没法看」）。
-        .index(this.initialIndex)
+        // 关键：Swiper 必须跟随当前播放下标。不能绑定 initialIndex：
+        // 长按倍速等状态更新会触发 build，常量 index 会把 Swiper 拉回进入时的第一条。
+        .index(this.currentIndex)
         .vertical(true)
         .loop(false)
         .indicator(false)
