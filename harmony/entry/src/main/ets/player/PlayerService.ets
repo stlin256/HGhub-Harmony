@@ -963,6 +963,8 @@ export class PlayerService {
         BackgroundPlayback.stop().catch(() => {
         });
         this.playbackEnded = true;
+        // 完播位置：自然结束记 100%。
+        RuntimeHooksHub.get().recordAction('ended100');
         RuntimeHooksHub.get().onPlaybackEnd(true);
         this.onCompleted();
       } else if (state === 'stopped') {
@@ -1550,6 +1552,8 @@ export class PlayerService {
       return;
     }
     this.seekLockAt = now;
+    // 播放行为：seek 次数（私有遥测，公开构建为空实现）。
+    RuntimeHooksHub.get().recordAction('seek');
     try {
       player.seek(target, media.SeekMode.SEEK_CLOSEST);
     } catch (err) {
@@ -1559,7 +1563,12 @@ export class PlayerService {
 
   /** 临时/常规倍速：0.75 / 1 / 1.25 / 1.5 / 2。 */
   setSpeed(rate: number): void {
+    const changed: boolean = this.rate !== rate;
     this.rate = rate;
+    if (changed) {
+      // 倍速切换次数（私有遥测，公开构建为空实现）。
+      RuntimeHooksHub.get().recordAction('speed');
+    }
     const player = this.syncPlayer();
     if (player === undefined) {
       return;
@@ -1664,6 +1673,12 @@ export class PlayerService {
     // 用户中途退出：本次播放若有开始无自然结束，按「未完成」记录一次结束事件。
     if (this.vvCounted && !this.playbackEnded) {
       this.playbackEnded = true;
+      // 完播位置：用户退出时按当前进度分档（<25/25-50/50-75/75-100）。
+      const pct: number = this.durationMs > 0 ?
+        Math.min(100, Math.max(0, Math.round((this.positionMs / this.durationMs) * 100))) : -1;
+      if (pct >= 0) {
+        RuntimeHooksHub.get().recordAction('ended' + (pct < 25 ? '25' : pct < 50 ? '50' : pct < 75 ? '75' : '100'));
+      }
       RuntimeHooksHub.get().onPlaybackEnd(false);
     }
     this.saveHistory(true, false);

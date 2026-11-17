@@ -86,6 +86,18 @@ export class NoopRuntimeHooks implements RuntimeHooks {
   sampleDeviceMetrics(): void {
   }
 
+  recordStartupAbility(_ms: number): void {
+  }
+
+  recordStartupFirstFrame(_ms: number): void {
+  }
+
+  onScreenOn(): void {
+  }
+
+  onScreenOff(): void {
+  }
+
   exportDiagnostics(): Promise<string> {
     return Promise.resolve('');
   }

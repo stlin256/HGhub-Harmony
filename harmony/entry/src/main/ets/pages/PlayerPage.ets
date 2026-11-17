@@ -334,6 +334,15 @@ export struct PlayerPage {
       }
     }, HgMotion.ms(HgMotion.exitStandard) + PANE_POP_BUFFER_MS);
   }
+  /**
+   * 退出横屏播放：恢复竖屏窗口，但保留播放页与播放流（不 pop、不 release）。
+   * 与「离开播放页恢复竖屏」的区别：这里只是把窗口转回竖屏，播放继续。
+   */
+  private exitLandscapePlayback(): void {
+    WindowChrome.restorePortrait();
+    PlaybackLog.info('ui.landscape', 'exit to portrait, keep playing');
+  }
+
   /** 平行视窗下显示「全屏/退出全屏」；全屏时按钮用于回到分栏。 */
   private canToggleFullscreen(): boolean {
     return this.inSplitPane() || this.forceFullscreen;
@@ -3564,6 +3573,11 @@ export struct PlayerPage {
       }
       if (this.locked) {
         this.toggleLock();
+        return true;
+      }
+      // 横屏播放态按返回：只退出横屏回到竖屏播放，不退出播放页、不打断播放流。
+      if (this.isLandscapeWindow()) {
+        this.exitLandscapePlayback();
         return true;
       }
       // 全屏态按返回：先退回平行视窗分栏，而不是直接退出播放页。

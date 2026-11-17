@@ -444,9 +444,9 @@ struct Index {
     if (this.tabletNoticeChecked) {
       return;
     }
-    // 平板或大屏设备都提示；平板竖屏可能 <840vp，因此设备类型也纳入判定。
-    const tabletDevice: boolean = deviceInfo.deviceType === 'tablet' || deviceInfo.deviceType === '2in1';
-    if (!tabletDevice && this.windowW < HgResponsive.EXPANDED) {
+    // 只按设备类型判定：手机横屏窗口宽度同样会超过 840vp，
+    // 只看宽度会把手机横屏误判成平板，导致在手机上弹出「大屏/平板」提示。
+    if (!HgResponsive.isLargeScreenDevice(deviceInfo.deviceType)) {
       return;
     }
     this.tabletNoticeChecked = true;
@@ -550,7 +550,8 @@ struct Index {
     this.navApplying = true;
     try {
       // 平板/大屏才分栏；手机横屏虽然宽度≥840vp，但高度只有 360-450vp，不应切成平板分栏。
-      const wide: boolean = this.windowW >= HgResponsive.EXPANDED && this.windowH >= HgResponsive.MEDIUM;
+      // 折叠屏展开后窗口接近平板尺寸，但形态仍是手机，同样不切分栏。
+      const wide: boolean = HgResponsive.isTabletLayout(deviceInfo.deviceType, this.windowW, this.windowH);
       // 回根页面或窗口已窄到不可能是分栏时复位全屏标记，避免窄窗下返回键要按两次。
       if ((!hasContent || !wide) && AppStorage.get<boolean>(K_FORCE_FULLSCREEN) === true) {
         AppStorage.setOrCreate<boolean>(K_FORCE_FULLSCREEN, false);

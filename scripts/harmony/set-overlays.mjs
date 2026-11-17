@@ -28,6 +28,9 @@ const ETS_ROOT = path.join(ROOT, 'harmony', 'entry', 'src', 'main', 'ets');
 const OVERLAY_DIR = process.env.HG_OVERLAYS_DIR || path.join(HERE, '.local', 'overlays');
 const BACKUP_DIR = process.env.HG_OVERLAY_BACKUP_DIR || path.join(HERE, '.local', '.overlay-backup');
 const ETS_PREFIX = 'harmony/entry/src/main/ets/';
+const MODULE_PATH = path.join(ROOT, 'harmony', 'entry', 'src', 'main', 'module.json5');
+const MODULE_BACKUP = path.join(HERE, '.local', '.module-backup.json5');
+const PRIVATE_PERMISSIONS = path.join(HERE, '.local', 'private-permissions.json');
 
 function rel(p) {
   return path.relative(ROOT, p).replace(/\\/g, '/');
@@ -88,7 +91,90 @@ function copyFile(source, target) {
   fs.writeFileSync(target, text, 'utf8');
 }
 
+function restoreModule() {
+  if (!fs.existsSync(MODULE_BACKUP)) {
+    return;
+  }
+  fs.copyFileSync(MODULE_BACKUP, MODULE_PATH);
+  fs.rmSync(MODULE_BACKUP, { force: true });
+}
+
+function patchModule() {
+  if (!fs.existsSync(PRIVATE_PERMISSIONS) || !fs.existsSync(MODULE_PATH)) {
+    return;
+  }
+  let spec;
+  try {
+    spec = JSON.parse(fs.readFileSync(PRIVATE_PERMISSIONS, 'utf8'));
+  } catch (err) {
+    return;
+  }
+  const wanted = Array.isArray(spec.requestPermissions) ? spec.requestPermissions : [];
+  if (wanted.length === 0) {
+    return;
+  }
+  const original = fs.readFileSync(MODULE_PATH, 'utf8');
+  const marker = '"requestPermissions"';
+  const markerAt = original.indexOf(marker);
+  if (markerAt < 0) {
+    return;
+  }
+  const open = original.indexOf('[', markerAt);
+  if (open < 0) {
+    return;
+  }
+  // 找到与 requestPermissions 的 [ 匹配的 ]，不能取后面 usedScene 里的第一个 ]。
+  let close = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = open; i < original.length; i++) {
+    const ch = original.charAt(i);
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '[') {
+      depth++;
+    } else if (ch === ']') {
+      depth--;
+      if (depth === 0) {
+        close = i;
+        break;
+      }
+    }
+  }
+  if (close < 0) {
+    return;
+  }
+  const existing = original.substring(open, close);
+  const missing = wanted.filter((item) => item && item.name && existing.indexOf('"' + item.name + '"') < 0);
+  if (missing.length === 0) {
+    return;
+  }
+  if (!fs.existsSync(MODULE_BACKUP)) {
+    fs.copyFileSync(MODULE_PATH, MODULE_BACKUP);
+  }
+  const existingBody = existing.substring(1).trim();
+  let insert = '';
+  for (const perm of missing) {
+    insert += (existingBody.length > 0 || insert.length > 0 ? ',' : '') + '\n      ' + JSON.stringify(perm);
+  }
+  fs.writeFileSync(MODULE_PATH, original.substring(0, close) + insert + '\n    ' + original.substring(close), 'utf8');
+}
+
 function restore() {
+  restoreModule();
   if (!fs.existsSync(BACKUP_DIR)) {
     console.log('[set-overlays] 无备份（公开占位状态，无需恢复）：' + rel(BACKUP_DIR));
     return;
@@ -132,6 +218,7 @@ function apply() {
     restore();
     throw err;
   }
+  patchModule();
   console.log('[set-overlays] 已覆盖 ' + applied.length + ' 个文件：');
   for (const item of applied) {
     console.log('  ' + item);

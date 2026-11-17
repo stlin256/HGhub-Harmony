@@ -296,6 +296,75 @@ export class Net {
     return true;
   }
 
+  /**
+   * 二进制请求体（可选压缩上传）：与 request 相同的 https 校验 / IPv6 回退 / 连接池，
+   * 只是 extraData 换成 ArrayBuffer。失败时同样丢弃连接池实例。
+   */
+  private static async requestBinary(url: string, method: http.RequestMethod,
+    headers: Record<string, string>, body: ArrayBuffer, timeoutMs: number): Promise<RawText> {
+    if (parseHttpsUrl(url) === null) {
+      throw new Error('仅支持 HTTPS 请求');
+    }
+    const host: string = hostOfUrl(url);
+    const family: http.AddressFamily = Net.pickFamily(host);
+    try {
+      return await Net.requestOnceBinary(url, host, family, method, headers, body, timeoutMs);
+    } catch (err) {
+      if (family === http.AddressFamily.ONLY_V6) {
+        Ipv6Preference.markUnsupported(host);
+        Net.invalidate(host);
+        try {
+          return await Net.requestOnceBinary(url, host, http.AddressFamily.DEFAULT,
+            method, headers, body, timeoutMs);
+        } catch (retryErr) {
+          Net.invalidate(host);
+          throw new Error(Net.errorText(retryErr));
+        }
+      }
+      Net.invalidate(host);
+      throw new Error(Net.errorText(err));
+    }
+  }
+
+  /** 单次二进制请求：复用该 host 的 HttpRequest（连接池）。 */
+  private static async requestOnceBinary(url: string, host: string, family: http.AddressFamily,
+    method: http.RequestMethod, headers: Record<string, string>, body: ArrayBuffer,
+    timeoutMs: number): Promise<RawText> {
+    const request: http.HttpRequest = Net.httpFor(host);
+    const serverHost: string = Endpoints.host();
+    const isServerHost: boolean = serverHost.length > 0 && host === serverHost;
+    if (isServerHost && headers['x-hgub-key'] === undefined) {
+      headers['x-hgub-key'] = Endpoints.clientKey();
+    }
+    const options: http.HttpRequestOptions = {
+      method: method,
+      header: headers,
+      connectTimeout: 10000,
+      readTimeout: timeoutMs,
+      expectDataType: http.HttpDataType.STRING,
+      maxLimit: RESPONSE_MAX_TEXT_BYTES,
+      addressFamily: family
+    };
+    if (isServerHost && Endpoints.caPath().length > 0) {
+      options.caPath = Endpoints.caPath();
+    }
+    options.extraData = body;
+    if (Net.supportsConnectionTuning()) {
+      options.reuseConnections = true;
+      options.inactivityMs = CONN_INACTIVITY_MS;
+    }
+    const response: http.HttpResponse = await request.request(url, options);
+    const code: number = response.responseCode;
+    let text = '';
+    if (typeof response.result === 'string') {
+      text = response.result as string;
+    }
+    if (text.length > RESPONSE_MAX_TEXT_BYTES) {
+      throw new Error('响应内容过大');
+    }
+    return new RawText(code, text, headerValue(response.header, 'content-type'));
+  }
+
   private static async request(url: string, method: http.RequestMethod, headers: Record<string, string>,
     body: string, timeoutMs: number, asBytes: boolean): Promise<RawText | RawBytes> {
     // 平台机制：scheme 判定交给系统 URL 解析器；只允许 https（TLS 校验由系统 http 栈完成）。
@@ -393,6 +462,25 @@ export class Net {
       'User-Agent': USER_AGENT
     };
     const raw = await Net.request(url, http.RequestMethod.POST, headers, body, timeoutMs, false);
+    return raw as RawText;
+  }
+
+  /**
+   * 二进制 POST：body 为已编码字节，编码方式由调用方通过请求头声明。
+   * 与 postJson 共用连接池 / CA / 错误归一，只是请求体换成 ArrayBuffer。
+   */
+  static async postBinary(url: string, body: ArrayBuffer, headers: Record<string, string>,
+    timeoutMs: number): Promise<RawText> {
+    const merged: Record<string, string> = {
+      'Content-Type': 'application/octet-stream',
+      'Accept': 'application/json',
+      'User-Agent': USER_AGENT
+    };
+    const keys: string[] = Object.keys(headers);
+    for (let i = 0; i < keys.length; i++) {
+      merged[keys[i]] = headers[keys[i]];
+    }
+    const raw = await Net.requestBinary(url, http.RequestMethod.POST, merged, body, timeoutMs);
     return raw as RawText;
   }
 

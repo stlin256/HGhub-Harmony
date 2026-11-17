@@ -27,6 +27,7 @@ import { USER_AGENT } from '../services/Net';
 import { isPlaylistBytes, isPlaylistText, normalizeCacheKey } from './PlaylistRewrite';
 import { PlaybackLog } from './PlaybackLog';
 import { parseWebUrl, sanitizeRequestHeaders, sanitizeResponseHeaderValue } from '../utils/Security';
+import { RuntimeHooksHub } from '../services/RuntimeHooksHub';
 
 /** 缓存 kind：播放列表（m3u8 文本，内存 TTL 60s）。 */
 export const MEDIA_KIND_PLAYLIST: string = 'playlist';
@@ -213,6 +214,7 @@ export class MediaCache {
         MediaCache.entries.unshift(entry);
       }
       MediaCache.hits++;
+      RuntimeHooksHub.get().recordAction('cache_hit');
       return new MediaFetch(entry.bytes, entry.contentType, true, 200);
     }
     return null;
@@ -349,12 +351,14 @@ export class MediaCache {
       if (restored !== null) {
         MediaCache.store(url, restored.bytes, restored.contentType, kind, MediaCache.ttlOf(kind));
         MediaCache.hits++;
+        RuntimeHooksHub.get().recordAction('cache_hit');
         PlaybackLog.info('mediacache.restore',
           'kind=' + kind + ' bytes=' + restored.bytes.length + ' ' + PlaybackLog.safeUrl(url));
         return restored;
       }
     }
     MediaCache.misses++;
+    RuntimeHooksHub.get().recordAction('cache_miss');
     return await MediaCache.request(url, headers, kind, foreground);
   }
 

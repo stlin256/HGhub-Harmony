@@ -142,6 +142,13 @@ export interface RuntimeHooks {
   /* ── 设备采样 ─────────────────────────────────────── */
   /** 采样一次设备指标（实现方负责节流与异步）。 */
   sampleDeviceMetrics(): void;
+  /** 启动分阶段：Ability 创建耗时（毫秒；公开构建空实现）。 */
+  recordStartupAbility(ms: number): void;
+  /** 启动分阶段：首帧耗时（毫秒；公开构建空实现）。 */
+  recordStartupFirstFrame(ms: number): void;
+  /** 屏幕点亮 / 熄灭事件（公开构建空实现）。 */
+  onScreenOn(): void;
+  onScreenOff(): void;
 
   /* ── 诊断 ─────────────────────────────────────────── */
   /** 导出诊断包；返回保存路径，用户取消或实现不可用返回空串。 */

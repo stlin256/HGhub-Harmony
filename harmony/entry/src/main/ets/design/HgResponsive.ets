@@ -8,6 +8,9 @@
  *
  * 页面通过 @StorageProp(K_WINDOW_W) 拿到窗口宽度（vp），再调用这里的函数。
  */
+
+import { display } from '@kit.ArkUI';
+
 export class HgResponsive {
   /** 平板断点（vp）。 */
   static readonly MEDIUM: number = 600;
@@ -53,5 +56,44 @@ export class HgResponsive {
   /** 是否是平板竖屏/横屏（供少数需要区分方向的地方用）。 */
   static isTabletLandscape(widthVp: number, heightVp: number): boolean {
     return HgResponsive.isWide(widthVp) && HgResponsive.isLandscape(widthVp, heightVp);
+  }
+
+  /**
+   * 是否真正的大屏设备（平板 / PC），不看窗口尺寸。
+   *
+   * 手机横屏时窗口宽度会超过 840vp，但高度只有 360-450vp，
+   * 只看宽度会把手机误判成平板（误弹平板提示、误切分栏），因此统一用设备类型判定。
+   * deviceType 不可用（空串/未知）时返回 false，宁可少提示也不误提示。
+   */
+  static isLargeScreenDevice(deviceType: string): boolean {
+    return deviceType === 'tablet' || deviceType === '2in1';
+  }
+
+  /**
+   * 是否折叠屏（含展开态）。
+   *
+   * 折叠屏展开后窗口接近平板尺寸，但形态仍是手机，不应按平板处理。
+   * display 接口异常时返回 false（不影响手机/平板判定）。
+   */
+  static isFoldableDevice(): boolean {
+    try {
+      return display.isFoldable();
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * 是否按平板/大屏布局处理（平板提示、分栏等）：平板/PC 设备，或非折叠屏的大窗口。
+   * 手机横屏（高度 < 600vp）不算。
+   */
+  static isTabletLayout(deviceType: string, widthVp: number, heightVp: number): boolean {
+    if (HgResponsive.isLargeScreenDevice(deviceType)) {
+      return true;
+    }
+    if (HgResponsive.isFoldableDevice()) {
+      return false;
+    }
+    return widthVp >= HgResponsive.EXPANDED && heightVp >= HgResponsive.MEDIUM;
   }
 }
