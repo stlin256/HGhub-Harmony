@@ -4,7 +4,7 @@ import { JSON } from '@kit.ArkTS';
 import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
-  K_BOTTOM_INSET, K_CONTENT_W, K_DARK, K_FORCE_FULLSCREEN, K_NAV_W, K_TOP_INSET, K_WINDOW_W
+  K_BOTTOM_INSET, K_CONTENT_W, K_DARK, K_FORCE_FULLSCREEN, K_NAV_W, K_TOP_INSET, K_WINDOW_H, K_WINDOW_W
 } from '../state/UserPrefs';
 import { HgResponsive } from '../design/HgResponsive';
 import { UiBus } from '../services/UiBus';
@@ -119,6 +119,8 @@ struct Index {
   @StorageProp('bottomInsetPx') bottomInsetPx: number = 0;
   /** 窗口宽度（vp）：驱动平板/横屏的平行视窗（Split）与左右栏宽度。 */
   @StorageProp(K_WINDOW_W) @Watch('onWindowWidthChanged') windowW: number = 400;
+  /** 窗口高度：手机横屏高度很小，不能因为宽度过 840vp 就误判为平板分栏。 */
+  @StorageProp(K_WINDOW_H) @Watch('onWindowWidthChanged') windowH: number = 780;
   @State navSplit: boolean = false;
   /** 平行视窗右栏是否为空（未打开详情），用于展示引导占位。 */
   @State navEmpty: boolean = true;
@@ -547,7 +549,8 @@ struct Index {
     }
     this.navApplying = true;
     try {
-      const wide: boolean = this.windowW >= HgResponsive.EXPANDED;
+      // 平板/大屏才分栏；手机横屏虽然宽度≥840vp，但高度只有 360-450vp，不应切成平板分栏。
+      const wide: boolean = this.windowW >= HgResponsive.EXPANDED && this.windowH >= HgResponsive.MEDIUM;
       // 回根页面或窗口已窄到不可能是分栏时复位全屏标记，避免窄窗下返回键要按两次。
       if ((!hasContent || !wide) && AppStorage.get<boolean>(K_FORCE_FULLSCREEN) === true) {
         AppStorage.setOrCreate<boolean>(K_FORCE_FULLSCREEN, false);

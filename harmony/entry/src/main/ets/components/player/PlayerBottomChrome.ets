@@ -246,7 +246,8 @@ export struct PlayerBottomChrome {
         .height(44)
       }
       .width('100%')
-      .padding({ left: this.leftPad, right: this.rightPad, top: HgSpace.xxl, bottom: this.bottomPad + HgSpace.m })
+      // 底部内容下移：只保留安全区 + 4vp，避免进度条区域整体悬得过高。
+      .padding({ left: this.leftPad, right: this.rightPad, top: HgSpace.xxl, bottom: this.bottomPad + HgSpace.xs })
       .linearGradient({ angle: 180, colors: [['#00000000', 0.0], ['#66000000', 0.45], ['#E6000000', 1.0]] })
     }
     .width('100%')
