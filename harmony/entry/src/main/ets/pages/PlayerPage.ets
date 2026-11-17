@@ -1618,7 +1618,6 @@ export struct PlayerPage {
       this.showChrome();
     }
   }
-
   private toggleMute(): void {
     const next = !this.muted;
     this.muted = next;
@@ -1632,7 +1631,6 @@ export struct PlayerPage {
     }
     this.showChrome();
   }
-
   private changeRate(rate: number): void {
     RuntimeHooksHub.get().recordAction(RuntimeAction.RATE);
     this.rate = rate;
@@ -1644,7 +1642,6 @@ export struct PlayerPage {
     UiBus.toastInfo(rate === 1 ? I18n.fmt0($r('app.string.fmt_rate_restored')) :
         I18n.fmt1($r('app.string.fmt_rate_value'), rate));
   }
-
   /** 倍速 chip 数字变化时做一个 instant 80ms 的轻微缩放脉冲（切倍速/锁倍速都有过渡反馈）。 */
   private pulseRateChip(): void {
     if (this.ratePulseTimer >= 0) {
@@ -1664,13 +1661,11 @@ export struct PlayerPage {
       });
     }, HgMotion.ms(HgMotion.instant));
   }
-
   /* ── 手势 ─────────────────────────────────────────── */
   /** 防连点：seek 提交后 SEEK_REARM_MS(180ms) 内忽略新的横滑/进度条拖动（DESIGN §4.8.5）。 */
   private canStartSeek(): boolean {
     return Date.now() - this.lastSeekCommitAt >= SEEK_REARM_MS;
   }
-
   private handleTouch(event: TouchEvent): void {
     if (this.locked || this.ids.length === 0) {
       if (event.type === TouchType.Up) {
@@ -1768,7 +1763,6 @@ export struct PlayerPage {
       this.gestureMode = 0;
     }
   }
-
   /**
    * 控件点击手动分发：BottomChrome/RailChrome 为 hitTestBehavior(None)，
    * 按钮点击由手势层按坐标命中后分发；同一命中逻辑在按下时驱动 pressedChrome 按压态。
@@ -1781,7 +1775,6 @@ export struct PlayerPage {
     this.dispatchChromeAction(key);
     return true;
   }
-
   /** 坐标 → chrome 按钮 key（空字符串=未命中）；顺序与视觉层级保持一致。 */
   private chromeHitKey(px: number, py: number): string {
     if (!this.chromeVisible || this.locked) {
@@ -1832,7 +1825,8 @@ export struct PlayerPage {
       return '';
     }
     // 右侧互动栏（点赞/收藏/评论/分享）：宽屏评论侧栏打开时互动栏已隐藏，不再拦截点击。
-    if (!this.commentPanelVisible && px >= w - this.rightInset - 88 && py > h * 0.28 && py < h * 0.60) {
+    if (!this.commentPanelVisible && !this.isLandscapeWindow() &&
+      px >= w - this.rightInset - 88 && py > h * 0.28 && py < h * 0.60) {
       const ratio: number = py / h;
       if (ratio < 0.36) {
         return 'like';
@@ -1847,7 +1841,6 @@ export struct PlayerPage {
     }
     return '';
   }
-
   private dispatchChromeAction(key: string): void {
     if (key === 'back') {
       this.handlePlayerBack();
@@ -2583,15 +2576,16 @@ export struct PlayerPage {
   /** 横屏视频 + 竖屏窗口时，在视频下沿给一个横屏播放入口。 */
   private showLandscapeChip(): boolean {
     return this.isLandscapeVideo() && !this.isLandscapeWindow() && this.videoW > 0 && this.videoH > 0 &&
+      this.screenW > 0 && this.screenW < HgResponsive.MEDIUM && !this.inSplitPane() &&
       !this.starting && !this.loading && !this.locked && this.errorText.length === 0;
   }
 
   private landscapeChipX(): number {
-    return this.videoRectX + Math.max(0, (this.videoRectW - 96) / 2);
+    return this.videoRectX + Math.max(0, (this.videoRectW - 104) / 2);
   }
 
   private landscapeChipY(): number {
-    const y: number = this.videoRectY + this.videoRectH + HgSpace.xs;
+    const y: number = this.videoRectY + this.videoRectH + HgSpace.m + HgSpace.xs;
     const maxY: number = this.frameHeight() - HgSpace.xxxl;
     return y > maxY ? maxY : y;
   }
@@ -2979,7 +2973,7 @@ export struct PlayerPage {
           onMenu: () => { this.toggleMenu(); }
         })
         // 宽屏评论侧栏占用右侧：互动栏让位（隐藏且不参与命中），避免与侧栏重叠。
-        if (!this.commentPanelVisible) {
+        if (!this.commentPanelVisible && !this.isLandscapeWindow()) {
           PlayerRailChrome({
             liked: this.liked,
             faved: this.faved,
@@ -3390,7 +3384,7 @@ export struct PlayerPage {
         .height('100%')
 
         // 宽屏评论区侧栏：固定右侧、全高，内容复用 CommentsSheet（分页/加载更多/发表逻辑不变）。
-        if (this.commentPanelVisible) {
+        if (this.commentPanelVisible && !this.isLandscapeWindow()) {
           PlayerCommentSidebar({
             videoId: this.currentId(),
             ep: this.ep,
@@ -3464,6 +3458,10 @@ export struct PlayerPage {
             x: this.landscapeChipX(),
             y: this.landscapeChipY(),
             onTap: () => {
+              if (!this.forceFullscreen) {
+                this.togglePaneFullscreen();
+              }
+              this.closeCommentPanel();
               WindowChrome.enterLandscape();
             }
           })
@@ -3483,6 +3481,9 @@ export struct PlayerPage {
         }
         if (!isNaN(height) && height > 0) {
           this.screenH = height;
+        }
+        if (this.isLandscapeWindow() && this.commentPanelVisible) {
+          this.closeCommentPanel();
         }
         this.recomputeVideoRect(false);
       })

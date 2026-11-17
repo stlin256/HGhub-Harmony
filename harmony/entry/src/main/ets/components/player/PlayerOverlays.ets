@@ -62,6 +62,7 @@ export struct PlayerLandscapeChip {
       .fontSize(HgFont.micro)
       .fontWeight(HgFont.weightMedium)
       .fontColor(HgColor.videoInk)
+      .width(104)
       .height(32)
       .padding({ left: HgSpace.m, right: HgSpace.m })
       .backgroundColor(HgColor.videoChipStrong)
