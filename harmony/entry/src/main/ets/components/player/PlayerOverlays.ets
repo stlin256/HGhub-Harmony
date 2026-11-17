@@ -48,6 +48,32 @@ export struct PlayerSpeedChip {
   }
 }
 
+
+/** 横屏视频「横屏播放」胶囊：位于视频画面下沿一点点，点按请求系统横屏。 */
+@Component
+export struct PlayerLandscapeChip {
+  @Prop x: number = 0;
+  @Prop y: number = 0;
+  onTap: () => void = () => {
+  };
+
+  build() {
+    Button('横屏播放')
+      .fontSize(HgFont.micro)
+      .fontWeight(HgFont.weightMedium)
+      .fontColor(HgColor.videoInk)
+      .height(32)
+      .padding({ left: HgSpace.m, right: HgSpace.m })
+      .backgroundColor(HgColor.videoChipStrong)
+      .borderRadius(HgRadius.chip)
+      .position({ x: this.x, y: this.y })
+      .accessibilityText('横屏播放')
+      .onClick(() => {
+        this.onTap();
+      })
+  }
+}
+
 @Component
 export struct PlayerPiPHintChip {
   @Prop pipHint: string = '';

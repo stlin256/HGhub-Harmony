@@ -120,6 +120,29 @@ export class WindowChrome {
     }
   }
 
+  /** 请求横屏播放（播放页「横屏播放」胶囊）。 */
+  static enterLandscape(): void {
+    if (!AppContext.isReady()) {
+      return;
+    }
+    window.getLastWindow(AppContext.abilityContext()).then((win: window.Window) => {
+      return win.setPreferredOrientation(window.Orientation.LANDSCAPE);
+    }).catch((err: Object) => {
+      hilog.warn(DOMAIN, TAG, 'landscape failed: %{public}s', JSON.stringify(err));
+    });
+  }
+
+  /** 离开播放页恢复竖屏，避免整个应用停留在横屏。 */
+  static restorePortrait(): void {
+    if (!AppContext.isReady()) {
+      return;
+    }
+    window.getLastWindow(AppContext.abilityContext()).then((win: window.Window) => {
+      return win.setPreferredOrientation(window.Orientation.PORTRAIT);
+    }).catch(() => {
+    });
+  }
+
   private static apply(hidden: boolean): void {
     WindowChrome.hidden = hidden;
     WindowChrome.queue = WindowChrome.queue.then((): Promise<void> => {

@@ -44,7 +44,7 @@ import { PlayerMoreMenu } from '../components/player/PlayerMoreMenu';
 import { PlayerRailChrome, PlayerTopChrome } from '../components/player/PlayerChrome';
 import { PlayerBottomChrome } from '../components/player/PlayerBottomChrome';
 import { PlayerPageHelpers } from '../player/PlayerPageHelpers';
-import { PlayerCommentSidebar, PlayerLockLayer, PlayerPiPHintChip, PlayerPosterOverlay, PlayerSpeedChip } from '../components/player/PlayerOverlays';
+import { PlayerCommentSidebar, PlayerLandscapeChip, PlayerLockLayer, PlayerPiPHintChip, PlayerPosterOverlay, PlayerSpeedChip } from '../components/player/PlayerOverlays';
 import { AppChannel } from '../utils/AppChannel';
 const RATES: number[] = [1, 1.25, 1.5, 2];
 const CHROME_HIDE_MS: number = 3000;
@@ -439,6 +439,7 @@ export struct PlayerPage {
       AppStorage.setOrCreate<boolean>(K_FORCE_FULLSCREEN, false);
     }
     WindowChrome.showStatusBar();
+    WindowChrome.restorePortrait();
     WindowChrome.syncSystemBarColors(UserPrefs.dark(), false);
     // 离开播放页恢复系统熄屏策略，避免整机一直常亮。
     WindowChrome.setKeepScreenOn(false);
@@ -1179,7 +1180,6 @@ export struct PlayerPage {
       this.playNow(id, 1, point.sec, force);
     }
   }
-
   private applyPost(post: Post): void {
     if (post.title !== undefined && post.title !== null && post.title.length > 0) {
       this.title = post.title;
@@ -1211,7 +1211,6 @@ export struct PlayerPage {
     }
     this.service.refreshSessionMeta();
   }
-
   private prefetchNeighbors(): void {
     // 预取前后各 2 条：快速连续上下滑时，相邻页占位不会因为封面还没回来而黑一块。
     this.loadCover(this.currentIndex + 1);
@@ -1219,7 +1218,6 @@ export struct PlayerPage {
     this.loadCover(this.currentIndex + 2);
     this.loadCover(this.currentIndex - 2);
   }
-
   private loadCover(index: number): void {
     if (index < 0 || index >= this.ids.length) {
       return;
@@ -1270,7 +1268,6 @@ export struct PlayerPage {
       });
     }
   }
-
   /* ── 播放动作 ─────────────────────────────────────── */
   private togglePlay(): void {
     if (this.errorText.length > 0) {
@@ -1284,7 +1281,6 @@ export struct PlayerPage {
     this.service.toggle();
     this.showChrome();
   }
-
   private replay(): void {
     this.ended = false;
     this.positionMs = 0;
@@ -1292,7 +1288,6 @@ export struct PlayerPage {
     this.service.play();
     this.showChrome();
   }
-
   private retryPlayback(): void {
     const id = this.currentId();
     if (id <= 0) {
@@ -1310,7 +1305,6 @@ export struct PlayerPage {
     }
     this.service.load(id, this.ep, 0, true, true);
   }
-
   private switchEpisode(ep: number): void {
     RuntimeHooksHub.get().recordAction(RuntimeAction.EP_SWITCH);
     this.sheetVisible = false;
@@ -1337,7 +1331,6 @@ export struct PlayerPage {
     this.service.load(this.currentId(), ep, 0, true, false);
     this.showChrome();
   }
-
   private handleCompleted(): void {
     RecService.recordComplete(this.currentId());
     if (this.params.feedKind !== 'post' && this.ep < this.episodeCount) {
@@ -1349,7 +1342,6 @@ export struct PlayerPage {
     this.showChrome();
     this.syncKeepScreenOn();
   }
-
   private maybePrefetch(ms: number): void {
     if (this.durationMs <= 0 || this.params.feedKind === 'post') {
       return;
@@ -1363,7 +1355,6 @@ export struct PlayerPage {
       this.prefetchDone = false;
     }
   }
-
   /* ── 互动 ─────────────────────────────────────────── */
   private toggleLike(): void {
     RuntimeHooksHub.get().recordAction(this.liked ? RuntimeAction.UNLIKE : RuntimeAction.LIKE);
@@ -1403,7 +1394,6 @@ export struct PlayerPage {
       UiBus.toast('操作失败，请稍后重试');
     });
   }
-
   private toggleFav(): void {
     RuntimeHooksHub.get().recordAction(this.faved ? RuntimeAction.UNFAV : RuntimeAction.FAV);
     const id = this.currentId();
@@ -1451,7 +1441,6 @@ export struct PlayerPage {
       UiBus.toast('操作失败，请稍后重试');
     });
   }
-
   /** 点赞/收藏图标脉冲：instant 80ms 放大到 1.12，回落 fast 140ms（与颜色过渡同步）。 */
   private pulseRail(kind: string): void {
     if (this.railPulseTimer >= 0) {
@@ -1476,7 +1465,6 @@ export struct PlayerPage {
       });
     }, HgMotion.ms(HgMotion.instant));
   }
-
   /**
    * 分享：优先调起系统分享面板，不支持时回退复制链接。
    * 分享出去的永远是主站规范链接（与当前线路无关），接收方只解析视频 ID 用自己的线路播放。
@@ -1501,7 +1489,6 @@ export struct PlayerPage {
     UiBus.toastOk('链接已复制');
     this.haptic(10);
   }
-
   private haptic(duration: number): void {
     try {
       const effect: vibrator.VibrateTime = { type: 'time', duration: duration };
@@ -1511,7 +1498,6 @@ export struct PlayerPage {
     } catch (err) {
     }
   }
-
   /* ── Chrome 显隐 / 锁定 / 倍速 / 静音 ─────────────── */
   /**
    * chrome 显隐统一入口：显示 fast 140ms、隐藏 exitFast 120ms。
@@ -1526,7 +1512,6 @@ export struct PlayerPage {
     }
     this.chromeVisible = visible;
   }
-
   /** chrome 浮层淡入/淡出（§3.8：显示 fast、隐藏 exitFast）。 */
   private chromeFade(): TransitionEffect {
     return TransitionEffect.asymmetric(
@@ -1534,7 +1519,6 @@ export struct PlayerPage {
       HgMotion.fadeOut(HgMotion.exitFast)
     );
   }
-
   /** 轻量 chip 显隐（画质/投播/全屏等）：fast 进、exitFast 出。 */
   private chipFade(): TransitionEffect {
     return TransitionEffect.asymmetric(
@@ -1542,17 +1526,14 @@ export struct PlayerPage {
       HgMotion.fadeOut(HgMotion.exitFast)
     );
   }
-
   /** 按压态缩放：pressedChrome 命中 key 时 0.96。 */
   private chromeScale(key: string): number {
     return this.pressedChrome === key ? HgMotion.pressScale : 1;
   }
-
   /** 按压态动画时长：按下 instant 80ms、松开 fast 140ms。 */
   private chromePressMs(key: string): number {
     return HgMotion.pressMs(this.pressedChrome === key);
   }
-
   /**
    * chrome 按钮自身触摸：驱动 pressedChrome 按压态。
    * Bottom/Rail chrome 根节点为 HitTestMode.None（自身不响应、子节点响应），按钮自身收到触摸时走这里；
@@ -1567,10 +1548,7 @@ export struct PlayerPage {
       }
     }
   }
-
   /** Sheet 内容过渡：仅 kind 切换时 crossfade（standard/exitFast），首次打开交给系统 Sheet 动画。 */
-
-
   private showChrome(): void {
     if (this.locked || this.destroyed) {
       return;
@@ -1578,7 +1556,6 @@ export struct PlayerPage {
     this.setChromeVisible(true);
     this.scheduleHideChrome();
   }
-
   private scheduleHideChrome(): void {
     if (this.hideTimer >= 0) {
       clearTimeout(this.hideTimer);
@@ -1596,7 +1573,6 @@ export struct PlayerPage {
       }
     }, CHROME_HIDE_MS);
   }
-
   /**
    * 系统投播面板开合：打开期间保持 chrome 常驻（TopChrome 里有 AVCastPicker，
    * 自动隐藏会把组件卸载，系统投播面板/预览会随之中断消失）。
@@ -1621,7 +1597,6 @@ export struct PlayerPage {
       this.showChrome();
     }
   }
-
   private toggleLock(): void {
     const next: boolean = !this.locked;
     if (next && this.commentPanelVisible) {
@@ -2605,6 +2580,22 @@ export struct PlayerPage {
     return PlayerPageHelpers.canUseCommentPanel(this.params.feedKind, this.windowW, this.frameWidth());
   }
 
+  /** 横屏视频 + 竖屏窗口时，在视频下沿给一个横屏播放入口。 */
+  private showLandscapeChip(): boolean {
+    return this.isLandscapeVideo() && !this.isLandscapeWindow() && this.videoW > 0 && this.videoH > 0 &&
+      !this.starting && !this.loading && !this.locked && this.errorText.length === 0;
+  }
+
+  private landscapeChipX(): number {
+    return this.videoRectX + Math.max(0, (this.videoRectW - 96) / 2);
+  }
+
+  private landscapeChipY(): number {
+    const y: number = this.videoRectY + this.videoRectH + HgSpace.xs;
+    const maxY: number = this.frameHeight() - HgSpace.xxxl;
+    return y > maxY ? maxY : y;
+  }
+
   /** 当前视频是否横屏（宽 > 高）；尺寸未知时返回 false。 */
   private isLandscapeVideo(): boolean {
     return PlayerPageHelpers.isLandscapeVideo(this.videoW, this.videoH);
@@ -3468,6 +3459,15 @@ export struct PlayerPage {
             this.setMenuVisible(false);
           }
         })
+        if (this.showLandscapeChip()) {
+          PlayerLandscapeChip({
+            x: this.landscapeChipX(),
+            y: this.landscapeChipY(),
+            onTap: () => {
+              WindowChrome.enterLandscape();
+            }
+          })
+        }
       }
       .width('100%')
       .height('100%')
